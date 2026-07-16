@@ -21,14 +21,20 @@ This fork is a set of targeted optimisations layered on top of their work, not a
 Optimisation and playback-quality work, most of it aimed at high-bitrate remux and lossless audio:
 
 - **Lighter, faster build** -- unused engine components stripped out (see *What's been removed*).
-- **Improved throughput & buffering** -- a multi-connection parallel range downloader with
-  adjustable connection count and chunk size, HTTP/2 pooling, and off-heap custom buffers. A
-  position-aware chunk-eviction policy stops the downloader re-fetching data it already had, so the
-  buffer fills close to the speed the source can deliver and holds through bitrate peaks.
-- **Dolby Vision** -- app-side Profile 7 -> 8.1 conversion via libdovi with no per-frame GC stutter,
-  correct enhancement-layer handling for single-track remuxes.
+- **Improved throughput & buffering** -- NuvioTV's parallel-connections downloading had a chunk-
+  eviction flaw that re-downloaded data it had already fetched (measured ~47% of transfer wasted on
+  a 4K remux). The fork makes eviction position-aware so it stops discarding chunks the reader is
+  about to need -- the buffer fills close to the speed the source can deliver and holds through
+  bitrate peaks, and about half the wasted debrid data goes away. Plus off-heap custom buffers and a
+  seek-reopen fix that makes non-faststart MP4s watchable.
+- **Dolby Vision** -- app-side Profile 7 and Profile 5 -> 8.1 conversion via libdovi with no
+  per-frame GC stutter, correct in-band enhancement-layer stripping for single-track remuxes, and
+  fixes so DV5 and preserve-mapping no longer convert to the wrong profile (they were silently
+  producing static 8.4 output).
 - **High-resolution / lossless audio** -- a hardened bitstream passthrough stack (TrueHD, DTS-HD MA,
-  Atmos, DTS:X) that resists mid-playback renegotiation, plus lossless-track auto-selection.
+  Atmos, DTS:X) that resists mid-playback renegotiation, DTS-HD MA/DTS:X detection that works on
+  native-DV boxes, a hi-res AC-3 transcode fix, an audio-path diagnostics row, and lossless-track
+  auto-selection.
 - **Kodi-style MAT audio** -- an app-side MAT / IEC61937 packing path (ported from Kodi's
   CPackerMAT) to decouple TrueHD from vendor HALs. Behind an Advanced toggle, off by default,
   experimental.
@@ -38,9 +44,16 @@ Optimisation and playback-quality work, most of it aimed at high-bitrate remux a
 - **Faster stream start** -- startup instrumentation plus a bootstrap fast-path so first frame
   doesn't wait on a full chunk or the file's tail index.
 - **Faster / optimised UI** -- home-grid scroll-jank reduction and poster prefetch/pre-decode.
-- **Improved speed-test** -- a revised last-played-stream throughput test.
-- **Stats-for-nerds overlay** -- live video/audio bitrate, codec names, measured passthrough
-  bitrate, HDR detection, SoC thermal, audio-clock jitter, and underrun cross-checks.
+- **Improved speed-test** -- runs a real throughput test against the actual last stream URL (same
+  source and path playback uses), so the number reflects what you can really pull from that debrid/
+  Emby endpoint -- useful for telling a slow source apart from a buffering bug and for tuning
+  connection count / chunk size.
+- **Stats-for-nerds overlay** -- a live playback diagnostics HUD built for high-bitrate/lossless
+  content: measured video bitrate, audio codec by name and its measured passthrough bitrate, whether
+  passthrough is genuinely reaching the sink, HDR/Dolby Vision detection, live network throughput,
+  the negotiated audio path, SoC temperature against per-chip throttle thresholds, audio-clock
+  jitter, and AudioTrack underrun cross-checks. Confirms you're actually getting lossless audio and
+  the right HDR mode, and doubles as a triage tool.
 
 New stats for nerds overlay -
 
