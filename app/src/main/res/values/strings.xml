@@ -674,7 +674,7 @@
     <string name="audio_force_optical_passthrough">Force AC-3 Transcoding (Optical/SPDIF)</string>
     <string name="audio_force_optical_passthrough_sub">Transcodes multichannel formats (TrueHD, DTS, AAC, etc.) to Dolby Digital 5.1 in real-time for Optical/SPDIF connections.</string>
     <string name="audio_mat_passthrough">TrueHD MAT Passthrough (experimental)</string>
-    <string name="audio_mat_passthrough_sub">Packs Dolby TrueHD into MAT/IEC61937 in the app instead of relying on the device. May improve TrueHD/Atmos passthrough on some boxes, but is experimental and can cause audio dropouts or no audio (needing a reboot) on others. Leave off unless testing.</string>
+    <string name="audio_mat_passthrough_sub">App-side MAT/IEC61937 packing for TrueHD. May help passthrough on some boxes; can cause dropouts or silence on others. Leave off unless testing.</string>
     <!-- DV7 Handling Mode -->
     <string name="dv7_handling_title">Dolby Vision Handling</string>
     <string name="dv7_handling_dialog_subtitle">Choose how DV streams are processed at playback time.</string>

@@ -119,6 +119,11 @@ internal class ParallelRangeDataSource(
         // Never evict a chunk touched in the last 2 s: closes the narrow race
         // where an overlapping old instance is still copying from the buffer.
         private const val EVICTION_TOUCH_GUARD_MS = 2_000L
+        // nt-followup: chunks in reader+1..reader+NEAR_AHEAD_PROTECT are imminent
+        // and must never be evicted (even under the cap+2 hard ceiling), or the
+        // reader re-downloads them. 2 covers the adjacent-pair re-fetch observed
+        // on 2-connection fills; the fan-out already keeps the pool within cap.
+        private const val NEAR_AHEAD_PROTECT = 2L
         // pre-nt3 (re-derived review fix): a conforming DataSource blocks
         // rather than returning 0 for a positive-length read; tolerate a few
         // zero-progress reads, then fail the chunk instead of spinning forever.
@@ -304,9 +309,24 @@ internal class ParallelRangeDataSource(
                     val eligible = session.futures.keys
                         .filter { it != protectIndex }
                         .filter { hardOver || now - (session.lastTouch[it] ?: 0L) >= EVICTION_TOUCH_GUARD_MS }
-                    val victim = eligible
+                    // nt-followup (residual re-fetch fix): the near-ahead window
+                    // reader+1..reader+NEAR_AHEAD_PROTECT is about to be read within
+                    // seconds. nt54 protects behind-cursor chunks first, but its
+                    // fallback (evict the farthest-ahead) combined with the cap+2
+                    // hardOver path (which drops the 2 s guard) could still evict a
+                    // COMPLETED, not-yet-read leading-edge chunk during a fill burst,
+                    // which the reader then re-downloads in full. Measured 2026-07-16
+                    // (nt1): 38 such re-fetches, all adjacent-pair leading-edge
+                    // chunks. Excluding the near-ahead window from eviction closes it;
+                    // the pool still has headroom because the fan-out (effectivePrefetchDepth)
+                    // plus the current chunk stays within chunkCap (depth + 2..4).
+                    val nearAheadFloor = if (readerIdx >= 0L) readerIdx else Long.MIN_VALUE
+                    val nearAheadCeil = if (readerIdx >= 0L) readerIdx + NEAR_AHEAD_PROTECT else Long.MIN_VALUE
+                    val evictable = eligible.filter { it < nearAheadFloor || it > nearAheadCeil }
+                    val victim = evictable
                         .filter { readerIdx >= 0L && it < readerIdx }
                         .minByOrNull { session.lastTouch[it] ?: 0L }
+                        ?: evictable.maxOrNull()
                         ?: eligible.maxOrNull()
                         ?: return
                     evictFuture(session, victim, poolCap)
