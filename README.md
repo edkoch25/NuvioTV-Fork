@@ -21,12 +21,15 @@ This fork is a set of targeted optimisations layered on top of their work, not a
 Optimisation and playback-quality work, most of it aimed at high-bitrate remux and lossless audio:
 
 - **Lighter, faster build** -- unused engine components stripped out (see *What's been removed*).
-- **Improved throughput & buffering** -- NuvioTV's parallel-connections downloading had a chunk-
-  eviction flaw that re-downloaded data it had already fetched (measured ~47% of transfer wasted on
-  a 4K remux). The fork makes eviction position-aware so it stops discarding chunks the reader is
-  about to need -- the buffer fills close to the speed the source can deliver and holds through
-  bitrate peaks, and about half the wasted debrid data goes away. Plus off-heap custom buffers and a
-  seek-reopen fix that makes non-faststart MP4s watchable.
+- **Improved throughput & buffering** -- two fixes to NuvioTV's parallel-connections downloading.
+  First, upstream only schedules a shallow `connections + 1` chunks of read-ahead; the fork deepens
+  that to a memory-budgeted `connections x 4`, so more data stays queued ahead of the reader and the
+  buffer actually builds. Second, upstream's chunk eviction re-downloaded data it had already
+  fetched (measured ~47% of transfer wasted on a 4K remux); the fork makes eviction position-aware
+  so it stops discarding chunks the reader is about to need. Together the buffer fills close to the
+  speed the source can deliver and holds through bitrate peaks, and about half the wasted debrid
+  data goes away. Plus off-heap custom buffers and a seek-reopen fix that makes non-faststart MP4s
+  watchable.
 - **Dolby Vision** -- app-side Profile 7 and Profile 5 -> 8.1 conversion via libdovi with no
   per-frame GC stutter, correct in-band enhancement-layer stripping for single-track remuxes, and
   fixes so DV5 and preserve-mapping no longer convert to the wrong profile (they were silently
