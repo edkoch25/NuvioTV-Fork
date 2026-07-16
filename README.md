@@ -1,4 +1,3 @@
-<img width="1920" height="1080" alt="screenshot" src="https://github.com/user-attachments/assets/4f99016c-fefa-471b-8499-286903fcb095" />
 ## About
 
 This is a **personal fork** of [NuvioTV](https://github.com/NuvioMedia/NuvioTV) for test builds,
