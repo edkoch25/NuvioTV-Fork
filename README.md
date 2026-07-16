@@ -1,3 +1,4 @@
+<img width="1920" height="1080" alt="screenshot" src="https://github.com/user-attachments/assets/4f99016c-fefa-471b-8499-286903fcb095" />
 ## About
 
 This is a **personal fork** of [NuvioTV](https://github.com/NuvioMedia/NuvioTV) for test builds,
@@ -58,13 +59,15 @@ Optimisation and playback-quality work, most of it aimed at high-bitrate remux a
   jitter, and AudioTrack underrun cross-checks. Confirms you're actually getting lossless audio and
   the right HDR mode, and doubles as a triage tool.
 
-New stats for nerds overlay -
+## New stats for nerds overlay -
 
-<img width="1920" height="1080" alt="screen" src="https://github.com/user-attachments/assets/0af8b4d3-8dfc-46b8-bc94-eb8893a62be5" />
+<img width="1920" height="1080" alt="screenshot" src="https://github.com/user-attachments/assets/5b572d80-d3b2-4716-86b5-51404f0b00ad" />
 
-Revised Last Played Stream Speed Test:
 
-<img width="1920" height="1080" alt="nuvio-ui2" src="https://github.com/user-attachments/assets/4a66fe54-d0ea-4a89-8329-ee36c92a0196" />
+## Revised Last Played Stream Speed Test:
+
+<img width="1920" height="1080" alt="screenshot1" src="https://github.com/user-attachments/assets/1ccb4258-7487-4424-82cb-496a776e3c4f" />
+
 
 ---
 
