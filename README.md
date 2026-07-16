@@ -53,8 +53,8 @@ Optimisation and playback-quality work, most of it aimed at high-bitrate remux a
   connection count / chunk size.
 - **Stats-for-nerds overlay** -- a live playback diagnostics HUD built for high-bitrate/lossless
   content: measured video bitrate, audio codec by name and its measured passthrough bitrate, whether
-  passthrough is genuinely reaching the sink, HDR/Dolby Vision detection, live network throughput,
-  the negotiated audio path, SoC temperature against per-chip throttle thresholds, audio-clock
+  passthrough is genuinely reaching the sink, HDR/Dolby Vision detection, live network throughput, buffer health, 
+  the negotiated audio path, SoC performance against per-chip throttle thresholds, audio-clock
   jitter, and AudioTrack underrun cross-checks. Confirms you're actually getting lossless audio and
   the right HDR mode, and doubles as a triage tool.
 
