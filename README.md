@@ -88,7 +88,7 @@ manager**, and **subtitle add-on support** are intact. Only the layout picker wa
 
 ## Target hardware
 
-Primary/validated target is the **Amlogic S905X4 and Amlogic S905X5M class (armeabi-v7a)**, tested on a Homatics Box R
+Primary/validated target is the **Amlogic S905X4 / 4GB RAM and Amlogic S905X5M / 2GB RAM class (armeabi-v7a)**, tested on a Homatics Box R
 4K Plus and a Xiaomi Box S 3rd Gen, in a Samsung HW-Q800F -> LG C9 eARC chain. Other devices (Nvidia Shield, Prism+, Xiaomi) have been
 community-tested.
 
