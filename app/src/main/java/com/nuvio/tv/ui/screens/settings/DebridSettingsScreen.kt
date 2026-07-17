@@ -647,6 +647,15 @@ fun DebridSettingsContent(
             },
             onDismiss = { activeStreamPicker = null }
         )
+        DebridStreamPicker.PREFERRED_RELEASE_GROUPS -> DebridTextListDialog(
+            title = stringResource(R.string.debrid_stream_release_groups_preferred),
+            selectedValues = uiState.streamPreferences.preferredReleaseGroups,
+            onSelected = { value ->
+                viewModel.setStreamPreferences(uiState.streamPreferences.copy(preferredReleaseGroups = value))
+                activeStreamPicker = null
+            },
+            onDismiss = { activeStreamPicker = null }
+        )
         DebridStreamPicker.REQUIRED_RELEASE_GROUPS -> DebridTextListDialog(
             title = stringResource(R.string.debrid_stream_release_groups_required),
             selectedValues = uiState.streamPreferences.requiredReleaseGroups,
@@ -1093,6 +1102,12 @@ private fun LazyListScope.debridRuleRows(
         context.getString(R.string.debrid_picker_excluded_languages_title),
         context.getString(R.string.debrid_picker_excluded_languages_subtitle),
         selectionCountLabel(preferences.excludedLanguages, context)
+    )
+    row(
+        DebridStreamPicker.PREFERRED_RELEASE_GROUPS,
+        context.getString(R.string.debrid_picker_preferred_release_groups_title),
+        context.getString(R.string.debrid_picker_preferred_release_groups_subtitle),
+        selectionCountLabel(preferences.preferredReleaseGroups, context)
     )
     row(
         DebridStreamPicker.REQUIRED_RELEASE_GROUPS,
@@ -1608,6 +1623,7 @@ private enum class DebridStreamPicker {
     PREFERRED_LANGUAGES,
     REQUIRED_LANGUAGES,
     EXCLUDED_LANGUAGES,
+    PREFERRED_RELEASE_GROUPS,
     REQUIRED_RELEASE_GROUPS,
     EXCLUDED_RELEASE_GROUPS
 }

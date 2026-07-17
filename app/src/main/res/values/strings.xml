@@ -1116,6 +1116,7 @@
     <string name="debrid_stream_languages_preferred">Preferred languages</string>
     <string name="debrid_stream_languages_required">Required languages</string>
     <string name="debrid_stream_languages_excluded">Excluded languages</string>
+    <string name="debrid_stream_release_groups_preferred">Preferred release groups</string>
     <string name="debrid_stream_release_groups_required">Required release groups</string>
     <string name="debrid_stream_release_groups_excluded">Excluded release groups</string>
     <string name="debrid_stream_release_groups_input_subtitle">Enter one group per line.</string>
@@ -2681,6 +2682,8 @@
     <string name="debrid_picker_required_languages_subtitle">Only show streams with selected languages.</string>
     <string name="debrid_picker_excluded_languages_title">Excluded languages</string>
     <string name="debrid_picker_excluded_languages_subtitle">Hide streams where every language is excluded.</string>
+    <string name="debrid_picker_preferred_release_groups_title">Preferred release groups</string>
+    <string name="debrid_picker_preferred_release_groups_subtitle">Sort selected release groups first, in listed order.</string>
     <string name="debrid_picker_required_release_groups_title">Required release groups</string>
     <string name="debrid_picker_required_release_groups_subtitle">Only show selected release groups.</string>
     <string name="debrid_picker_excluded_release_groups_title">Excluded release groups</string>

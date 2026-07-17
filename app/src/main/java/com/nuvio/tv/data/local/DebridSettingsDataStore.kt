@@ -7,8 +7,10 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import com.google.gson.Gson
 import com.nuvio.tv.core.debrid.DebridProviders
 import com.nuvio.tv.core.debrid.DebridStreamFormatterDefaults
+import com.nuvio.tv.core.debrid.TrashReleaseGroups
 import com.nuvio.tv.core.profile.ProfileManager
 import com.nuvio.tv.domain.model.DebridSettings
+import com.nuvio.tv.domain.model.DebridStreamAudioTag
 import com.nuvio.tv.domain.model.DebridStreamCodecFilter
 import com.nuvio.tv.domain.model.DebridStreamEncode
 import com.nuvio.tv.domain.model.DebridStreamFeatureFilter
@@ -320,7 +322,7 @@ class DebridSettingsDataStore @Inject constructor(
 
     private fun parseStreamPreferences(value: String?): DebridStreamPreferences? {
         return runCatching {
-            gson.fromJson(value, DebridStreamPreferences::class.java)?.normalized()
+            gson.fromJson(value, DebridStreamPreferences::class.java)?.normalized()?.migratedToTrashDefaults()
         }.getOrNull()
     }
 
@@ -339,7 +341,11 @@ class DebridSettingsDataStore @Inject constructor(
         var preferences = DebridStreamPreferences(
             maxResults = normalizeDebridStreamMaxResults(maxResults),
             sortCriteria = sortCriteriaForLegacyMode(sortMode),
-            requiredResolutions = resolutionsForMinimumQuality(minimumQuality)
+            requiredResolutions = if (minimumQuality == DebridStreamMinimumQuality.ANY) {
+                DebridStreamPreferences().requiredResolutions
+            } else {
+                resolutionsForMinimumQuality(minimumQuality)
+            }
         )
         preferences = when (dolbyVisionFilter) {
             DebridStreamFeatureFilter.ANY -> preferences
@@ -415,6 +421,7 @@ class DebridSettingsDataStore @Inject constructor(
         val excludedLanguagesValue: List<com.nuvio.tv.domain.model.DebridStreamLanguage>? = excludedLanguages
         val requiredReleaseGroupsValue: List<String>? = requiredReleaseGroups
         val excludedReleaseGroupsValue: List<String>? = excludedReleaseGroups
+        val preferredReleaseGroupsValue: List<String>? = preferredReleaseGroups
         val sortCriteriaValue: List<DebridStreamSortCriterion>? = sortCriteria
         return copy(
             maxResults = normalizeDebridStreamMaxResults(maxResults),
@@ -443,9 +450,54 @@ class DebridSettingsDataStore @Inject constructor(
             preferredLanguages = preferredLanguagesValue.orEmpty(),
             requiredLanguages = requiredLanguagesValue.orEmpty(),
             excludedLanguages = excludedLanguagesValue.orEmpty(),
+            preferredReleaseGroups = (preferredReleaseGroupsValue ?: TrashReleaseGroups.PREFERRED_LADDER)
+                .map { it.trim() }.filter { it.isNotBlank() }.distinctBy { it.lowercase() },
             requiredReleaseGroups = requiredReleaseGroupsValue.orEmpty().map { it.trim() }.filter { it.isNotBlank() }.distinct(),
             excludedReleaseGroups = excludedReleaseGroupsValue.orEmpty().map { it.trim() }.filter { it.isNotBlank() }.distinct(),
-            sortCriteria = sortCriteriaValue ?: DebridStreamSortCriterion.originalOrder
+            sortCriteria = sortCriteriaValue ?: DebridStreamSortCriterion.originalOrder,
+            trashDefaultsVersion = trashDefaultsVersion.coerceAtLeast(0)
+        )
+    }
+
+    /**
+     * One-time additive upgrade to the TRaSH-derived defaults introduced with
+     * preferredReleaseGroups. Preference blobs stored before
+     * TrashReleaseGroups.DEFAULTS_VERSION get the new exclusion lists merged
+     * in (user additions preserved), the preferred-group ladder seeded when
+     * absent, and verbatim copies of the old default audio/encode orders and
+     * old best-quality sort chain replaced by the new defaults. Any later
+     * user edit persists trashDefaultsVersion, so removals of individual
+     * defaults stick and are never re-added.
+     */
+    private fun DebridStreamPreferences.migratedToTrashDefaults(): DebridStreamPreferences {
+        if (trashDefaultsVersion >= TrashReleaseGroups.DEFAULTS_VERSION) return this
+        val legacyAudioOrder = listOf(
+            DebridStreamAudioTag.ATMOS, DebridStreamAudioTag.DD_PLUS, DebridStreamAudioTag.DD,
+            DebridStreamAudioTag.DTS_X, DebridStreamAudioTag.DTS_HD_MA, DebridStreamAudioTag.DTS_HD,
+            DebridStreamAudioTag.DTS_ES, DebridStreamAudioTag.DTS, DebridStreamAudioTag.TRUEHD,
+            DebridStreamAudioTag.OPUS, DebridStreamAudioTag.FLAC, DebridStreamAudioTag.AAC,
+            DebridStreamAudioTag.UNKNOWN
+        )
+        val legacyEncodeOrder = listOf(
+            DebridStreamEncode.AV1, DebridStreamEncode.HEVC, DebridStreamEncode.AVC,
+            DebridStreamEncode.XVID, DebridStreamEncode.DIVX, DebridStreamEncode.UNKNOWN
+        )
+        val legacyBestQuality = listOf(
+            DebridStreamSortKey.RESOLUTION, DebridStreamSortKey.QUALITY, DebridStreamSortKey.VISUAL_TAG,
+            DebridStreamSortKey.AUDIO_TAG, DebridStreamSortKey.AUDIO_CHANNEL, DebridStreamSortKey.ENCODE,
+            DebridStreamSortKey.SIZE
+        ).map { DebridStreamSortCriterion(it, DebridStreamSortDirection.DESC) }
+        val defaults = DebridStreamPreferences()
+        return copy(
+            preferredReleaseGroups = preferredReleaseGroups.ifEmpty { TrashReleaseGroups.PREFERRED_LADDER },
+            excludedReleaseGroups = (excludedReleaseGroups + TrashReleaseGroups.EXCLUDED_GROUPS).distinctBy { it.lowercase() },
+            excludedQualities = (excludedQualities + defaults.excludedQualities).distinct(),
+            excludedVisualTags = (excludedVisualTags + defaults.excludedVisualTags).distinct(),
+            excludedEncodes = (excludedEncodes + defaults.excludedEncodes).distinct(),
+            preferredAudioTags = if (preferredAudioTags == legacyAudioOrder) DebridStreamAudioTag.defaultOrder else preferredAudioTags,
+            preferredEncodes = if (preferredEncodes == legacyEncodeOrder) DebridStreamEncode.defaultOrder else preferredEncodes,
+            sortCriteria = if (sortCriteria == legacyBestQuality) DebridStreamSortCriterion.defaultOrder else sortCriteria,
+            trashDefaultsVersion = TrashReleaseGroups.DEFAULTS_VERSION
         )
     }
 }

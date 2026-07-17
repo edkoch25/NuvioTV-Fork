@@ -1614,6 +1614,9 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
             // finishes, so the waiting code below resumes without polling.
             val searchSettled = CompletableDeferred<Unit>()
 
+            val debridStreamPreferences =
+                debridSettingsDataStore.settings.first().streamPreferences
+
             fun trySelectStream(data: List<AddonStreams>): Stream? {
                 val orderedStreams = StreamAutoPlaySelector.orderAddonStreams(data, installedAddonOrder)
                 val allStreams = orderedStreams.flatMap { it.streams }
@@ -1631,7 +1634,8 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                         null
                     },
                     preferBingeGroupInSelection = playerSettings.streamAutoPlayPreferBingeGroupForNextEpisode,
-                    bingeGroupOnly = bingeGroupOnlyManualMode
+                    bingeGroupOnly = bingeGroupOnlyManualMode,
+                    debridStreamPreferences = debridStreamPreferences
                 )
             }
 
@@ -1649,7 +1653,8 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                     selectedPlugins = effectiveSelectedPlugins,
                     preferredBingeGroup = currentStreamBingeGroup,
                     preferBingeGroupInSelection = true,
-                    bingeGroupOnly = true
+                    bingeGroupOnly = true,
+                    debridStreamPreferences = debridStreamPreferences
                 )
             }
 

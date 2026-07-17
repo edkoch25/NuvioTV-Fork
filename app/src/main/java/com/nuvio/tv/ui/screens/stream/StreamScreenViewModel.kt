@@ -88,12 +88,25 @@ class StreamScreenViewModel @Inject constructor(
     private val directDebridResolver: DirectDebridResolver,
     private val directDebridStreamPreparer: DirectDebridStreamPreparer,
     private val debridStreamPresentation: DebridStreamPresentation,
+    private val debridSettingsDataStore: com.nuvio.tv.data.local.DebridSettingsDataStore,
     private val externalPlaybackTracker: com.nuvio.tv.core.player.ExternalPlaybackTracker,
     private val subtitleRepository: com.nuvio.tv.domain.repository.SubtitleRepository,
     private val subtitleFileCache: com.nuvio.tv.core.player.SubtitleFileCache,
     private val torrentService: TorrentService,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
+
+    /** Latest debrid stream preferences for TRaSH-aligned auto-pick ranking. */
+    @Volatile
+    private var latestDebridStreamPreferences: com.nuvio.tv.domain.model.DebridStreamPreferences? = null
+
+    init {
+        viewModelScope.launch {
+            debridSettingsDataStore.settings.collect { settings ->
+                latestDebridStreamPreferences = settings.streamPreferences
+            }
+        }
+    }
     private var autoPlayHandledForSession = false
     private var ttffSourcesReadyMarked = false
     private var directAutoPlayModeInitializedForSession = false
@@ -508,7 +521,8 @@ class StreamScreenViewModel @Inject constructor(
                         selectedAddons = playerSettings.streamAutoPlaySelectedAddons,
                         selectedPlugins = playerSettings.streamAutoPlaySelectedPlugins,
                         preferredBingeGroup = persistedBingeGroup,
-                        preferBingeGroupInSelection = persistedBingeGroup != null
+                        preferBingeGroupInSelection = persistedBingeGroup != null,
+                        debridStreamPreferences = latestDebridStreamPreferences
                     )
                 }
                 if (shouldAutoSelect && !ttffSourcesReadyMarked) {
@@ -723,7 +737,8 @@ class StreamScreenViewModel @Inject constructor(
                                     selectedPlugins = playerSettings.streamAutoPlaySelectedPlugins,
                                     preferredBingeGroup = persistedBingeGroup,
                                     preferBingeGroupInSelection = true,
-                                    bingeGroupOnly = true
+                                    bingeGroupOnly = true,
+                                    debridStreamPreferences = latestDebridStreamPreferences
                                 )
                                 if (earlyMatch != null) {
                                     resolvedAutoPlayTarget = true

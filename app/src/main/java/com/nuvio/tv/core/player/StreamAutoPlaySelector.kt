@@ -4,6 +4,7 @@ import com.nuvio.tv.core.build.AppFeaturePolicy
 import com.nuvio.tv.data.local.StreamAutoPlayMode
 import com.nuvio.tv.data.local.StreamAutoPlaySource
 import com.nuvio.tv.domain.model.AddonStreams
+import com.nuvio.tv.domain.model.DebridStreamPreferences
 import com.nuvio.tv.domain.model.Stream
 import com.nuvio.tv.domain.model.StreamDebridCacheState
 
@@ -55,7 +56,8 @@ object StreamAutoPlaySelector {
         selectedPlugins: Set<String>,
         preferredBingeGroup: String? = null,
         preferBingeGroupInSelection: Boolean = false,
-        bingeGroupOnly: Boolean = false
+        bingeGroupOnly: Boolean = false,
+        debridStreamPreferences: DebridStreamPreferences? = null
     ): Stream? {
         if (streams.isEmpty()) return null
 
@@ -100,7 +102,7 @@ object StreamAutoPlaySelector {
             StreamAutoPlayMode.MANUAL -> null
             StreamAutoPlayMode.FIRST_STREAM -> candidateStreams.firstOrNull { isPlayable(it) }
             StreamAutoPlayMode.QUALITY_RANK ->
-                StreamQualityRank.rank(candidateStreams.filter { isPlayable(it) }).firstOrNull()
+                StreamQualityRank.rank(candidateStreams.filter { isPlayable(it) }, debridStreamPreferences).firstOrNull()
             StreamAutoPlayMode.REGEX_MATCH -> {
                 val pattern = regexPattern.trim()
  

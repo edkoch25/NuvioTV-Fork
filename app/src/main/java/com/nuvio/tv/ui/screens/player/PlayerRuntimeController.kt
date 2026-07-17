@@ -90,6 +90,7 @@ class PlayerRuntimeController(
     internal val directDebridResolver: DirectDebridResolver,
     internal val directDebridStreamPreparer: DirectDebridStreamPreparer,
     internal val streamBadgePresentation: com.nuvio.tv.core.streams.StreamBadgePresentation,
+    internal val debridSettingsDataStore: com.nuvio.tv.data.local.DebridSettingsDataStore,
     internal val playbackIssueReportRepository: PlaybackIssueReportRepository,
     savedStateHandle: SavedStateHandle,
     internal val scope: CoroutineScope

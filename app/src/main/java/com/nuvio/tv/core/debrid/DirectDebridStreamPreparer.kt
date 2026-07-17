@@ -6,6 +6,7 @@ import com.nuvio.tv.data.local.DebridSettingsDataStore
 import com.nuvio.tv.data.local.PlayerSettings
 import com.nuvio.tv.data.local.StreamAutoPlayMode
 import com.nuvio.tv.domain.model.AddonStreams
+import com.nuvio.tv.domain.model.DebridStreamPreferences
 import com.nuvio.tv.domain.model.Stream
 import com.nuvio.tv.domain.model.StreamDebridCacheState
 import kotlinx.coroutines.CancellationException
@@ -36,13 +37,15 @@ class DirectDebridStreamPreparer @Inject constructor(
     ) {
         val settings = dataStore.settings.first()
         val limit = settings.instantPlaybackPreparationLimit
+        val debridStreamPreferences = settings.streamPreferences
         if (!settings.canResolvePlayableLinks || limit <= 0) return
 
         val candidates = prioritizeCandidates(
             streams = streams,
             limit = limit,
             playerSettings = playerSettings,
-            installedAddonNames = installedAddonNames
+            installedAddonNames = installedAddonNames,
+            debridStreamPreferences = debridStreamPreferences
         )
         for (stream in candidates) {
             if (!resolver.shouldResolveToPlayableStream(stream)) continue
@@ -77,7 +80,8 @@ class DirectDebridStreamPreparer @Inject constructor(
         streams: List<Stream>,
         limit: Int,
         playerSettings: PlayerSettings,
-        installedAddonNames: Set<String>
+        installedAddonNames: Set<String>,
+        debridStreamPreferences: DebridStreamPreferences? = null
     ): List<Stream> {
         if (limit <= 0) return emptyList()
         val candidates = streams
@@ -93,7 +97,8 @@ class DirectDebridStreamPreparer @Inject constructor(
             source = playerSettings.streamAutoPlaySource,
             installedAddonNames = installedAddonNames,
             selectedAddons = playerSettings.streamAutoPlaySelectedAddons,
-            selectedPlugins = playerSettings.streamAutoPlaySelectedPlugins
+            selectedPlugins = playerSettings.streamAutoPlaySelectedPlugins,
+            debridStreamPreferences = debridStreamPreferences
         )
         if (autoPlaySelection?.let { it.isDirectDebrid() || it.isCachedLocalDebridTorrent() } == true) {
             candidates.firstOrNull { it.preparationKey() == autoPlaySelection.preparationKey() }
