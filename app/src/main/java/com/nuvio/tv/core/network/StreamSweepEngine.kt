@@ -83,7 +83,17 @@ object StreamSweepEngine {
         val baselineMbps: Double,
         val targetMbps: Double?,
         val measured: List<MeasuredPass>,
-        val errorText: String?
+        val errorText: String?,
+        /**
+         * Median per-pass coefficient of variation of the sub-window Mbps
+         * series, across parallel passes with enough windows. Null when
+         * fewer than STABILITY_MIN_PASSES qualifying passes ran (including
+         * the leave-parallel-off early exit, where no parallel pass runs -
+         * the baseline test carries no sub-windows). A link-wobble signal,
+         * not a throughput figure.
+         */
+        val stabilityCoV: Double?,
+        val stabilityPassCount: Int
     )
 
     suspend fun run(
@@ -137,6 +147,7 @@ object StreamSweepEngine {
         }
 
         val measured = mutableListOf<MeasuredPass>()
+        val passStabilityCovs = mutableListOf<Double>()
 
         suspend fun measure(connections: Int, chunkMb: Int): Double {
             val label = rowLabel(connections, chunkMb)
@@ -144,12 +155,14 @@ object StreamSweepEngine {
             parallelPasses += 1
             onState(label)
             onPassAdded(label)
-            val mbps = StreamSpeedTester.runParallelChunkTest(
+            val pass = StreamSpeedTester.runParallelChunkTest(
                 streamUrl,
                 headers,
                 chunkMb * 1024L * 1024L,
                 connections
             )
+            val mbps = pass.mbps
+            coefficientOfVariation(pass.subWindowMbps)?.let { passStabilityCovs += it }
             onPassResult(label, mbps)
             if (mbps > 0) measured += MeasuredPass(connections, chunkMb, mbps)
             if (targetMbps != null && mbps >= targetMbps && passesSinceSufficient < 0) {
@@ -187,7 +200,9 @@ object StreamSweepEngine {
                     baselineMbps = baseline,
                     targetMbps = targetMbps,
                     measured = measured.toList(),
-                    errorText = context.getString(R.string.stream_test_error_connection)
+                    errorText = context.getString(R.string.stream_test_error_connection),
+                    stabilityCoV = stabilityCoVOf(passStabilityCovs),
+                    stabilityPassCount = passStabilityCovs.size
                 )
             }
 
@@ -202,7 +217,9 @@ object StreamSweepEngine {
                     baselineMbps = baseline,
                     targetMbps = targetMbps,
                     measured = measured.toList(),
-                    errorText = null
+                    errorText = null,
+                    stabilityCoV = stabilityCoVOf(passStabilityCovs),
+                    stabilityPassCount = passStabilityCovs.size
                 )
             }
 
@@ -236,7 +253,9 @@ object StreamSweepEngine {
                     baselineMbps = baseline,
                     targetMbps = targetMbps,
                     measured = measured.toList(),
-                    errorText = null
+                    errorText = null,
+                    stabilityCoV = stabilityCoVOf(passStabilityCovs),
+                    stabilityPassCount = passStabilityCovs.size
                 )
             }
 
@@ -349,7 +368,9 @@ object StreamSweepEngine {
                         baselineMbps = baseline,
                         targetMbps = targetMbps,
                         measured = measured.toList(),
-                        errorText = null
+                        errorText = null,
+                        stabilityCoV = stabilityCoVOf(passStabilityCovs),
+                        stabilityPassCount = passStabilityCovs.size
                     )
                 }
                 val fastest = measured.maxByOrNull { it.mbps }
@@ -386,7 +407,9 @@ object StreamSweepEngine {
                         baselineMbps = baseline,
                         targetMbps = targetMbps,
                         measured = measured.toList(),
-                        errorText = null
+                        errorText = null,
+                        stabilityCoV = stabilityCoVOf(passStabilityCovs),
+                        stabilityPassCount = passStabilityCovs.size
                     )
                 }
                 return SweepOutcome(
@@ -396,7 +419,9 @@ object StreamSweepEngine {
                     baselineMbps = baseline,
                     targetMbps = targetMbps,
                     measured = measured.toList(),
-                    errorText = null
+                    errorText = null,
+                    stabilityCoV = stabilityCoVOf(passStabilityCovs),
+                    stabilityPassCount = passStabilityCovs.size
                 )
             }
 
@@ -423,7 +448,9 @@ object StreamSweepEngine {
                     baselineMbps = baseline,
                     targetMbps = targetMbps,
                     measured = measured.toList(),
-                    errorText = null
+                    errorText = null,
+                    stabilityCoV = stabilityCoVOf(passStabilityCovs),
+                    stabilityPassCount = passStabilityCovs.size
                 )
             } else {
                 SweepOutcome(
@@ -433,7 +460,9 @@ object StreamSweepEngine {
                     baselineMbps = baseline,
                     targetMbps = targetMbps,
                     measured = measured.toList(),
-                    errorText = null
+                    errorText = null,
+                    stabilityCoV = stabilityCoVOf(passStabilityCovs),
+                    stabilityPassCount = passStabilityCovs.size
                 )
             }
         } catch (e: Exception) {
@@ -444,8 +473,30 @@ object StreamSweepEngine {
                 baselineMbps = baselineMbps,
                 targetMbps = targetMbps,
                 measured = measured.toList(),
-                errorText = e.localizedMessage ?: context.getString(R.string.error_unknown)
+                errorText = e.localizedMessage ?: context.getString(R.string.error_unknown),
+                stabilityCoV = stabilityCoVOf(passStabilityCovs),
+                stabilityPassCount = passStabilityCovs.size
             )
         }
+    }
+
+    // Minimum sub-windows for a pass to yield a CoV, and minimum qualifying
+    // passes for the sweep-level median. [inferred] initial values.
+    private const val STABILITY_MIN_WINDOWS = 4
+    private const val STABILITY_MIN_PASSES = 2
+
+    private fun coefficientOfVariation(samples: List<Double>): Double? {
+        if (samples.size < STABILITY_MIN_WINDOWS) return null
+        val mean = samples.average()
+        if (mean <= 0.0) return null
+        val variance = samples.sumOf { val d = it - mean; d * d } / samples.size
+        return kotlin.math.sqrt(variance) / mean
+    }
+
+    private fun stabilityCoVOf(passCovs: List<Double>): Double? {
+        if (passCovs.size < STABILITY_MIN_PASSES) return null
+        val sorted = passCovs.sorted()
+        val mid = sorted.size / 2
+        return if (sorted.size % 2 == 1) sorted[mid] else (sorted[mid - 1] + sorted[mid]) / 2.0
     }
 }

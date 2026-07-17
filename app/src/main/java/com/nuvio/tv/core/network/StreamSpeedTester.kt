@@ -27,6 +27,19 @@ object StreamSpeedTester {
     private const val MEASURE_BYTES = 64L * 1024 * 1024
     private const val MEASURE_MAX_MS = 8_000L
 
+    // Stability sub-windows: snapshot the NETWORK tally roughly every
+    // SUB_WINDOW_MS during the measured window and record per-window Mbps.
+    // Same tally the headline figure uses - zero extra network cost. Windows
+    // are normalised by their actual elapsed time, so a read blocking past
+    // the nominal boundary widens the window rather than skewing the rate.
+    // A trailing partial window shorter than SUB_WINDOW_MIN_TAIL_MS is
+    // discarded as noise.
+    private const val SUB_WINDOW_MS = 500L
+    private const val SUB_WINDOW_MIN_TAIL_MS = 250L
+
+    /** Headline Mbps plus the per-sub-window Mbps series behind it. */
+    data class ParallelPassResult(val mbps: Double, val subWindowMbps: List<Double>)
+
     // 1. Measures single connection baseline speed (standard OkHttp)
     suspend fun runBaselineTest(
         url: String,
@@ -81,7 +94,7 @@ object StreamSpeedTester {
         headers: Map<String, String>,
         chunkSizeBytes: Long,
         parallelConnections: Int
-    ): Double = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    ): ParallelPassResult = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         // AtomicLong: the tally is incremented from multiple connection threads,
         // and plain 64-bit writes can tear on 32-bit ABIs.
         val totalBytesDownloaded = java.util.concurrent.atomic.AtomicLong(0L)
@@ -136,24 +149,44 @@ object StreamSpeedTester {
             val networkAtMeasureStart = totalBytesDownloaded.get()
             val tStart = System.currentTimeMillis()
             val tDeadline = tStart + MEASURE_MAX_MS
+            val subWindowMbps = mutableListOf<Double>()
+            var windowStartMs = tStart
+            var windowStartBytes = networkAtMeasureStart
             while (!eof &&
                 totalBytesDownloaded.get() - networkAtMeasureStart < MEASURE_BYTES &&
                 System.currentTimeMillis() < tDeadline
             ) {
                 val read = dataSource.read(buffer, 0, buffer.size)
                 if (read == -1) { eof = true }
+                val nowMs = System.currentTimeMillis()
+                if (nowMs - windowStartMs >= SUB_WINDOW_MS) {
+                    val bytesNow = totalBytesDownloaded.get()
+                    subWindowMbps += ((bytesNow - windowStartBytes) * 8.0) /
+                        ((nowMs - windowStartMs) * 1000.0)
+                    windowStartMs = nowMs
+                    windowStartBytes = bytesNow
+                }
             }
-            val elapsed = (System.currentTimeMillis() - tStart).coerceAtLeast(1)
+            val endMs = System.currentTimeMillis()
+            if (endMs - windowStartMs >= SUB_WINDOW_MIN_TAIL_MS) {
+                val bytesNow = totalBytesDownloaded.get()
+                subWindowMbps += ((bytesNow - windowStartBytes) * 8.0) /
+                    ((endMs - windowStartMs) * 1000.0)
+            }
+            val elapsed = (endMs - tStart).coerceAtLeast(1)
             val networkDelta = totalBytesDownloaded.get() - networkAtMeasureStart
             dataSource.close()
 
-            return@withContext (networkDelta * 8.0) / (elapsed * 1000.0)
+            return@withContext ParallelPassResult(
+                mbps = (networkDelta * 8.0) / (elapsed * 1000.0),
+                subWindowMbps = subWindowMbps.toList()
+            )
         } catch (e: Exception) {
             e.printStackTrace()
-            return@withContext 0.0
+            return@withContext ParallelPassResult(0.0, emptyList())
         }
         @Suppress("UNREACHABLE_CODE")
-        0.0
+        ParallelPassResult(0.0, emptyList())
     }
 
     suspend fun getStreamContentLength(
