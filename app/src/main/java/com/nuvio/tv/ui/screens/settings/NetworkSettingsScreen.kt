@@ -248,34 +248,10 @@ fun AdvancedSettingsContent(
         }
     }
 
-    // Adaptive greedy sweep with a cheapest-sufficient verdict (Item 1(b)):
-    //   Stage 1  Baseline (single connection). If it already meets the target
-    //            (2x the last title's average bitrate) the verdict is "leave
-    //            parallel off" and the sweep ends - parallel connections only
-    //            help when one connection cannot feed the title.
-    //   Stage 2  Chunk climb at 2 connections up the 8/16/32/64/128 ladder.
-    //   Stage 3  Connection climb at the best chunk: 3 -> 4 -> 8 -> 16 (counts
-    //            above 4 need Nuvio Performance Mode at runtime; rows are
-    //            labelled).
-    //   Stage 4  Neighbour refinement around the best config (chunk up, conn
-    //            up, chunk down).
-    //   Stage 5  Below-target cross-check: if the target is still unmet with
-    //            pass budget left, probe untested 3- and 4-connection combos
-    //            against the two strongest chunk sizes measured this session,
-    //            cheapest first, stopping the moment a pass meets the target.
-    // Stop rules are asymmetric around the target. While the target is UNMET,
-    // every Mbps matters: climbs continue on any gain and get one grace step
-    // through a single regression (single-sample passes are noisy - one dip
-    // is not a wall), stopping only when a second consecutive rung fails to
-    // recover. Once the target is MET, the economy rule applies: continue or
-    // adopt only on >=10% gains. Sustained 429 rate-limiting on debrid CDNs
-    // shows up as consecutive collapses and still stops the climb.
-    // Every candidate is gated against the device RAM tier first (the
-    // safe/warning native limits, matching the tester's native-memory
-    // allocations); configs beyond the warning limit never run, rows between
-    // safe and warning are marked. Hard cap of 12 parallel passes; once the
-    // target is met at most 2 further passes run (to show headroom). The
-    // winner is a recommendation, not a provable optimum.
+    // Stream sweep: the algorithm now lives in core.network.StreamSweepEngine
+    // (single source of truth, shared with the Device Assessment). This wrapper
+    // only owns the Compose state; pass labels, stop rules, memory gating and
+    // verdict strings are produced by the engine and are unchanged.
     fun runStreamDiagnostics() {
         if (lastStreamUrl.isNullOrBlank()) return
         scope.launch {
@@ -283,269 +259,23 @@ fun AdvancedSettingsContent(
             streamErrorMessage = null
             streamVerdict = null
 
-            val chunkLadderMb = listOf(8, 16, 32, 64, 128)
-            val maxChunkMb = com.nuvio.tv.data.local.PlayerSettings.MAX_PARALLEL_CHUNK_SIZE_KB / 1024
-            val minChunkMb = (com.nuvio.tv.data.local.PlayerSettings.MIN_PARALLEL_CHUNK_SIZE_KB + 1023) / 1024
-            val connLadder = listOf(2, 3, 4, 8, 16)
-            val standardConnLimit = com.nuvio.tv.data.local.PlayerSettings.MAX_PARALLEL_CONNECTION_COUNT
-            val safeLimitMb =
-                com.nuvio.tv.ui.screens.player.NuvioExoPlayerPerformanceHelper.getSafeNativeMemoryLimitMb(context)
-            val warningLimitMb =
-                com.nuvio.tv.ui.screens.player.NuvioExoPlayerPerformanceHelper.getWarningNativeMemoryLimitMb(context)
-            val targetMbps = estimatedBitrate?.takeIf { it > 0 }?.let { it * 2.0 / 1_000_000.0 }
-            val ranConfigs = mutableSetOf<Pair<Int, Int>>() // (connections, chunkMb)
-            var parallelPasses = 0
-            var passesSinceSufficient = -1 // -1 = target not yet met
-            val maxParallelPasses = 12
-
-            fun overheadMb(connections: Int, chunkMb: Int) =
-                MemoryBudget.parallelOverheadMb(connections, chunkMb)
-
-            fun allowed(connections: Int, chunkMb: Int) =
-                chunkMb in minChunkMb..maxChunkMb && overheadMb(connections, chunkMb) <= warningLimitMb
-
-            fun mayContinue() =
-                parallelPasses < maxParallelPasses && passesSinceSufficient < 2
-
-            // Target unmet -> continue on any gain; target met -> require >=10%.
-            fun belowTarget() = targetMbps != null && passesSinceSufficient < 0
-
-            fun continueBar() = if (belowTarget()) 1.0 else 1.10
-
-            fun rowLabel(connections: Int, chunkMb: Int): String {
-                var label = context.getString(R.string.stream_test_label_parallel_dyn, connections, chunkMb)
-                val status = MemoryBudget.getUsageStatus(overheadMb(connections, chunkMb), safeLimitMb, warningLimitMb)
-                if (status == MemoryUsageStatus.WARNING) {
-                    label += context.getString(R.string.stream_test_row_warning_suffix)
+            val outcome = com.nuvio.tv.core.network.StreamSweepEngine.run(
+                context = context,
+                streamUrl = lastStreamUrl,
+                headers = lastHeadersMap,
+                estimatedBitrate = estimatedBitrate,
+                onState = { streamTestState = it },
+                onPassAdded = { label ->
+                    streamPassResults = streamPassResults + (label to null)
+                },
+                onPassResult = { label, mbps ->
+                    streamPassResults = streamPassResults.map { if (it.first == label) label to mbps else it }
                 }
-                if (connections > standardConnLimit) {
-                    label += context.getString(R.string.stream_test_row_pm_suffix)
-                }
-                return label
-            }
+            )
 
-            data class Measured(val connections: Int, val chunkMb: Int, val mbps: Double)
-            val measured = mutableListOf<Measured>()
-
-            suspend fun measure(connections: Int, chunkMb: Int): Double {
-                val label = rowLabel(connections, chunkMb)
-                ranConfigs += connections to chunkMb
-                parallelPasses += 1
-                streamTestState = label
-                streamPassResults = streamPassResults + (label to null)
-                val mbps = com.nuvio.tv.core.network.StreamSpeedTester.runParallelChunkTest(
-                    lastStreamUrl,
-                    lastHeadersMap,
-                    chunkMb * 1024L * 1024L,
-                    connections
-                )
-                streamPassResults = streamPassResults.map { if (it.first == label) label to mbps else it }
-                if (mbps > 0) measured += Measured(connections, chunkMb, mbps)
-                if (targetMbps != null && mbps >= targetMbps && passesSinceSufficient < 0) {
-                    passesSinceSufficient = 0
-                } else if (passesSinceSufficient >= 0) {
-                    passesSinceSufficient += 1
-                }
-                return mbps
-            }
-
-            fun withPmSuffix(text: String, connections: Int): String =
-                if (connections > standardConnLimit) {
-                    text + context.getString(R.string.stream_test_verdict_pm_suffix)
-                } else text
-
-            try {
-                // Stage 1 - baseline.
-                val baselineLabel = context.getString(R.string.stream_test_label_baseline)
-                streamTestState = baselineLabel
-                streamPassResults = streamPassResults + (baselineLabel to null)
-                val baseline = com.nuvio.tv.core.network.StreamSpeedTester.runBaselineTest(
-                    lastStreamUrl,
-                    lastHeadersMap
-                )
-                streamPassResults = streamPassResults.map { if (it.first == baselineLabel) baselineLabel to baseline else it }
-
-                if (baseline <= 0.0) {
-                    streamErrorMessage = context.getString(R.string.stream_test_error_connection)
-                    streamTestState = "Error"
-                    return@launch
-                }
-
-                if (targetMbps != null && baseline >= targetMbps) {
-                    streamVerdict = context.getString(
-                        R.string.stream_test_verdict_leave_off,
-                        "%.1f Mbps".format(baseline)
-                    )
-                    streamTestState = "Done"
-                    return@launch
-                }
-
-                // Stage 2 - chunk climb at 2 connections.
-                var bestConnections = 2
-                var bestChunkMb = -1
-                var bestMbps = -1.0
-                var prevMbps = -1.0
-                var grace = true // one pass through a single regression while below target
-                for (chunkMb in chunkLadderMb) {
-                    if (!mayContinue() || !allowed(2, chunkMb)) break
-                    val mbps = measure(2, chunkMb)
-                    if (mbps > bestMbps) { bestMbps = mbps; bestChunkMb = chunkMb }
-                    if (prevMbps > 0 && mbps < prevMbps * continueBar()) {
-                        if (belowTarget() && grace && mbps < prevMbps) {
-                            grace = false
-                            prevMbps = mbps
-                            continue
-                        }
-                        break
-                    }
-                    if (mbps > prevMbps) grace = true
-                    prevMbps = mbps
-                }
-
-                if (bestChunkMb <= 0 || bestMbps <= 0.0) {
-                    streamTestState = "Done"
-                    return@launch
-                }
-
-                // Stage 3 - connection climb at the best chunk.
-                prevMbps = bestMbps
-                grace = true
-                for (connections in connLadder) {
-                    if (connections <= 2) continue
-                    if (!mayContinue() || !allowed(connections, bestChunkMb)) break
-                    if (connections to bestChunkMb in ranConfigs) continue
-                    val mbps = measure(connections, bestChunkMb)
-                    if (mbps > bestMbps) { bestMbps = mbps; bestConnections = connections }
-                    if (mbps < prevMbps * continueBar()) {
-                        if (belowTarget() && grace && mbps < prevMbps) {
-                            grace = false
-                            prevMbps = mbps
-                            continue
-                        }
-                        break
-                    }
-                    if (mbps > prevMbps) grace = true
-                    prevMbps = mbps
-                }
-
-                // Stage 4 - neighbour refinement around the best config.
-                var improved = true
-                while (improved && mayContinue()) {
-                    improved = false
-                    val chunkUp = chunkLadderMb.firstOrNull { it > bestChunkMb }
-                    val chunkDown = chunkLadderMb.lastOrNull { it < bestChunkMb }
-                    val connUp = connLadder.firstOrNull { it > bestConnections }
-                    val neighbours = listOfNotNull(
-                        chunkUp?.let { bestConnections to it },
-                        connUp?.let { it to bestChunkMb },
-                        chunkDown?.let { bestConnections to it }
-                    )
-                    for ((connections, chunkMb) in neighbours) {
-                        if (!mayContinue()) break
-                        if (connections to chunkMb in ranConfigs || !allowed(connections, chunkMb)) continue
-                        val mbps = measure(connections, chunkMb)
-                        if (mbps >= bestMbps * continueBar() && mbps > bestMbps) {
-                            bestMbps = mbps
-                            bestConnections = connections
-                            bestChunkMb = chunkMb
-                            improved = true
-                            break
-                        }
-                    }
-                }
-
-                // Stage 5 - below-target cross-check. Coordinate ascent can
-                // miss cross combinations (e.g. 3/32, 4/16) whose path runs
-                // through a non-improving intermediate. When the verdict would
-                // otherwise be marginal/cannot-sustain with budget unspent,
-                // spend it on the untested standard-count combos against the
-                // two strongest chunks measured this session.
-                if (belowTarget()) {
-                    val topChunks = measured
-                        .sortedByDescending { it.mbps }
-                        .map { it.chunkMb }
-                        .distinct()
-                        .take(2)
-                    val crossConfigs = topChunks
-                        .flatMap { chunk -> listOf(3 to chunk, 4 to chunk) }
-                        .filter { it !in ranConfigs && allowed(it.first, it.second) }
-                        .sortedBy { overheadMb(it.first, it.second) }
-                    for ((connections, chunkMb) in crossConfigs) {
-                        if (!mayContinue()) break
-                        val mbps = measure(connections, chunkMb)
-                        if (mbps > bestMbps) {
-                            bestMbps = mbps
-                            bestConnections = connections
-                            bestChunkMb = chunkMb
-                        }
-                        if (targetMbps != null && mbps >= targetMbps) break
-                    }
-                }
-
-                // Verdict: cheapest config that BOTH meets the 2x target AND fits the
-                // safe native-memory budget, so the tool never recommends a configuration
-                // the memory-usage indicator would flag. If none of the sufficient configs
-                // fit the safe budget, fall back to the cheapest sufficient one regardless
-                // (a working recommendation beats none on a very memory-constrained device).
-                streamVerdict = if (targetMbps != null) {
-                    val sufficient = measured.filter { it.mbps >= targetMbps }
-                    val sufficientAndSafe = sufficient.filter {
-                        overheadMb(it.connections, it.chunkMb) <= safeLimitMb
-                    }
-                    val cheapest = (sufficientAndSafe.ifEmpty { sufficient })
-                        .minByOrNull { overheadMb(it.connections, it.chunkMb) }
-                    if (cheapest != null) {
-                        withPmSuffix(
-                            context.getString(
-                                R.string.stream_test_verdict_recommend,
-                                cheapest.connections,
-                                cheapest.chunkMb,
-                                "%.1f Mbps".format(cheapest.mbps)
-                            ),
-                            cheapest.connections
-                        )
-                    } else {
-                        measured.maxByOrNull { it.mbps }?.let { fastest ->
-                            // Below 2x is not the same as unplayable: above the
-                            // title's own bitrate playback should work with thin
-                            // headroom; below it the stream cannot be sustained.
-                            val bitrateMbps = targetMbps / 2.0
-                            val resId = if (fastest.mbps >= bitrateMbps) {
-                                R.string.stream_test_verdict_marginal
-                            } else {
-                                R.string.stream_test_verdict_cannot_sustain
-                            }
-                            withPmSuffix(
-                                context.getString(
-                                    resId,
-                                    fastest.connections,
-                                    fastest.chunkMb,
-                                    "%.1f Mbps".format(fastest.mbps),
-                                    "%.1f Mbps".format(bitrateMbps)
-                                ),
-                                fastest.connections
-                            )
-                        }
-                    }
-                } else {
-                    measured.maxByOrNull { it.mbps }?.let { fastest ->
-                        withPmSuffix(
-                            context.getString(
-                                R.string.stream_test_verdict_fastest_nobitrate,
-                                fastest.connections,
-                                fastest.chunkMb,
-                                "%.1f Mbps".format(fastest.mbps)
-                            ),
-                            fastest.connections
-                        )
-                    }
-                }
-
-                streamTestState = "Done"
-            } catch (e: java.lang.Exception) {
-                streamErrorMessage = e.localizedMessage ?: unknownError
-                streamTestState = "Error"
-            }
+            streamErrorMessage = outcome.errorText
+            streamVerdict = outcome.verdictText
+            streamTestState = if (outcome.errorText != null) "Error" else "Done"
         }
     }
 
