@@ -2895,4 +2895,84 @@
     <string name="stream_test_video_bitrate">Average Video Bitrate: %1$s</string>
     <string name="stream_test_error_connection">Connection failed. The last played stream link may have expired or is unreachable. Please play the video again and retry.</string>
 
+
+    <!-- Device Settings Assessment (Stage 1, review-only): engine strings -->
+    <string name="assessment_value_on">On</string>
+    <string name="assessment_value_off">Off</string>
+    <string name="assessment_value_no_change">No change</string>
+    <string name="assessment_value_auto">Auto</string>
+    <string name="assessment_value_on_auto">On \u00b7 Auto (\u2248%1$s now)</string>
+    <string name="assessment_value_seconds">%1$d s</string>
+    <string name="assessment_value_afr_start_stop">On \u2014 start &amp; stop</string>
+    <string name="assessment_value_afr_start">On \u2014 start only</string>
+    <string name="assessment_unit_mb">%1$d MB</string>
+    <string name="assessment_unit_kb">%1$d KB</string>
+    <string name="assessment_current_parallel_on">On \u2014 %1$d \u00d7 %2$s</string>
+
+    <string name="assessment_item_parallel">Parallel connections</string>
+    <string name="assessment_item_chunk">Chunk size</string>
+    <string name="assessment_item_network_master">Custom network pipeline</string>
+    <string name="assessment_item_http2">HTTP/2</string>
+    <string name="assessment_item_perf_mode">Nuvio performance mode (native memory)</string>
+    <string name="assessment_item_buffer_master">Custom buffers</string>
+    <string name="assessment_item_managed_budget">Managed memory budget</string>
+    <string name="assessment_item_target_buffer">Target buffer size</string>
+    <string name="assessment_item_allow_large">Allow larger target buffer</string>
+    <string name="assessment_item_max_buffer">Max buffer</string>
+    <string name="assessment_item_vod_cache">VOD disk cache</string>
+    <string name="assessment_item_afr">Frame-rate matching (AFR)</string>
+    <string name="assessment_item_res_match">Resolution matching</string>
+    <string name="assessment_item_dv7">DV Profile 7 handling</string>
+    <string name="assessment_item_dv5">DV Profile 5 \u2192 8.1 conversion</string>
+    <string name="assessment_item_strip_hdr10plus">Strip HDR10+ metadata</string>
+    <string name="assessment_item_tunneling">Tunnelled playback</string>
+
+    <string name="assessment_grounds_parallel_off">Single connection measured %1$s \u2014 already \u2265 2\u00d7 this title\'s bitrate; parallel adds memory for no benefit</string>
+    <string name="assessment_grounds_parallel_rec">Measured %1$s at %2$d \u00d7 %3$d MB \u2014 cheapest configuration meeting 2\u00d7 bitrate within the safe memory budget</string>
+    <string name="assessment_grounds_parallel_rec_unsafe">Measured %1$s at %2$d \u00d7 %3$d MB \u2014 meets 2\u00d7 bitrate, but no configuration inside the safe budget did; this one exceeds the safe limit</string>
+    <string name="assessment_grounds_parallel_marginal">Fastest measured %1$s at %2$d \u00d7 %3$d MB \u2014 above the title\'s bitrate but under the 2\u00d7 margin; expect thin headroom</string>
+    <string name="assessment_grounds_parallel_cannot">Fastest measured %1$s at %2$d \u00d7 %3$d MB \u2014 below the title\'s own bitrate; this link can\'t sustain the stream</string>
+    <string name="assessment_grounds_parallel_fastest">Fastest measured %1$s at %2$d \u00d7 %3$d MB \u2014 no title bitrate was known, so no sufficiency verdict</string>
+    <string name="assessment_grounds_chunk">Paired with the connection count above, from the same measured pass</string>
+    <string name="assessment_grounds_network_master">Master switch for the HTTP/2 and parallel settings below</string>
+    <string name="assessment_grounds_http2">Multiplexes range requests over one connection; broadly beneficial, no probe needed</string>
+    <string name="assessment_grounds_perf_mode">Memory limits scale to this device\'s %1$s tier (safe %2$d MB / warning %3$d MB); counts above %4$d connections require it</string>
+    <string name="assessment_grounds_perf_mode_unsupported">Requires Android 8.0 or newer</string>
+    <string name="assessment_grounds_buffer_master">Applies the buffer values below</string>
+    <string name="assessment_grounds_managed_budget">Managed mode pins the target to the safe limit and ignores parallel-connection overhead; the explicit target below accounts for both</string>
+    <string name="assessment_grounds_target_buffer">Largest %1$d MB step where target + %2$d MB connection overhead stays \u2264 the %3$d MB safe limit</string>
+    <string name="assessment_grounds_allow_large_on">Needed so the target slider reaches %1$d MB on this device</string>
+    <string name="assessment_grounds_allow_large_off">The recommended target fits the standard slider range</string>
+    <string name="assessment_grounds_max_buffer">A %1$d MB target holds \u2248%2$d s of this title (%3$s) \u2014 seconds beyond that can\'t materialise</string>
+    <string name="assessment_grounds_max_buffer_nobitrate">No title bitrate known \u2014 the byte ceiling can\'t be computed; leaving the cap at %1$d s</string>
+    <string name="assessment_grounds_vod_auto">Auto sizes from free space (20%% of free within limits, 1 GB reserve) \u2014 \u2248%1$s on this device right now</string>
+    <string name="assessment_grounds_vod_off">Not enough free space for a useful cache (needs \u2265 100 MB after the 1 GB reserve) \u2014 the runtime would stream direct anyway</string>
+    <string name="assessment_grounds_afr_on">Display reports multiple refresh rates at the current resolution (%1$s)</string>
+    <string name="assessment_grounds_afr_already">Already on \u2014 Start vs Start &amp; stop is preference: fewer HDMI resyncs vs the UI returning to 60 Hz</string>
+    <string name="assessment_grounds_afr_single">Single-rate display at the current resolution \u2014 nothing to switch to</string>
+    <string name="assessment_grounds_res_on">Display exposes multiple resolutions (%1$s)</string>
+    <string name="assessment_grounds_res_single">Single-resolution display \u2014 nothing to switch to</string>
+    <string name="assessment_grounds_display_unknown">Couldn\'t inspect the display from this screen \u2014 leave as is and verify by eye</string>
+    <string name="assessment_grounds_dv7_auto">Auto resolves on this device to: %1$s</string>
+    <string name="assessment_grounds_dv7_unknown">Display doesn\'t report its HDR types \u2014 Auto still applies a defensive base-layer strip; verify by eye</string>
+    <string name="assessment_grounds_dv5_on">Display doesn\'t decode DV, but a P8 decoder and the libdovi bridge are present \u2014 convert so DV5 titles keep dynamic metadata</string>
+    <string name="assessment_grounds_dv5_off_display">Display decodes DV natively \u2014 conversion is unnecessary work</string>
+    <string name="assessment_grounds_dv5_off_nopath">No P8 decoder / libdovi bridge available to convert with</string>
+    <string name="assessment_grounds_strip_on">Display doesn\'t report HDR10+ \u2014 dynamic metadata can only mislead the sink</string>
+    <string name="assessment_grounds_strip_off">Display reports HDR10+ \u2014 keep the dynamic metadata</string>
+    <string name="assessment_grounds_tunneling">Seek/fast-forward and audio-sync quirks on some decoder stacks aren\'t queryable \u2014 verify on this chain before keeping it on</string>
+
+    <string name="assessment_dv7_native">native DV7 pass-through</string>
+    <string name="assessment_dv7_convert">convert to DV8.1 via libdovi</string>
+    <string name="assessment_dv7_strip">HEVC base layer (HDR10)</string>
+    <string name="assessment_dv7_strip_besteffort">base-layer strip (capabilities unknown)</string>
+    <string name="assessment_dv7_tonemap">strip and tone-map</string>
+
+    <string name="assessment_profile_fast_title">Fast start</string>
+    <string name="assessment_profile_fast_sub">Starts \u2248%1$d s after tap; smallest stall cushion</string>
+    <string name="assessment_profile_balanced_title">Balanced</string>
+    <string name="assessment_profile_balanced_sub">Middle ground on start-up and stall cushion</string>
+    <string name="assessment_profile_stall_title">Stall-resistant</string>
+    <string name="assessment_profile_stall_sub">Deepest cushion; slowest to start</string>
+
 </resources>
