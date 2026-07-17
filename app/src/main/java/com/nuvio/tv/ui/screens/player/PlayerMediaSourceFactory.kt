@@ -21,6 +21,7 @@ import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.text.SubtitleParser
 import com.nuvio.tv.NuvioApplication
 import com.nuvio.tv.core.network.IPv4FirstDns
+import com.nuvio.tv.core.player.VodCacheSizing
 import com.nuvio.tv.data.local.PlayerSettings
 import com.nuvio.tv.data.local.VodCacheSizeMode
 import okhttp3.ConnectionPool
@@ -303,34 +304,16 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
         return scheme == "https" || scheme == "http"
     }
 
-    private fun resolveVodCacheMaxBytes(): Long {
-        val minBytes = PlayerSettings.MIN_VOD_CACHE_SIZE_MB.toLong() * 1024L * 1024L
-        val maxBytes = PlayerSettings.MAX_VOD_CACHE_SIZE_MB.toLong() * 1024L * 1024L
-        val runtimeMaxBytes = resolveRuntimeVodCacheUpperBoundBytes(maxBytes)
-        // Not enough free space to host a useful cache: skip it (0 = caller streams direct).
-        if (runtimeMaxBytes < minBytes) return 0L
-        val manualBytes = vodCacheSizeMb
-            .coerceIn(PlayerSettings.MIN_VOD_CACHE_SIZE_MB, PlayerSettings.MAX_VOD_CACHE_SIZE_MB)
-            .toLong() * 1024L * 1024L
-        val resolvedManualBytes = manualBytes.coerceAtMost(runtimeMaxBytes)
-
-        if (vodCacheSizeMode == VodCacheSizeMode.MANUAL) return resolvedManualBytes
-
-        val freeSpaceBytes = context.cacheDir.usableSpace
-        if (freeSpaceBytes <= 0L) return resolvedManualBytes
-        val autoBytes = freeSpaceBytes / 5L // 20% for a healthy buffer
-        return autoBytes.coerceIn(minBytes, runtimeMaxBytes)
-    }
-
-    private fun resolveRuntimeVodCacheUpperBoundBytes(hardMaxBytes: Long): Long {
-        val freeSpaceBytes = context.cacheDir.usableSpace
-        val headroomAdjusted = if (freeSpaceBytes > VOD_CACHE_FREE_SPACE_RESERVE_BYTES) {
-            freeSpaceBytes - VOD_CACHE_FREE_SPACE_RESERVE_BYTES
-        } else {
-            (freeSpaceBytes * 8L) / 10L
-        }
-        return headroomAdjusted.coerceAtLeast(1L * 1024L * 1024L).coerceAtMost(hardMaxBytes)
-    }
+    // Maths extracted to core.player.VodCacheSizing (shared with the Device
+    // Assessment). Free space is read ONCE here and passed in; the inline
+    // original read it twice in quick succession, which is equivalent for any
+    // stable value - the single read just removes a benign race.
+    private fun resolveVodCacheMaxBytes(): Long =
+        VodCacheSizing.resolveMaxBytes(
+            freeSpaceBytes = context.cacheDir.usableSpace,
+            mode = vodCacheSizeMode,
+            manualSizeMb = vodCacheSizeMb
+        )
 
     companion object {
         private const val MIME_VIDEO_QUICK_TIME = "video/quicktime"
@@ -340,7 +323,6 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
         // low-RAM tier, 5 otherwise) stays a few tens of MB.
         private const val MP4_SESSION_CHUNK_BYTES = 8L * 1024L * 1024L
         private const val ENABLE_VOD_CACHE = true
-        private const val VOD_CACHE_FREE_SPACE_RESERVE_BYTES = 1024L * 1024L * 1024L
         internal const val DEFAULT_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
