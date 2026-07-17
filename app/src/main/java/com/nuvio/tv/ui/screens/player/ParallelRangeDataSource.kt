@@ -136,6 +136,13 @@ internal class ParallelRangeDataSource(
         private const val RATE_LIMIT_BACKOFF_JITTER_MS = 250L
         private const val RATE_LIMIT_SLEEP_SLICE_MS = 100L
 
+        // nt3 Lever 1: the clamp above is no longer session-permanent. After a
+        // quiet period with no 429/503 the read path lifts it and restores full
+        // prefetch depth; each re-trip doubles the next required quiet period
+        // (capped) so a persistently limiting server cannot make us oscillate.
+        private const val RATE_LIMIT_RECOVERY_BASE_MS = 45_000L
+        private const val RATE_LIMIT_RECOVERY_MAX_MS = 360_000L
+
         private class ChunkSession(
             val requestUri: Uri,
             val requestHeaders: Map<String, String>,
@@ -151,11 +158,20 @@ internal class ParallelRangeDataSource(
             val futures = ConcurrentHashMap<Long, CompletableFuture<DownloadedChunk>>()
             val lastTouch = ConcurrentHashMap<Long, Long>()
             val abandoned = AtomicBoolean(false)
-            // nt-tier2: set once when the server rate-limits us repeatedly; the
+            // nt-tier2: set when the server rate-limits us repeatedly; the
             // read path then holds prefetch to a single connection for this
-            // session. One-way (never cleared) — a new stream gets a new session.
+            // session. nt3 Lever 1: no longer one-way — after a quiet cooldown
+            // with no further 429/503 the read path lifts the clamp
+            // (tryRecoverFromRateLimit below); each re-trip doubles the next
+            // cooldown, capped at RATE_LIMIT_RECOVERY_MAX_MS.
             val rateLimited = AtomicBoolean(false)
             val rateLimit429s = AtomicInteger(0)
+            // nt3 Lever 1: uptime stamp of the most recently observed 429/503
+            // (slides on every hit, so the cooldown measures true quiet time),
+            // and how many times the clamp has tripped this session (drives
+            // the exponential cooldown).
+            @Volatile var lastRateLimitAtMs: Long = 0L
+            val rateLimitClampCount = AtomicInteger(0)
             val activeSources: MutableSet<DataSource> = java.util.concurrent.ConcurrentHashMap.newKeySet()
             @Volatile var lastUsedAtMs: Long = SystemClock.uptimeMillis()
 
@@ -177,6 +193,28 @@ internal class ParallelRangeDataSource(
             fun noteRead(chunkIndex: Long) {
                 touch(chunkIndex)
                 lastReadChunkIndex = chunkIndex
+            }
+
+            /**
+             * nt3 Lever 1: lift the rate-limit clamp once no 429/503 has been
+             * observed for the current cooldown. Returns true when the clamp
+             * is (now) inactive, false while it must still hold. Called from
+             * the read path; trips happen on download threads — the CAS makes
+             * that race benign (a concurrent 429 simply re-stamps
+             * lastRateLimitAtMs and can re-trip as normal).
+             */
+            fun tryRecoverFromRateLimit(): Boolean {
+                if (!rateLimited.get()) return true
+                val trips = rateLimitClampCount.get().coerceAtLeast(1)
+                val cooldownMs = (RATE_LIMIT_RECOVERY_BASE_MS shl (trips - 1).coerceAtMost(3))
+                    .coerceAtMost(RATE_LIMIT_RECOVERY_MAX_MS)
+                if (SystemClock.uptimeMillis() - lastRateLimitAtMs < cooldownMs) return false
+                if (rateLimited.compareAndSet(true, false)) {
+                    rateLimit429s.set(0)
+                    Log.i(TAG, "Rate-limit cooldown (${cooldownMs}ms) elapsed with no further " +
+                        "429/503; restoring parallel prefetch (clamp trips this session: $trips)")
+                }
+                return true
             }
         }
 
@@ -758,9 +796,12 @@ internal class ParallelRangeDataSource(
         // scatter-read files) fetch only the chunk they actually need, instead
         // of fanning out connections+1 chunks of dead prefetch per visit.
         // nt-tier2: once the session is rate-limited, hold prefetch to a single
-        // connection so we stop fanning out into the limit.
+        // connection so we stop fanning out into the limit. nt3 Lever 1: the
+        // clamp lifts after a quiet cooldown (tryRecoverFromRateLimit) instead
+        // of holding for the rest of the session; a null session keeps the
+        // pre-clamp behaviour (fall through to the earned-prefetch gate).
         val maxAhead = when {
-            session?.rateLimited?.get() == true -> 1
+            session?.tryRecoverFromRateLimit() == false -> 1
             bytesServedThisOpen >= EARNED_PREFETCH_BYTES -> effectivePrefetchDepth
             else -> 1
         }
@@ -911,9 +952,15 @@ internal class ParallelRangeDataSource(
         var lastException: Exception = firstError
         var attempt = 0
         while (attempt < RATE_LIMIT_MAX_BACKOFF_RETRIES) {
+            // nt3 Lever 1: stamp every observed 429/503 so the recovery
+            // cooldown measures quiet time since the LAST hit, not since the
+            // moment the clamp tripped.
+            activeSession.lastRateLimitAtMs = SystemClock.uptimeMillis()
             if (activeSession.rateLimit429s.incrementAndGet() >= RATE_LIMIT_CLAMP_THRESHOLD &&
                 activeSession.rateLimited.compareAndSet(false, true)) {
-                Log.w(TAG, "Rate-limited (HTTP ${rl.responseCode}) repeatedly; clamping session to single connection")
+                val trips = activeSession.rateLimitClampCount.incrementAndGet()
+                Log.w(TAG, "Rate-limited (HTTP ${rl.responseCode}) repeatedly; clamping session to " +
+                    "single connection (trip #$trips this session)")
             }
             val waitMs = rateLimitBackoffMs(attempt, rl)
             Log.w(TAG, "Chunk $chunkIndex rate-limited (HTTP ${rl.responseCode}); backing off ${waitMs}ms " +
