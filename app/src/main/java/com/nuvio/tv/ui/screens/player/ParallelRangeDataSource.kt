@@ -119,11 +119,6 @@ internal class ParallelRangeDataSource(
         // Never evict a chunk touched in the last 2 s: closes the narrow race
         // where an overlapping old instance is still copying from the buffer.
         private const val EVICTION_TOUCH_GUARD_MS = 2_000L
-        // nt-followup: chunks in reader+1..reader+NEAR_AHEAD_PROTECT are imminent
-        // and must never be evicted (even under the cap+2 hard ceiling), or the
-        // reader re-downloads them. 2 covers the adjacent-pair re-fetch observed
-        // on 2-connection fills; the fan-out already keeps the pool within cap.
-        private const val NEAR_AHEAD_PROTECT = 2L
         // pre-nt3 (re-derived review fix): a conforming DataSource blocks
         // rather than returning 0 for a positive-length read; tolerate a few
         // zero-progress reads, then fail the chunk instead of spinning forever.
@@ -145,7 +140,11 @@ internal class ParallelRangeDataSource(
             val requestUri: Uri,
             val requestHeaders: Map<String, String>,
             val chunkSize: Long,
-            val chunkCap: Int
+            val chunkCap: Int,
+            // nt2: size of the live prefetch window (effectivePrefetchDepth).
+            // Chunks in reader+1..reader+prefetchWindow are imminent and are
+            // excluded from eviction so the reader never re-downloads them.
+            val prefetchWindow: Int
         ) {
             @Volatile var resolvedUri: Uri? = null
             @Volatile var totalLength: Long = -1L
@@ -244,7 +243,8 @@ internal class ParallelRangeDataSource(
             requestHeaders: Map<String, String>,
             chunkSz: Long,
             chunkCap: Int,
-            poolCap: Int
+            poolCap: Int,
+            prefetchWindow: Int
         ): ChunkSession {
             synchronized(sessionLock) {
                 val existing = currentChunkSession
@@ -259,7 +259,7 @@ internal class ParallelRangeDataSource(
                     }
                     teardownSessionLocked(existing, poolCap)
                 }
-                val created = ChunkSession(requestUri, requestHeaders, chunkSz, chunkCap)
+                val created = ChunkSession(requestUri, requestHeaders, chunkSz, chunkCap, prefetchWindow)
                 currentChunkSession = created
                 return created
             }
@@ -309,25 +309,29 @@ internal class ParallelRangeDataSource(
                     val eligible = session.futures.keys
                         .filter { it != protectIndex }
                         .filter { hardOver || now - (session.lastTouch[it] ?: 0L) >= EVICTION_TOUCH_GUARD_MS }
-                    // nt-followup (residual re-fetch fix): the near-ahead window
-                    // reader+1..reader+NEAR_AHEAD_PROTECT is about to be read within
-                    // seconds. nt54 protects behind-cursor chunks first, but its
-                    // fallback (evict the farthest-ahead) combined with the cap+2
-                    // hardOver path (which drops the 2 s guard) could still evict a
-                    // COMPLETED, not-yet-read leading-edge chunk during a fill burst,
-                    // which the reader then re-downloads in full. Measured 2026-07-16
-                    // (nt1): 38 such re-fetches, all adjacent-pair leading-edge
-                    // chunks. Excluding the near-ahead window from eviction closes it;
-                    // the pool still has headroom because the fan-out (effectivePrefetchDepth)
-                    // plus the current chunk stays within chunkCap (depth + 2..4).
+                    // nt2 (re-fetch fix, evidenced by evict-diag2 2026-07-17): the
+                    // ENTIRE in-flight prefetch window reader+1..reader+prefetchWindow
+                    // is about to be read within seconds, so it is excluded from
+                    // eviction. The prior code protected only reader+1..reader+2 and,
+                    // worse, its last-ditch fallback (eligible.maxOrNull, which ignores
+                    // the exclusion) could evict a protected chunk under the cap+2
+                    // hardOver path. Measured on that build: 190 re-fetches, all
+                    // reader+1..reader+4 - 94 breaches of the reader+1..reader+2 window
+                    // via the fallback, 96 from reader+3/+4 sitting outside it. Widening
+                    // the window to the full prefetch depth and dropping the breaching
+                    // fallback closes both: when only in-window chunks remain, bail (as
+                    // the soft-cap does) and let the pool sit transiently at cap+2 rather
+                    // than evict-then-refetch. Behind and beyond-window chunks stay
+                    // evictable (hardOver drops the touch guard for them), so the pool
+                    // stays bounded; beyond-window chunks (stale prefetch after a
+                    // backward seek) are the farthest-ahead evictable and go first.
                     val nearAheadFloor = if (readerIdx >= 0L) readerIdx else Long.MIN_VALUE
-                    val nearAheadCeil = if (readerIdx >= 0L) readerIdx + NEAR_AHEAD_PROTECT else Long.MIN_VALUE
+                    val nearAheadCeil = if (readerIdx >= 0L) readerIdx + session.prefetchWindow else Long.MIN_VALUE
                     val evictable = eligible.filter { it < nearAheadFloor || it > nearAheadCeil }
                     val victim = evictable
                         .filter { readerIdx >= 0L && it < readerIdx }
                         .minByOrNull { session.lastTouch[it] ?: 0L }
                         ?: evictable.maxOrNull()
-                        ?: eligible.maxOrNull()
                         ?: return
                     evictFuture(session, victim, poolCap)
                 }
@@ -495,7 +499,7 @@ internal class ParallelRangeDataSource(
         // re-opens, the failed futures are gone, and downloads retry against
         // the session's URI — with the full probe as the eventual fallback via
         // session teardown on TTL.
-        val attachedSession = obtainSession(dataSpec.uri, dataSpec.httpRequestHeaders, chunkSize, sessionChunkCap, maxPoolSize)
+        val attachedSession = obtainSession(dataSpec.uri, dataSpec.httpRequestHeaders, chunkSize, sessionChunkCap, maxPoolSize, effectivePrefetchDepth)
         session = attachedSession
         val warmLength = attachedSession.totalLength
         if (warmLength > 0L && dataSpec.position in 0 until warmLength) {
