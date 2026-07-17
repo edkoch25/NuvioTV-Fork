@@ -702,6 +702,22 @@ fun AdvancedSettingsContent(
             }
         }
 
+        item(key = "assessment_header") {
+            Text(
+                text = stringResource(R.string.assessment_section_header),
+                style = MaterialTheme.typography.titleSmall,
+                color = NuvioTheme.colors.TextTertiary,
+                modifier = Modifier.padding(top = NuvioTheme.spacing.xs)
+            )
+        }
+
+        item(key = "device_assessment") {
+            DeviceAssessmentCard(
+                playerSettings = dvPlayerSettings,
+                diagnostics = dvDiagnostics
+            )
+        }
+
         item(key = "cache_header") {
             Text(
                 text = stringResource(R.string.advanced_section_cache),

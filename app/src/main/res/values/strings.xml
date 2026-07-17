@@ -2975,4 +2975,33 @@
     <string name="assessment_profile_stall_title">Stall-resistant</string>
     <string name="assessment_profile_stall_sub">Deepest cushion; slowest to start</string>
 
+
+    <!-- Device Settings Assessment (Stage 1, review-only): UI strings -->
+    <string name="assessment_section_header">Device assessment</string>
+    <string name="assessment_run_title">Run device assessment</string>
+    <string name="assessment_run_running">Assessing\u2026</string>
+    <string name="assessment_run_subtitle">Measures your link against the last-played stream and checks this device\'s facts \u2014 shows recommendations only, changes nothing</string>
+    <string name="assessment_no_stream">No last-played stream \u2014 device rows will still run; play something first for the measured rows</string>
+    <string name="assessment_header_title">Device facts</string>
+    <string name="assessment_header_device">Device</string>
+    <string name="assessment_header_device_value">%1$s \u2014 safe %2$d MB / warning %3$d MB</string>
+    <string name="assessment_header_display">Display</string>
+    <string name="assessment_header_display_unknown">Not inspectable from this screen</string>
+    <string name="assessment_header_stream">Last stream</string>
+    <string name="assessment_header_stream_none">None</string>
+    <string name="assessment_header_bitrate">Bitrate</string>
+    <string name="assessment_header_hdr">HDR</string>
+    <string name="assessment_section_measured">Measured \u2014 tested on your stream</string>
+    <string name="assessment_section_calculated">Calculated for this device</string>
+    <string name="assessment_section_priority">Choose your priority \u2014 buffer profiles</string>
+    <string name="assessment_section_verify">Detected \u2014 verify yourself</string>
+    <string name="assessment_measured_skipped">No last-played stream \u2014 sweep skipped. Play something, then rerun for measured rows.</string>
+    <string name="assessment_currently">Currently: %1$s</string>
+    <string name="assessment_profile_values">start %1$d s \u00b7 rebuffer %2$d s \u00b7 min %3$d s</string>
+    <string name="assessment_profile_suggested_stable">Suggested \u2014 your link held steady during the sweep</string>
+    <string name="assessment_profile_suggested_variable">Suggested \u2014 your link wobbled during the sweep</string>
+    <string name="assessment_stability_line">Link stability during the sweep: CoV %1$s (lower is steadier). [inferred] thresholds; profiles are your call.</string>
+    <string name="assessment_error_prefix">Sweep error: %1$s \u2014 the calculated rows below are still valid</string>
+    <string name="assessment_footer">Review-only: nothing has been changed. Measured rows were tested on this device; calculated rows are derived from queryable facts; the apply step arrives in a later build.</string>
+
 </resources>
