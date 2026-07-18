@@ -6,6 +6,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import com.nuvio.tv.domain.model.Subtitle
+import com.nuvio.tv.data.local.InternalPlayerEngine
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -82,6 +83,69 @@ internal fun PlayerRuntimeController.selectAudioTrack(trackIndex: Int) {
             }
         }
     }
+}
+
+/**
+ * Tunnelled-playback guard for mid-stream audio track switches.
+ *
+ * Under tunneled playback, video frames are released by the audio HW clock via
+ * the platform AV sync hub. The in-place switch path (TrackSelectionOverride +
+ * nudge seek) destroys and recreates the AudioTrack inside a live tunnel; on
+ * some vendor HALs (community Prism+/MediaTek report, July 2026) the tunnel
+ * comes back with latched bad frame pacing — persistent judder plus a sluggish
+ * compositor until the player is fully rebuilt. The user-discovered workaround
+ * (stop, then resume) is a full rebuild; this mirrors it in-app using the same
+ * release/initializePlayer-at-position sequence as the 5001 PCM-fallback
+ * recovery.
+ *
+ * MUST be called AFTER rememberAudioSelection(): it seeds the engine-switch
+ * carry-over channel from rememberedTrackPreference (target audio + carried
+ * subtitle preference). The restore path consumes that channel with top
+ * priority, and its presence also suppresses the task-3.9 lossless default
+ * from re-running over the user's pick on the rebuilt player.
+ *
+ * Returns true when the rebuild path was taken (caller must skip the in-place
+ * switch); false to fall through to the existing in-place path. Tunneling off
+ * (the default) always returns false — behaviour is byte-identical to today.
+ */
+internal fun PlayerRuntimeController.maybeRebuildForTunneledAudioSwitch(trackIndex: Int): Boolean {
+    if (isUsingMpvEngine()) return false
+    if (!_uiState.value.tunnelingEnabled) return false
+    val player = _exoPlayer ?: return false
+    val track = _uiState.value.audioTracks.getOrNull(trackIndex) ?: return false
+    if (track.isSelected) return false
+    // Seeded by rememberAudioSelection() immediately before this call; if the
+    // preference is somehow absent, fall back to the in-place path rather than
+    // rebuild without a restorable pick.
+    val preference = rememberedTrackPreference?.takeIf { it.audio != null } ?: return false
+    pendingEngineSwitchTrackPreference = PlayerRuntimeController.PendingEngineSwitchTrackPreference(
+        streamUrl = currentStreamUrl,
+        preference = preference,
+        sourceEngine = InternalPlayerEngine.EXOPLAYER
+    )
+    val savedPosition = player.currentPosition.takeIf { it > 0L } ?: 0L
+    val paused = userPausedManually
+    logSwitchTrace(
+        stage = "tunneled-audio-switch-rebuild",
+        message = "trackIndex=$trackIndex position=$savedPosition paused=$paused " +
+            "track=${track.language}/${track.name}/${track.trackId}"
+    )
+    Log.d(
+        PlayerRuntimeController.TAG,
+        "Tunneled audio switch: rebuilding player at ${savedPosition}ms for track index=$trackIndex name=${track.name}"
+    )
+    // Plain scope.launch (NOT errorRetryJob): releasePlayer() cancels
+    // errorRetryJob internally, and this job must not cancel itself mid-run.
+    // Both callees are regular (non-suspend) functions, so once launched the
+    // sequence runs to completion.
+    scope.launch {
+        releasePlayer(flushPlaybackState = false)
+        if (savedPosition > 0L) {
+            _uiState.update { it.copy(pendingSeekPosition = savedPosition) }
+        }
+        initializePlayer(currentStreamUrl, currentHeaders, startPaused = paused)
+    }
+    return true
 }
 
 internal fun PlayerRuntimeController.rememberAudioSelection(trackIndex: Int) {

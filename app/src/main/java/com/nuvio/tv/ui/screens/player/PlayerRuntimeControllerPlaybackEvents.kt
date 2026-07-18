@@ -1051,7 +1051,12 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
                 message = "index=${event.index}"
             )
             rememberAudioSelection(event.index)
-            selectAudioTrack(event.index)
+            // Tunnelled playback: in-place AudioTrack recreation inside a live
+            // tunnel latches bad frame pacing on some vendor HALs (Prism+
+            // report). Rebuild at position instead; no-op when tunneling off.
+            if (!maybeRebuildForTunneledAudioSwitch(event.index)) {
+                selectAudioTrack(event.index)
+            }
             _uiState.update {
                 it.copy(
                     showAudioOverlay = false,
