@@ -182,7 +182,7 @@ object StreamSweepEngine {
             coefficientOfVariation(pass.subWindowMbps)?.let { passStabilityCovs += it }
             onPassResult(label, mbps)
             if (mbps > 0) measured += MeasuredPass(connections, chunkMb, mbps)
-            if (targetMbps != null && mbps >= targetMbps && passesSinceSufficient < 0) {
+            if (targetMbps != null && mbps >= targetMbps * SUFFICIENCY_TOLERANCE && passesSinceSufficient < 0) {
                 passesSinceSufficient = 0
             } else if (passesSinceSufficient >= 0) {
                 passesSinceSufficient += 1
@@ -223,7 +223,7 @@ object StreamSweepEngine {
                 )
             }
 
-            if (targetMbps != null && baseline >= targetMbps) {
+            if (targetMbps != null && baseline >= targetMbps * SUFFICIENCY_TOLERANCE) {
                 return SweepOutcome(
                     verdictKind = VerdictKind.LEAVE_PARALLEL_OFF,
                     verdictText = context.getString(
@@ -357,7 +357,7 @@ object StreamSweepEngine {
             // fit the safe budget, fall back to the cheapest sufficient one regardless
             // (a working recommendation beats none on a very memory-constrained device).
             if (targetMbps != null) {
-                val sufficient = measured.filter { it.mbps >= targetMbps }
+                val sufficient = measured.filter { it.mbps >= targetMbps * SUFFICIENCY_TOLERANCE }
                 val sufficientAndSafe = sufficient.filter {
                     overheadMb(it.connections, it.chunkMb) <= safeLimitMb
                 }
@@ -435,7 +435,7 @@ object StreamSweepEngine {
                             connections = chosen.connections,
                             chunkMb = chosen.chunkMb,
                             mbps = chosen.mbps,
-                            meetsTarget = chosen.mbps >= targetMbps,
+                            meetsTarget = chosen.mbps >= targetMbps * SUFFICIENCY_TOLERANCE,
                             fitsSafeBudget = overheadMb(chosen.connections, chosen.chunkMb) <= safeLimitMb,
                             bufferTrade = trade
                         ),
@@ -566,7 +566,16 @@ object StreamSweepEngine {
     // 2x config on this device's safe budget, tank depth beats refill rate.
     // On large budgets the gain never reaches the gate and 2x keeps winning.
     private const val TRADE_BAR_OF_BITRATE = 1.5
-    private const val TRADE_MIN_GAIN_S = 8
+    private const val TRADE_MIN_GAIN_S = 5
+
+    // Sufficiency is judged with a near-miss tolerance: single-sample passes
+    // on links measuring CoV ~0.4 make a 1-2% shortfall against the 2x bar
+    // indistinguishable from passing, and a hard cliff turned one such miss
+    // (189.8 vs 192.0) into a 64 MB-costlier recommendation. [inferred]
+    // initial value, like the trade constants above; TRADE_MIN_GAIN_S was
+    // lowered 8 -> 5 on two runs of field data (6 s gain wrongly blocked,
+    // 2 s gain correctly blocked).
+    private const val SUFFICIENCY_TOLERANCE = 0.95
 
     private fun coefficientOfVariation(samples: List<Double>): Double? {
         if (samples.size < STABILITY_MIN_WINDOWS) return null
