@@ -519,7 +519,8 @@ private fun AssessmentItemRow(item: AssessmentItem) {
                     color = NuvioTheme.colors.TextTertiary
                 )
             } else if (!item.changeNeeded && !item.currentValue.isNullOrBlank() &&
-                item.recommendedValue != stringResource(R.string.assessment_value_no_change)
+                item.recommendedValue != stringResource(R.string.assessment_value_your_call) &&
+                item.recommendedValue != stringResource(R.string.assessment_value_leave_as_is)
             ) {
                 // Endorsement marker: the row asserts a concrete value and the
                 // device already holds it. "No change" stays reserved for rows

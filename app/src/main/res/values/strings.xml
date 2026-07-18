@@ -2906,7 +2906,8 @@
     <!-- Device Settings Assessment (Stage 1, review-only): engine strings -->
     <string name="assessment_value_on">On</string>
     <string name="assessment_value_off">Off</string>
-    <string name="assessment_value_no_change">No change</string>
+    <string name="assessment_value_your_call">Your call</string>
+    <string name="assessment_value_leave_as_is">Leave as is</string>
     <string name="assessment_value_auto">Auto</string>
     <string name="assessment_value_on_auto">On \u00b7 Auto (\u2248%1$s now)</string>
     <string name="assessment_value_seconds">%1$d s</string>

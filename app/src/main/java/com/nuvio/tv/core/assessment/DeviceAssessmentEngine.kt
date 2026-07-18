@@ -231,15 +231,18 @@ object DeviceAssessmentEngine {
         // none of it takes effect, so say so before recommending any of it.
         val engineOk = settings.internalPlayerEngine == InternalPlayerEngine.EXOPLAYER ||
             settings.internalPlayerEngine == InternalPlayerEngine.AUTO
+        val engineLabel = when (settings.internalPlayerEngine) {
+            InternalPlayerEngine.EXOPLAYER -> s(R.string.assessment_value_engine_exo)
+            InternalPlayerEngine.AUTO -> s(R.string.assessment_value_engine_auto)
+            InternalPlayerEngine.MVP_PLAYER -> s(R.string.assessment_value_engine_mvp)
+        }
         items += AssessmentItem(
             key = "engine",
             title = s(R.string.assessment_item_engine),
-            currentValue = when (settings.internalPlayerEngine) {
-                InternalPlayerEngine.EXOPLAYER -> s(R.string.assessment_value_engine_exo)
-                InternalPlayerEngine.AUTO -> s(R.string.assessment_value_engine_auto)
-                InternalPlayerEngine.MVP_PLAYER -> s(R.string.assessment_value_engine_mvp)
-            },
-            recommendedValue = if (engineOk) s(R.string.assessment_value_no_change)
+            currentValue = engineLabel,
+            // When the engine is right, the row ENDORSES the current value
+            // (green tick) instead of a vague no-change.
+            recommendedValue = if (engineOk) engineLabel
             else s(R.string.assessment_value_engine_exo),
             grounds = if (engineOk) s(R.string.assessment_grounds_engine_ok)
             else s(R.string.assessment_grounds_engine_switch),
@@ -491,7 +494,7 @@ object DeviceAssessmentEngine {
                 key = "force_ac3",
                 title = s(R.string.assessment_item_ac3),
                 currentValue = if (settings.forceOpticalPassthrough) on else off,
-                recommendedValue = s(R.string.assessment_value_no_change),
+                recommendedValue = s(R.string.assessment_value_leave_as_is),
                 grounds = s(R.string.assessment_grounds_ac3_unknown),
                 tier = AssessmentTier.VERIFY,
                 changeNeeded = false
@@ -522,7 +525,7 @@ object DeviceAssessmentEngine {
                         } else {
                             s(R.string.assessment_value_afr_start)
                         },
-                        recommendedValue = s(R.string.assessment_value_no_change),
+                        recommendedValue = s(R.string.assessment_value_your_call),
                         grounds = s(R.string.assessment_grounds_afr_already),
                         tier = AssessmentTier.CALCULATED,
                         changeNeeded = false
@@ -547,7 +550,11 @@ object DeviceAssessmentEngine {
                 key = "res_match",
                 title = s(R.string.assessment_item_res_match),
                 currentValue = if (settings.resolutionMatchingEnabled) on else off,
-                recommendedValue = s(R.string.assessment_value_no_change),
+                recommendedValue = if (display.supportsResolutionSwitching) {
+                    s(R.string.assessment_value_your_call)
+                } else {
+                    s(R.string.assessment_value_leave_as_is)
+                },
                 grounds = if (display.supportsResolutionSwitching) {
                     s(R.string.assessment_grounds_res_choice, resolutionsLabel(display))
                 } else {
@@ -561,7 +568,7 @@ object DeviceAssessmentEngine {
                 key = "afr",
                 title = s(R.string.assessment_item_afr),
                 currentValue = afrModeLabel(context, settings.frameRateMatchingMode),
-                recommendedValue = s(R.string.assessment_value_no_change),
+                recommendedValue = s(R.string.assessment_value_leave_as_is),
                 grounds = s(R.string.assessment_grounds_display_unknown),
                 tier = AssessmentTier.VERIFY,
                 changeNeeded = false
@@ -570,7 +577,7 @@ object DeviceAssessmentEngine {
                 key = "res_match",
                 title = s(R.string.assessment_item_res_match),
                 currentValue = if (settings.resolutionMatchingEnabled) on else off,
-                recommendedValue = s(R.string.assessment_value_no_change),
+                recommendedValue = s(R.string.assessment_value_leave_as_is),
                 grounds = s(R.string.assessment_grounds_display_unknown),
                 tier = AssessmentTier.VERIFY,
                 changeNeeded = false
