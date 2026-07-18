@@ -572,6 +572,7 @@ class PlayerSettingsDataStore @Inject constructor(
     private val backBufferDurationMsKey = intPreferencesKey("back_buffer_duration_ms")
     private val retainBackBufferFromKeyframeKey = booleanPreferencesKey("retain_back_buffer_from_keyframe")
     private val nuvioPerformanceModeEnabledKey = booleanPreferencesKey("nuvio_performance_mode_enabled")
+    private val assessmentRevertSnapshotKey = stringPreferencesKey("assessment_revert_snapshot")
 
     private val migrationLoadControlDefaultsAlignedDoneKey = booleanPreferencesKey("migration_load_control_defaults_aligned_done")
     private val migrationLoadControlDefaultsRetunedDoneKey = booleanPreferencesKey("migration_load_control_defaults_retuned_done")
@@ -1611,6 +1612,18 @@ class PlayerSettingsDataStore @Inject constructor(
         factory.get(pid, FEATURE).data.map { prefs ->
             (prefs[nuvioPerformanceModeEnabledKey] ?: PlayerSettings.DEFAULT_NUVIO_PERFORMANCE_MODE_ENABLED) &&
                     android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O
+        }
+    }
+
+    /** Per-profile JSON snapshot captured by the Device Assessment apply step. */
+    val assessmentRevertSnapshot: Flow<String?> = profileManager.activeProfileId.flatMapLatest { _ ->
+        store().data.map { prefs -> prefs[assessmentRevertSnapshotKey] }
+    }
+
+    suspend fun setAssessmentRevertSnapshot(json: String?) {
+        store().edit { prefs ->
+            if (json == null) prefs.remove(assessmentRevertSnapshotKey)
+            else prefs[assessmentRevertSnapshotKey] = json
         }
     }
 

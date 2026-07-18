@@ -462,13 +462,27 @@ object DeviceAssessmentEngine {
         // silently queryable, and on an HDMI chain this setting only turns
         // lossless passthrough into lossy AC-3.
         val audioRoute = AudioOutputRouteDetector.detect(context)
+        val audioRouteType = audioRoute?.key
+            ?.removePrefix("type:")?.substringBefore("|")
+            ?.let { raw ->
+                when (raw) {
+                    "hdmi" -> "HDMI"
+                    "hdmi_arc" -> "HDMI ARC"
+                    "hdmi_earc" -> "HDMI eARC"
+                    else -> raw
+                }
+            }
         if (audioRoute != null && audioRoute.key.startsWith("type:hdmi")) {
             items += AssessmentItem(
                 key = "force_ac3",
                 title = s(R.string.assessment_item_ac3),
                 currentValue = if (settings.forceOpticalPassthrough) on else off,
                 recommendedValue = off,
-                grounds = s(R.string.assessment_grounds_ac3_hdmi, audioRoute.label),
+                grounds = s(
+                    R.string.assessment_grounds_ac3_hdmi,
+                    audioRouteType ?: "HDMI",
+                    audioRoute.label
+                ),
                 tier = AssessmentTier.CALCULATED,
                 changeNeeded = settings.forceOpticalPassthrough
             )
@@ -643,7 +657,8 @@ object DeviceAssessmentEngine {
                 subtitle = s(subRes, i / 1000),
                 initialBufferMs = i,
                 rebufferMs = r,
-                minBufferMs = minMs
+                minBufferMs = minMs,
+                minCappedFromMs = m.takeIf { minMs < it }
             )
         }
         val profiles = listOf(
@@ -691,6 +706,79 @@ object DeviceAssessmentEngine {
             streamHdrType = diagnostics.videoHdrType
         )
 
+        // ── Machine-actionable plan: mirrors the CALCULATED/MEASURED rows
+        // above, null when no change or the row is VERIFY. The Internal
+        // Engine row stays advisory (switching players is not a knob).
+        val afrPlan = when {
+            !display.apiSupported -> null
+            display.supportsFrameRateSwitching ->
+                FrameRateMatchingMode.START_STOP.takeIf {
+                    settings.frameRateMatchingMode == FrameRateMatchingMode.OFF
+                }
+            else -> FrameRateMatchingMode.OFF.takeIf {
+                settings.frameRateMatchingMode != FrameRateMatchingMode.OFF
+            }
+        }
+        val resPlan = when {
+            !display.apiSupported -> null
+            display.supportsResolutionSwitching -> true.takeIf { !settings.resolutionMatchingEnabled }
+            else -> false.takeIf { settings.resolutionMatchingEnabled }
+        }
+        val plan = AssessmentApplyPlan(
+            nuvioPerformanceModeEnabled = perfModeSupported.takeIf {
+                settings.nuvioPerformanceModeEnabled != perfModeSupported
+            },
+            bufferEngineEnabled = true.takeIf { !settings.bufferEngineEnabled },
+            parallelNetworkEnabled = true.takeIf { !settings.parallelNetworkEnabled },
+            bufferBudgetManaged = false.takeIf { settings.bufferBudgetManaged },
+            allowLargeTargetBuffer = allowLargeNeeded.takeIf {
+                settings.allowLargeTargetBuffer != allowLargeNeeded
+            },
+            targetBufferSizeMb = recTargetMb.takeIf {
+                settings.bufferSettings.targetBufferSizeMb != recTargetMb
+            },
+            maxBufferMs = (recMaxS * 1000).takeIf {
+                settings.bufferSettings.maxBufferMs / 1000 != recMaxS
+            },
+            useParallelConnections = when {
+                sweep == null || sweep.errorText != null -> null
+                sweep.verdictKind == StreamSweepEngine.VerdictKind.LEAVE_PARALLEL_OFF ->
+                    false.takeIf { settings.useParallelConnections }
+                rec != null -> true.takeIf { !settings.useParallelConnections }
+                else -> null
+            },
+            parallelConnectionCount = rec?.connections?.takeIf {
+                sweep?.errorText == null && settings.parallelConnectionCount != it
+            },
+            parallelChunkSizeKb = rec?.let { it.chunkMb * 1024 }?.takeIf {
+                sweep?.errorText == null && settings.parallelChunkSizeKb != it
+            },
+            enableHttp2 = true.takeIf { !settings.enableHttp2 },
+            vodCacheEnabled = if (autoBytes > 0L) {
+                true.takeIf { !settings.vodCacheEnabled }
+            } else {
+                false.takeIf { settings.vodCacheEnabled }
+            },
+            vodCacheSizeMode = VodCacheSizeMode.AUTO.takeIf {
+                autoBytes > 0L && settings.vodCacheSizeMode != VodCacheSizeMode.AUTO
+            },
+            frameRateMatchingMode = afrPlan,
+            resolutionMatchingEnabled = resPlan,
+            dv7HandlingMode = Dv7HandlingMode.AUTO.takeIf {
+                policy.hdrCapsKnown && settings.dv7HandlingMode != Dv7HandlingMode.AUTO
+            },
+            dv5ToDv81Enabled = dv5RecommendOn.takeIf {
+                policy.hdrCapsKnown && settings.dv5ToDv81Enabled != dv5RecommendOn
+            },
+            stripHdr10PlusSei = stripRecommendOn.takeIf {
+                policy.hdrCapsKnown && settings.stripHdr10PlusSei != stripRecommendOn
+            },
+            forceOpticalPassthrough = false.takeIf {
+                audioRoute != null && audioRoute.key.startsWith("type:hdmi") &&
+                    settings.forceOpticalPassthrough
+            }
+        )
+
         return AssessmentResult(
             timestampMs = now,
             header = header,
@@ -700,6 +788,8 @@ object DeviceAssessmentEngine {
             profiles = profiles,
             suggestedProfile = suggestedProfile,
             stabilityCoV = sweep?.stabilityCoV,
+            stabilityPassCount = sweep?.stabilityPassCount ?: 0,
+            applyPlan = plan,
             errorText = sweep?.errorText
         )
     }

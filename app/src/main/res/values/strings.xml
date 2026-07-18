@@ -3000,7 +3000,7 @@
     <string name="assessment_profile_values">start %1$d s \u00b7 rebuffer %2$d s \u00b7 min %3$d s</string>
     <string name="assessment_profile_suggested_stable">Suggested \u2014 your link held steady during the sweep</string>
     <string name="assessment_profile_suggested_variable">Suggested \u2014 your link wobbled during the sweep</string>
-    <string name="assessment_stability_line">Link stability during the sweep: CoV %1$s (lower is steadier). [inferred] thresholds; profiles are your call.</string>
+    <string name="assessment_stability_line">Link stability during the sweep: CoV %1$s across %2$d qualifying passes (lower is steadier). [inferred] threshold; profiles are your call.</string>
     <string name="assessment_error_prefix">Sweep error: %1$s \u2014 the calculated rows below are still valid</string>
     <string name="assessment_footer">Review-only: nothing has been changed. Measured rows were tested on this device; calculated rows are derived from queryable facts; the apply step arrives in a later build.</string>
 
@@ -3018,7 +3018,19 @@
     <string name="assessment_grounds_engine_ok">Every assessed row below applies to the ExoPlayer path</string>
     <string name="assessment_grounds_engine_switch">Every assessed row below applies to the ExoPlayer path \u2014 under the MVP player these settings don\'t take effect</string>
     <string name="assessment_item_ac3">Force AC-3 Transcoding (Optical/SPDIF)</string>
-    <string name="assessment_grounds_ac3_hdmi">Audio route is %1$s \u2014 on an HDMI chain this setting only turns lossless passthrough into lossy AC-3</string>
+    <string name="assessment_grounds_ac3_hdmi">Audio route is %1$s (%2$s) \u2014 on an HDMI chain this setting only turns lossless passthrough into lossy AC-3</string>
     <string name="assessment_grounds_ac3_unknown">Couldn\'t confirm an optical route from here \u2014 this setting only belongs on Optical/SPDIF outputs</string>
+
+
+    <!-- Device Settings Assessment: Stage 2 apply/revert + polish -->
+    <string name="assessment_apply_title">Apply recommended settings</string>
+    <string name="assessment_apply_arm_sub">Writes the Measured and Calculated rows plus the selected profile \u2014 Verify rows are never touched. A revert snapshot is kept.</string>
+    <string name="assessment_apply_confirm_sub">Press again to confirm \u2014 about %1$d settings will be written</string>
+    <string name="assessment_apply_applying">Applying\u2026</string>
+    <string name="assessment_apply_done_sub">Applied \u2014 %1$d settings written \u00b7 re-run the assessment to refresh current values</string>
+    <string name="assessment_revert_title">Revert to pre-assessment settings</string>
+    <string name="assessment_revert_sub">Restores every value captured when you last applied, then clears the snapshot</string>
+    <string name="assessment_stability_insufficient">Link stability: not enough qualifying samples this run (%1$d passes with \u2265 4 sub-windows) \u2014 no profile suggestion</string>
+    <string name="assessment_profile_values_capped">start %1$d s \u00b7 rebuffer %2$d s \u00b7 min %3$d s \u2014 memory-capped from %4$d s</string>
 
 </resources>

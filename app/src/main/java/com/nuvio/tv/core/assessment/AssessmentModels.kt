@@ -1,5 +1,8 @@
 package com.nuvio.tv.core.assessment
 
+import com.nuvio.tv.data.local.Dv7HandlingMode
+import com.nuvio.tv.data.local.FrameRateMatchingMode
+import com.nuvio.tv.data.local.VodCacheSizeMode
 import com.nuvio.tv.ui.screens.settings.MemoryUsageStatus
 
 /**
@@ -43,7 +46,9 @@ data class IntentProfileOption(
     val subtitle: String,
     val initialBufferMs: Int,
     val rebufferMs: Int,
-    val minBufferMs: Int
+    val minBufferMs: Int,
+    /** Set when the byte-derived ceiling capped this profile's min buffer. */
+    val minCappedFromMs: Int? = null
 )
 
 data class AssessmentHeaderFacts(
@@ -69,5 +74,45 @@ data class AssessmentResult(
     /** Stability-derived suggestion among the profiles; null = no signal. */
     val suggestedProfile: ProfileKind?,
     val stabilityCoV: Double?,
+    val stabilityPassCount: Int,
+    /** Machine-actionable side of the items: null field = never touched. */
+    val applyPlan: AssessmentApplyPlan,
     val errorText: String?
 )
+
+/**
+ * Only MEASURED/CALCULATED rows with changeNeeded populate fields; VERIFY
+ * rows and no-change rows stay null by construction. The Internal Engine
+ * row is deliberately advisory-only and never enters the plan.
+ */
+data class AssessmentApplyPlan(
+    val nuvioPerformanceModeEnabled: Boolean? = null,
+    val bufferEngineEnabled: Boolean? = null,
+    val parallelNetworkEnabled: Boolean? = null,
+    val bufferBudgetManaged: Boolean? = null,
+    val allowLargeTargetBuffer: Boolean? = null,
+    val targetBufferSizeMb: Int? = null,
+    val maxBufferMs: Int? = null,
+    val useParallelConnections: Boolean? = null,
+    val parallelConnectionCount: Int? = null,
+    val parallelChunkSizeKb: Int? = null,
+    val enableHttp2: Boolean? = null,
+    val vodCacheEnabled: Boolean? = null,
+    val vodCacheSizeMode: VodCacheSizeMode? = null,
+    val frameRateMatchingMode: FrameRateMatchingMode? = null,
+    val resolutionMatchingEnabled: Boolean? = null,
+    val dv7HandlingMode: Dv7HandlingMode? = null,
+    val dv5ToDv81Enabled: Boolean? = null,
+    val stripHdr10PlusSei: Boolean? = null,
+    val forceOpticalPassthrough: Boolean? = null
+) {
+    val touchedCount: Int
+        get() = listOfNotNull(
+            nuvioPerformanceModeEnabled, bufferEngineEnabled, parallelNetworkEnabled,
+            bufferBudgetManaged, allowLargeTargetBuffer, targetBufferSizeMb,
+            maxBufferMs, useParallelConnections, parallelConnectionCount,
+            parallelChunkSizeKb, enableHttp2, vodCacheEnabled, vodCacheSizeMode,
+            frameRateMatchingMode, resolutionMatchingEnabled, dv7HandlingMode,
+            dv5ToDv81Enabled, stripHdr10PlusSei, forceOpticalPassthrough
+        ).size
+}

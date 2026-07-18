@@ -728,6 +728,12 @@ fun AdvancedSettingsContent(
                     settings = dvPlayerSettings,
                     diagnostics = dvDiagnostics
                 )
+            },
+            onApply = {
+                runApplyAssessment(scope = scope, context = context, state = assessmentState)
+            },
+            onRevert = {
+                runRevertAssessment(scope = scope, context = context, state = assessmentState)
             }
         )
 

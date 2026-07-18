@@ -24,6 +24,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Border
@@ -35,6 +36,8 @@ import com.nuvio.tv.R
 import com.nuvio.tv.core.assessment.AssessmentItem
 import com.nuvio.tv.core.assessment.AssessmentResult
 import com.nuvio.tv.core.assessment.AssessmentTier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nuvio.tv.core.assessment.DeviceAssessmentApplier
 import com.nuvio.tv.core.assessment.DeviceAssessmentEngine
 import com.nuvio.tv.core.assessment.ProfileKind
 import com.nuvio.tv.core.player.LastPlaybackDiagnostics
@@ -55,12 +58,27 @@ import kotlinx.coroutines.launch
  * screen-level state survives recycling; the run coroutine launches on the
  * screen scope so a mid-run scroll can't cancel the sweep.
  */
+@dagger.hilt.EntryPoint
+@dagger.hilt.InstallIn(dagger.hilt.components.SingletonComponent::class)
+internal interface AssessmentDataStoreEntryPoint {
+    fun playerSettingsDataStore(): com.nuvio.tv.data.local.PlayerSettingsDataStore
+}
+
+internal fun assessmentDataStore(context: Context): com.nuvio.tv.data.local.PlayerSettingsDataStore =
+    dagger.hilt.android.EntryPointAccessors.fromApplication(
+        context.applicationContext,
+        AssessmentDataStoreEntryPoint::class.java
+    ).playerSettingsDataStore()
+
 internal class DeviceAssessmentState {
     var running by mutableStateOf(false)
     var sweepState by mutableStateOf("")
     var passRows by mutableStateOf(listOf<Pair<String, Double?>>())
     var result by mutableStateOf<AssessmentResult?>(null)
     var selectedProfile by mutableStateOf<ProfileKind?>(null)
+    var applyArmed by mutableStateOf(false)
+    var applying by mutableStateOf(false)
+    var appliedCount by mutableStateOf<Int?>(null)
 }
 
 @Composable
@@ -81,6 +99,8 @@ internal fun runDeviceAssessment(
         state.passRows = emptyList()
         state.sweepState = ""
         state.result = null
+        state.applyArmed = false
+        state.appliedCount = null
         val outcome = DeviceAssessmentEngine.run(
             context = context,
             activity = context.findActivity(),
@@ -100,11 +120,49 @@ internal fun runDeviceAssessment(
     }
 }
 
+internal fun runApplyAssessment(
+    scope: CoroutineScope,
+    context: Context,
+    state: DeviceAssessmentState
+) {
+    val res = state.result ?: return
+    if (state.applying) return
+    scope.launch {
+        state.applying = true
+        val profile = res.profiles.firstOrNull { it.kind == state.selectedProfile }
+        val outcome = DeviceAssessmentApplier.apply(
+            dataStore = assessmentDataStore(context),
+            plan = res.applyPlan,
+            profile = profile
+        )
+        state.appliedCount = outcome.writtenCount
+        state.applyArmed = false
+        state.applying = false
+    }
+}
+
+internal fun runRevertAssessment(
+    scope: CoroutineScope,
+    context: Context,
+    state: DeviceAssessmentState
+) {
+    if (state.applying) return
+    scope.launch {
+        state.applying = true
+        DeviceAssessmentApplier.revert(assessmentDataStore(context))
+        state.appliedCount = null
+        state.applyArmed = false
+        state.applying = false
+    }
+}
+
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 internal fun LazyListScope.deviceAssessmentItems(
     state: DeviceAssessmentState,
     diagnostics: LastPlaybackDiagnostics,
-    onRun: () -> Unit
+    onRun: () -> Unit,
+    onApply: () -> Unit,
+    onRevert: () -> Unit
 ) {
     item(key = "assessment_run") {
         val hasStream = !diagnostics.streamUrl.isNullOrBlank()
@@ -113,13 +171,61 @@ internal fun LazyListScope.deviceAssessmentItems(
                 title = stringResource(
                     if (state.running) R.string.assessment_run_running else R.string.assessment_run_title
                 ),
-                subtitle = stringResource(
-                    if (hasStream) R.string.assessment_run_subtitle else R.string.assessment_no_stream
-                ),
+                subtitle = if (state.running) {
+                    null
+                } else {
+                    stringResource(
+                        if (hasStream) R.string.assessment_run_subtitle else R.string.assessment_no_stream
+                    )
+                },
                 value = if (state.running && state.sweepState.isNotBlank()) state.sweepState else null,
                 enabled = !state.running,
                 onClick = onRun
             )
+        }
+    }
+
+    item(key = "assessment_apply") {
+        val context = LocalContext.current
+        val dataStore = remember { assessmentDataStore(context) }
+        val snapshotJson by dataStore.assessmentRevertSnapshot.collectAsStateWithLifecycle(
+            initialValue = null
+        )
+        val res = state.result
+        if (res != null || snapshotJson != null) {
+            SettingsGroupCard(modifier = Modifier.fillMaxWidth()) {
+                if (res != null) {
+                    val previewCount = res.applyPlan.touchedCount +
+                        (if (state.selectedProfile != null) 3 else 0)
+                    SettingsActionRow(
+                        title = stringResource(
+                            if (state.applying) R.string.assessment_apply_applying
+                            else R.string.assessment_apply_title
+                        ),
+                        subtitle = when {
+                            state.appliedCount != null -> stringResource(
+                                R.string.assessment_apply_done_sub, state.appliedCount ?: 0
+                            )
+                            state.applyArmed -> stringResource(
+                                R.string.assessment_apply_confirm_sub, previewCount
+                            )
+                            else -> stringResource(R.string.assessment_apply_arm_sub)
+                        },
+                        enabled = !state.applying && previewCount > 0,
+                        onClick = {
+                            if (state.applyArmed) onApply() else state.applyArmed = true
+                        }
+                    )
+                }
+                if (snapshotJson != null) {
+                    SettingsActionRow(
+                        title = stringResource(R.string.assessment_revert_title),
+                        subtitle = stringResource(R.string.assessment_revert_sub),
+                        enabled = !state.applying,
+                        onClick = onRevert
+                    )
+                }
+            }
         }
     }
 
@@ -183,7 +289,8 @@ internal fun LazyListScope.deviceAssessmentItems(
                 AssessmentFactRow(
                     label = stringResource(R.string.assessment_header_stream),
                     value = res.header.streamLabel
-                        ?: stringResource(R.string.assessment_header_stream_none)
+                        ?: stringResource(R.string.assessment_header_stream_none),
+                    valueMaxLines = 2
                 )
                 res.header.streamBitrateMbps?.let { mbps ->
                     AssessmentFactRow(
@@ -249,12 +356,22 @@ internal fun LazyListScope.deviceAssessmentItems(
     item(key = "assessment_priority") {
         SettingsGroupCard(modifier = Modifier.fillMaxWidth()) {
             res.profiles.forEach { profile ->
-                val values = stringResource(
-                    R.string.assessment_profile_values,
-                    profile.initialBufferMs / 1000,
-                    profile.rebufferMs / 1000,
-                    profile.minBufferMs / 1000
-                )
+                val values = if (profile.minCappedFromMs != null) {
+                    stringResource(
+                        R.string.assessment_profile_values_capped,
+                        profile.initialBufferMs / 1000,
+                        profile.rebufferMs / 1000,
+                        profile.minBufferMs / 1000,
+                        profile.minCappedFromMs / 1000
+                    )
+                } else {
+                    stringResource(
+                        R.string.assessment_profile_values,
+                        profile.initialBufferMs / 1000,
+                        profile.rebufferMs / 1000,
+                        profile.minBufferMs / 1000
+                    )
+                }
                 val suggested = res.suggestedProfile == profile.kind
                 val suggestion = if (suggested) {
                     stringResource(
@@ -275,12 +392,21 @@ internal fun LazyListScope.deviceAssessmentItems(
                     onToggle = { state.selectedProfile = profile.kind }
                 )
             }
-            res.stabilityCoV?.let { cov ->
+            run {
+                val cov = res.stabilityCoV
                 Text(
-                    text = stringResource(
-                        R.string.assessment_stability_line,
-                        "%.2f".format(cov)
-                    ),
+                    text = if (cov != null) {
+                        stringResource(
+                            R.string.assessment_stability_line,
+                            "%.2f".format(cov),
+                            res.stabilityPassCount
+                        )
+                    } else {
+                        stringResource(
+                            R.string.assessment_stability_insufficient,
+                            res.stabilityPassCount
+                        )
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = NuvioTheme.colors.TextSecondary.copy(alpha = 0.6f),
                     modifier = Modifier.padding(
@@ -394,10 +520,9 @@ private fun AssessmentItemRow(item: AssessmentItem) {
 }
 
 @Composable
-private fun AssessmentFactRow(label: String, value: String) {
+private fun AssessmentFactRow(label: String, value: String, valueMaxLines: Int = 1) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
@@ -410,8 +535,10 @@ private fun AssessmentFactRow(label: String, value: String) {
             text = value,
             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
             color = NuvioTheme.colors.TextPrimary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+            maxLines = valueMaxLines,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(1f)
         )
     }
 }
