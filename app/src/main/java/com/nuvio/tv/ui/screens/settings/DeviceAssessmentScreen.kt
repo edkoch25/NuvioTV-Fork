@@ -185,50 +185,6 @@ internal fun LazyListScope.deviceAssessmentItems(
         }
     }
 
-    item(key = "assessment_apply") {
-        val context = LocalContext.current
-        val dataStore = remember { assessmentDataStore(context) }
-        val snapshotJson by dataStore.assessmentRevertSnapshot.collectAsStateWithLifecycle(
-            initialValue = null
-        )
-        val res = state.result
-        if (res != null || snapshotJson != null) {
-            SettingsGroupCard(modifier = Modifier.fillMaxWidth()) {
-                if (res != null) {
-                    val previewCount = res.applyPlan.touchedCount +
-                        (if (state.selectedProfile != null) 3 else 0)
-                    SettingsActionRow(
-                        title = stringResource(
-                            if (state.applying) R.string.assessment_apply_applying
-                            else R.string.assessment_apply_title
-                        ),
-                        subtitle = when {
-                            state.appliedCount != null -> stringResource(
-                                R.string.assessment_apply_done_sub, state.appliedCount ?: 0
-                            )
-                            state.applyArmed -> stringResource(
-                                R.string.assessment_apply_confirm_sub, previewCount
-                            )
-                            else -> stringResource(R.string.assessment_apply_arm_sub)
-                        },
-                        enabled = !state.applying && previewCount > 0,
-                        onClick = {
-                            if (state.applyArmed) onApply() else state.applyArmed = true
-                        }
-                    )
-                }
-                if (snapshotJson != null) {
-                    SettingsActionRow(
-                        title = stringResource(R.string.assessment_revert_title),
-                        subtitle = stringResource(R.string.assessment_revert_sub),
-                        enabled = !state.applying,
-                        onClick = onRevert
-                    )
-                }
-            }
-        }
-    }
-
     if (state.passRows.isNotEmpty()) {
         item(key = "assessment_passes") {
             SettingsGroupCard(modifier = Modifier.fillMaxWidth()) {
@@ -268,8 +224,11 @@ internal fun LazyListScope.deviceAssessmentItems(
             modifier = Modifier.fillMaxWidth(),
             title = stringResource(R.string.assessment_header_title)
         ) {
+            // Focusable shell: the facts block was the one non-focusable card,
+            // so DPAD never brought it fully into view and it straddled the
+            // viewport between focus stops.
+            AssessmentFocusCard {
             Column(
-                modifier = Modifier.padding(NuvioTheme.spacing.xs),
                 verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.xs)
             ) {
                 AssessmentFactRow(
@@ -305,6 +264,7 @@ internal fun LazyListScope.deviceAssessmentItems(
                         value = hdrBits.joinToString(" \u00b7 ")
                     )
                 }
+            }
             }
         }
     }
@@ -373,21 +333,13 @@ internal fun LazyListScope.deviceAssessmentItems(
                     )
                 }
                 val suggested = res.suggestedProfile == profile.kind
-                val suggestion = if (suggested) {
-                    stringResource(
-                        if (profile.kind == ProfileKind.STALL_RESISTANT) {
-                            R.string.assessment_profile_suggested_variable
-                        } else {
-                            R.string.assessment_profile_suggested_stable
-                        }
-                    )
-                } else {
-                    null
-                }
                 SettingsToggleRow(
-                    title = profile.title,
-                    subtitle = listOfNotNull(profile.subtitle, values, suggestion)
-                        .joinToString("\n"),
+                    title = if (suggested) {
+                        profile.title + " \u00b7 " + stringResource(R.string.assessment_profile_suggested_tag)
+                    } else {
+                        profile.title
+                    },
+                    subtitle = profile.subtitle + "\n" + values,
                     checked = state.selectedProfile == profile.kind,
                     onToggle = { state.selectedProfile = profile.kind }
                 )
@@ -425,6 +377,50 @@ internal fun LazyListScope.deviceAssessmentItems(
         item(key = "assessment_verify_${verifyItem.key}") {
             SettingsGroupCard(modifier = Modifier.fillMaxWidth()) {
                 AssessmentItemRow(verifyItem)
+            }
+        }
+    }
+
+    item(key = "assessment_apply") {
+        val context = LocalContext.current
+        val dataStore = remember { assessmentDataStore(context) }
+        val snapshotJson by dataStore.assessmentRevertSnapshot.collectAsStateWithLifecycle(
+            initialValue = null
+        )
+        val res = state.result
+        if (res != null || snapshotJson != null) {
+            SettingsGroupCard(modifier = Modifier.fillMaxWidth()) {
+                if (res != null) {
+                    val previewCount = res.applyPlan.touchedCount +
+                        (if (state.selectedProfile != null) 3 else 0)
+                    SettingsActionRow(
+                        title = stringResource(
+                            if (state.applying) R.string.assessment_apply_applying
+                            else R.string.assessment_apply_title
+                        ),
+                        subtitle = when {
+                            state.appliedCount != null -> stringResource(
+                                R.string.assessment_apply_done_sub, state.appliedCount ?: 0
+                            )
+                            state.applyArmed -> stringResource(
+                                R.string.assessment_apply_confirm_sub, previewCount
+                            )
+                            else -> stringResource(R.string.assessment_apply_arm_sub)
+                        },
+                        enabled = !state.applying && previewCount > 0,
+                        onClick = {
+                            if (state.applyArmed) onApply() else state.applyArmed = true
+                        }
+                    )
+                }
+                if (snapshotJson != null) {
+                    SettingsActionRow(
+                        title = stringResource(R.string.assessment_revert_title),
+                        subtitle = stringResource(R.string.assessment_revert_sub),
+                        enabled = !state.applying,
+                        onClick = onRevert
+                    )
+                }
             }
         }
     }
@@ -516,6 +512,40 @@ private fun AssessmentItemRow(item: AssessmentItem) {
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun AssessmentFocusCard(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    val zen = isFlatSettingsStyle()
+    Card(
+        onClick = {},
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.colors(
+            containerColor = if (zen) androidx.compose.ui.graphics.Color.Transparent
+            else NuvioTheme.colors.Background,
+            focusedContainerColor = if (zen) settingsFocusFillColor()
+            else NuvioTheme.colors.Background
+        ),
+        border = if (zen) {
+            CardDefaults.border(border = Border.None, focusedBorder = Border.None)
+        } else {
+            CardDefaults.border(
+                focusedBorder = Border(
+                    border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                    shape = settingsRowShape()
+                )
+            )
+        },
+        shape = CardDefaults.shape(settingsRowShape()),
+        scale = CardDefaults.scale(focusedScale = 1f, pressedScale = 1f)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = NuvioTheme.spacing.sm),
+            content = content
+        )
     }
 }
 

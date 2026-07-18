@@ -3033,4 +3033,9 @@
     <string name="assessment_stability_insufficient">Link stability: not enough qualifying samples this run (%1$d passes with \u2265 4 sub-windows) \u2014 no profile suggestion</string>
     <string name="assessment_profile_values_capped">start %1$d s \u00b7 rebuffer %2$d s \u00b7 min %3$d s \u2014 memory-capped from %4$d s</string>
 
+
+    <string name="assessment_profile_suggested_tag">Suggested</string>
+    <string name="assessment_grounds_res_choice">Display exposes multiple resolutions (%1$s) \u2014 matching lets the panel\'s scaler handle upscaling instead of this box\'s; which looks better is panel-dependent, so this stays your call</string>
+    <string name="assessment_grounds_res_inert">Single-resolution display \u2014 this setting is inert here</string>
+
 </resources>

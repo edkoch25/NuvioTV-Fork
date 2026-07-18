@@ -539,27 +539,23 @@ object DeviceAssessmentEngine {
                     changeNeeded = settings.frameRateMatchingMode != FrameRateMatchingMode.OFF
                 )
             }
-            if (display.supportsResolutionSwitching) {
-                items += AssessmentItem(
-                    key = "res_match",
-                    title = s(R.string.assessment_item_res_match),
-                    currentValue = if (settings.resolutionMatchingEnabled) on else off,
-                    recommendedValue = on,
-                    grounds = s(R.string.assessment_grounds_res_on, resolutionsLabel(display)),
-                    tier = AssessmentTier.CALCULATED,
-                    changeNeeded = !settings.resolutionMatchingEnabled
-                )
-            } else {
-                items += AssessmentItem(
-                    key = "res_match",
-                    title = s(R.string.assessment_item_res_match),
-                    currentValue = if (settings.resolutionMatchingEnabled) on else off,
-                    recommendedValue = off,
-                    grounds = s(R.string.assessment_grounds_res_single),
-                    tier = AssessmentTier.CALCULATED,
-                    changeNeeded = settings.resolutionMatchingEnabled
-                )
-            }
+            // Resolution matching is a preference, not a derivable fact: it
+            // decides WHICH scaler upscales sub-native content (the panel's or
+            // this box's), and no API says which looks better. State the trade
+            // and leave the choice; never write it.
+            items += AssessmentItem(
+                key = "res_match",
+                title = s(R.string.assessment_item_res_match),
+                currentValue = if (settings.resolutionMatchingEnabled) on else off,
+                recommendedValue = s(R.string.assessment_value_no_change),
+                grounds = if (display.supportsResolutionSwitching) {
+                    s(R.string.assessment_grounds_res_choice, resolutionsLabel(display))
+                } else {
+                    s(R.string.assessment_grounds_res_inert)
+                },
+                tier = AssessmentTier.CALCULATED,
+                changeNeeded = false
+            )
         } else {
             items += AssessmentItem(
                 key = "afr",
@@ -719,11 +715,6 @@ object DeviceAssessmentEngine {
                 settings.frameRateMatchingMode != FrameRateMatchingMode.OFF
             }
         }
-        val resPlan = when {
-            !display.apiSupported -> null
-            display.supportsResolutionSwitching -> true.takeIf { !settings.resolutionMatchingEnabled }
-            else -> false.takeIf { settings.resolutionMatchingEnabled }
-        }
         val plan = AssessmentApplyPlan(
             nuvioPerformanceModeEnabled = perfModeSupported.takeIf {
                 settings.nuvioPerformanceModeEnabled != perfModeSupported
@@ -766,7 +757,8 @@ object DeviceAssessmentEngine {
                 autoBytes > 0L && settings.vodCacheSizeMode != VodCacheSizeMode.AUTO
             },
             frameRateMatchingMode = afrPlan,
-            resolutionMatchingEnabled = resPlan,
+            // Preference row: never written (see the res_match item above).
+            resolutionMatchingEnabled = null,
             dv7HandlingMode = Dv7HandlingMode.AUTO.takeIf {
                 policy.hdrCapsKnown && settings.dv7HandlingMode != Dv7HandlingMode.AUTO
             },
