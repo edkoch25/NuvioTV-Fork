@@ -324,6 +324,37 @@ fun DebridSettingsContent(
                                 )
                             }
                         }
+
+                        item(key = "debrid_filters_reset_defaults") {
+                            SettingsActionRow(
+                                title = stringResource(R.string.debrid_filters_reset_title),
+                                subtitle = stringResource(R.string.debrid_filters_reset_subtitle),
+                                value = stringResource(R.string.layout_reset_default),
+                                onClick = { viewModel.setStreamPreferences(DebridStreamPreferences()) },
+                                enabled = true
+                            )
+                        }
+
+                        item(key = "debrid_filters_show_everything") {
+                            SettingsActionRow(
+                                title = stringResource(R.string.debrid_filters_show_everything_title),
+                                subtitle = stringResource(R.string.debrid_filters_show_everything_subtitle),
+                                value = stringResource(R.string.debrid_filters_show_everything_action),
+                                onClick = {
+                                    viewModel.setStreamPreferences(
+                                        DebridStreamPreferences(
+                                            maxResults = 0,
+                                            requiredResolutions = emptyList(),
+                                            excludedQualities = emptyList(),
+                                            excludedVisualTags = emptyList(),
+                                            excludedEncodes = emptyList(),
+                                            excludedReleaseGroups = emptyList()
+                                        )
+                                    )
+                                },
+                                enabled = true
+                            )
+                        }
                     }
                 }
                 SettingsVerticalScrollIndicators(state = state)

@@ -2684,6 +2684,11 @@
     <string name="debrid_picker_excluded_languages_subtitle">Hide streams where every language is excluded.</string>
     <string name="debrid_picker_preferred_release_groups_title">Preferred release groups</string>
     <string name="debrid_picker_preferred_release_groups_subtitle">Sort selected release groups first, in listed order.</string>
+    <string name="debrid_filters_reset_title">Reset to recommended defaults</string>
+    <string name="debrid_filters_reset_subtitle">Restore the TRaSH-aligned filtering and sorting defaults.</string>
+    <string name="debrid_filters_show_everything_title">Show everything</string>
+    <string name="debrid_filters_show_everything_subtitle">Clear all filters and result caps; keep smart sorting.</string>
+    <string name="debrid_filters_show_everything_action">Show all</string>
     <string name="debrid_picker_required_release_groups_title">Required release groups</string>
     <string name="debrid_picker_required_release_groups_subtitle">Only show selected release groups.</string>
     <string name="debrid_picker_excluded_release_groups_title">Excluded release groups</string>

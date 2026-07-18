@@ -133,7 +133,7 @@ data class DebridStreamPreferences(
     val preferredReleaseGroups: List<String> = TrashReleaseGroups.PREFERRED_LADDER,
     val requiredReleaseGroups: List<String> = emptyList(),
     val excludedReleaseGroups: List<String> = TrashReleaseGroups.EXCLUDED_GROUPS,
-    val sortCriteria: List<DebridStreamSortCriterion> = DebridStreamSortCriterion.originalOrder,
+    val sortCriteria: List<DebridStreamSortCriterion> = DebridStreamSortCriterion.defaultOrder,
     val trashDefaultsVersion: Int = TrashReleaseGroups.DEFAULTS_VERSION
 )
 

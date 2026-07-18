@@ -339,8 +339,16 @@ class DebridSettingsDataStore @Inject constructor(
         codecFilter: DebridStreamCodecFilter
     ): DebridStreamPreferences {
         var preferences = DebridStreamPreferences(
-            maxResults = normalizeDebridStreamMaxResults(maxResults),
-            sortCriteria = sortCriteriaForLegacyMode(sortMode),
+            maxResults = if (maxResults == 0) {
+                DebridStreamPreferences().maxResults
+            } else {
+                normalizeDebridStreamMaxResults(maxResults)
+            },
+            sortCriteria = if (sortMode == DebridStreamSortMode.DEFAULT) {
+                DebridStreamSortCriterion.defaultOrder
+            } else {
+                sortCriteriaForLegacyMode(sortMode)
+            },
             requiredResolutions = if (minimumQuality == DebridStreamMinimumQuality.ANY) {
                 DebridStreamPreferences().requiredResolutions
             } else {
@@ -454,7 +462,7 @@ class DebridSettingsDataStore @Inject constructor(
                 .map { it.trim() }.filter { it.isNotBlank() }.distinctBy { it.lowercase() },
             requiredReleaseGroups = requiredReleaseGroupsValue.orEmpty().map { it.trim() }.filter { it.isNotBlank() }.distinct(),
             excludedReleaseGroups = excludedReleaseGroupsValue.orEmpty().map { it.trim() }.filter { it.isNotBlank() }.distinct(),
-            sortCriteria = sortCriteriaValue ?: DebridStreamSortCriterion.originalOrder,
+            sortCriteria = sortCriteriaValue ?: DebridStreamSortCriterion.defaultOrder,
             trashDefaultsVersion = trashDefaultsVersion.coerceAtLeast(0)
         )
     }
