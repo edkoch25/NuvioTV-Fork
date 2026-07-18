@@ -2980,8 +2980,8 @@
     <string name="assessment_section_header">Device assessment</string>
     <string name="assessment_run_title">Run device assessment</string>
     <string name="assessment_run_running">Assessing\u2026</string>
-    <string name="assessment_run_subtitle">Measures your link against the last-played stream and checks this device\'s facts \u2014 shows recommendations only, changes nothing</string>
-    <string name="assessment_no_stream">No last-played stream \u2014 device rows will still run; play something first for the measured rows</string>
+    <string name="assessment_run_subtitle">Measures your link against the last-played stream and checks this device\'s facts. For best results, play your most demanding title first \u2014 settings tuned for the heaviest case play lighter content fine, not the reverse.</string>
+    <string name="assessment_no_stream">No last-played stream \u2014 device rows will still run. For measured rows, play your most demanding typical title first, then rerun.</string>
     <string name="assessment_header_title">Device facts</string>
     <string name="assessment_header_device">Device</string>
     <string name="assessment_header_device_value">%1$s \u2014 safe %2$d MB / warning %3$d MB</string>

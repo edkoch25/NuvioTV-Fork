@@ -737,8 +737,11 @@ object DeviceAssessmentEngine {
             targetBufferSizeMb = recTargetMb.takeIf {
                 settings.bufferSettings.targetBufferSizeMb != recTargetMb
             },
+            // Never WRITE a max-buffer value the engine couldn't ground: with
+            // no title bitrate the ceiling is the generic fallback, so the row
+            // stays display-only (its grounds already say why).
             maxBufferMs = (recMaxS * 1000).takeIf {
-                settings.bufferSettings.maxBufferMs / 1000 != recMaxS
+                capacityS != null && settings.bufferSettings.maxBufferMs / 1000 != recMaxS
             },
             useParallelConnections = when {
                 sweep == null || sweep.errorText != null -> null
