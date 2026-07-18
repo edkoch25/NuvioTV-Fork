@@ -77,8 +77,7 @@ of person who tunes buffer settings for fun.
 - **Stats-for-nerds overlay -- proof, not vibes.** A live diagnostics HUD built for
   high-bitrate/lossless content: measured video bitrate, the audio codec by name with its measured
   passthrough bitrate, whether bitstream is *genuinely* reaching your AVR, HDR/Dolby Vision
-  detection, live network throughput and buffer health, the negotiated audio path, SoC thermals
-  against per-chip throttle thresholds, audio-clock jitter and underrun cross-checks. When it says
+  detection, live network throughput and buffer health, the negotiated audio path, SoC stats to know when your SoC is being throtled, audio-clock jitter and underrun cross-checks. When it says
   TrueHD Atmos is hitting the sink, it measured it. The assessment configures; this overlay
   verifies.
 
