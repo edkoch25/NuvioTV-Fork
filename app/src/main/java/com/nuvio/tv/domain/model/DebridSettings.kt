@@ -89,7 +89,7 @@ enum class DebridStreamCodecFilter {
 }
 
 data class DebridStreamPreferences(
-    val maxResults: Int = 0,
+    val maxResults: Int = 8,
     val maxPerResolution: Int = 0,
     val maxPerQuality: Int = 0,
     val sizeMinGb: Int = 0,

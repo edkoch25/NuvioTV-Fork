@@ -106,50 +106,12 @@ object DirectDebridStreamFilter {
         streamFacts(stream, effectivePreferences(settings))
 
     private fun effectivePreferences(settings: DebridSettings): DebridStreamPreferences {
-        val default = DebridStreamPreferences()
-        if (settings.streamPreferences != default) return settings.streamPreferences
-        if (
-            settings.streamMaxResults == 0 &&
-            settings.streamSortMode == DebridStreamSortMode.DEFAULT &&
-            settings.streamMinimumQuality == DebridStreamMinimumQuality.ANY &&
-            settings.streamDolbyVisionFilter == DebridStreamFeatureFilter.ANY &&
-            settings.streamHdrFilter == DebridStreamFeatureFilter.ANY &&
-            settings.streamCodecFilter == DebridStreamCodecFilter.ANY
-        ) {
-            return default
-        }
-        var preferences = default.copy(
-            maxResults = settings.streamMaxResults,
-            sortCriteria = when (settings.streamSortMode) {
-                DebridStreamSortMode.DEFAULT -> default.sortCriteria
-                DebridStreamSortMode.QUALITY_DESC -> listOf(
-                    DebridStreamSortCriterion(DebridStreamSortKey.RESOLUTION, DebridStreamSortDirection.DESC),
-                    DebridStreamSortCriterion(DebridStreamSortKey.QUALITY, DebridStreamSortDirection.DESC),
-                    DebridStreamSortCriterion(DebridStreamSortKey.SIZE, DebridStreamSortDirection.DESC)
-                )
-                DebridStreamSortMode.SIZE_DESC -> listOf(DebridStreamSortCriterion(DebridStreamSortKey.SIZE, DebridStreamSortDirection.DESC))
-                DebridStreamSortMode.SIZE_ASC -> listOf(DebridStreamSortCriterion(DebridStreamSortKey.SIZE, DebridStreamSortDirection.ASC))
-            },
-            requiredResolutions = DebridStreamResolution.defaultOrder.filter {
-                it.value >= settings.streamMinimumQuality.minResolution && it != DebridStreamResolution.UNKNOWN
-            }
-        )
-        preferences = when (settings.streamDolbyVisionFilter) {
-            DebridStreamFeatureFilter.ANY -> preferences
-            DebridStreamFeatureFilter.EXCLUDE -> preferences.copy(excludedVisualTags = preferences.excludedVisualTags + listOf(DebridStreamVisualTag.DV, DebridStreamVisualTag.DV_ONLY, DebridStreamVisualTag.HDR_DV))
-            DebridStreamFeatureFilter.ONLY -> preferences.copy(requiredVisualTags = preferences.requiredVisualTags + listOf(DebridStreamVisualTag.DV, DebridStreamVisualTag.DV_ONLY, DebridStreamVisualTag.HDR_DV))
-        }
-        preferences = when (settings.streamHdrFilter) {
-            DebridStreamFeatureFilter.ANY -> preferences
-            DebridStreamFeatureFilter.EXCLUDE -> preferences.copy(excludedVisualTags = preferences.excludedVisualTags + listOf(DebridStreamVisualTag.HDR, DebridStreamVisualTag.HDR10, DebridStreamVisualTag.HDR10_PLUS, DebridStreamVisualTag.HLG, DebridStreamVisualTag.HDR_ONLY, DebridStreamVisualTag.HDR_DV))
-            DebridStreamFeatureFilter.ONLY -> preferences.copy(requiredVisualTags = preferences.requiredVisualTags + listOf(DebridStreamVisualTag.HDR, DebridStreamVisualTag.HDR10, DebridStreamVisualTag.HDR10_PLUS, DebridStreamVisualTag.HLG, DebridStreamVisualTag.HDR_ONLY, DebridStreamVisualTag.HDR_DV))
-        }
-        return when (settings.streamCodecFilter) {
-            DebridStreamCodecFilter.ANY -> preferences
-            DebridStreamCodecFilter.H264 -> preferences.copy(requiredEncodes = listOf(DebridStreamEncode.AVC))
-            DebridStreamCodecFilter.HEVC -> preferences.copy(requiredEncodes = listOf(DebridStreamEncode.HEVC))
-            DebridStreamCodecFilter.AV1 -> preferences.copy(requiredEncodes = listOf(DebridStreamEncode.AV1))
-        }
+        // The datastore always materialises streamPreferences (parsed blob or
+        // legacy-derived), so the historical in-filter legacy reconstruction
+        // is gone: it re-activated whenever the stored object equalled the
+        // shipped defaults -- exactly the state a defaults re-baseline
+        // produces -- and silently downgraded the sort chain.
+        return settings.streamPreferences
     }
 
     private fun applyLimits(

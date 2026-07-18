@@ -26,7 +26,7 @@ package com.nuvio.tv.core.debrid
 object TrashReleaseGroups {
 
     /** Bump when the shipped defaults change so persisted settings re-merge additively. */
-    const val DEFAULTS_VERSION = 1
+    const val DEFAULTS_VERSION = 2
 
     val PREFERRED_LADDER: List<String> = listOf(
         // Remux Tier 01
