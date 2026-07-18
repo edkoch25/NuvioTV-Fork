@@ -8,6 +8,7 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import com.nuvio.tv.ui.screens.player.ParallelRangeDataSource
 import com.nuvio.tv.ui.screens.player.PlayerPlaybackNetworking
 import okhttp3.Request
+import kotlinx.coroutines.launch
 
 @UnstableApi
 object StreamSpeedTester {
