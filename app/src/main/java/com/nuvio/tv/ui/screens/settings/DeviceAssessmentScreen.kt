@@ -518,6 +518,18 @@ private fun AssessmentItemRow(item: AssessmentItem) {
                     style = MaterialTheme.typography.labelSmall,
                     color = NuvioTheme.colors.TextTertiary
                 )
+            } else if (!item.changeNeeded && !item.currentValue.isNullOrBlank() &&
+                item.recommendedValue != stringResource(R.string.assessment_value_no_change)
+            ) {
+                // Endorsement marker: the row asserts a concrete value and the
+                // device already holds it. "No change" stays reserved for rows
+                // where the assessment declines to recommend at all.
+                Spacer(modifier = Modifier.height(NuvioTheme.spacing.xxs))
+                Text(
+                    text = stringResource(R.string.assessment_already_set),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = NuvioTheme.colors.Success
+                )
             }
         }
     }

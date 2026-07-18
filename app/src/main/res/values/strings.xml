@@ -2943,9 +2943,9 @@
     <string name="assessment_grounds_chunk">Paired with the connection count above, from the same measured pass</string>
     <string name="assessment_grounds_network_master">Master switch for the HTTP/2 and parallel settings below</string>
     <string name="assessment_grounds_http2">Multiplexes range requests over one connection; broadly beneficial, no probe needed</string>
-    <string name="assessment_grounds_perf_mode">Memory limits scale to this device\'s %1$s tier (safe %2$d MB / warning %3$d MB); counts above %4$d connections require it</string>
+    <string name="assessment_grounds_perf_mode">Keeps remux-sized buffers off the Java heap so garbage collection can\'t stutter frames; memory limits scale to this device\'s %1$s tier (safe %2$d MB / warning %3$d MB) and counts above %4$d connections require it</string>
     <string name="assessment_grounds_perf_mode_unsupported">Requires Android 8.0 or newer</string>
-    <string name="assessment_grounds_buffer_master">Applies the buffer values below</string>
+    <string name="assessment_grounds_buffer_master">Off means media3\'s stock load control: a byte-computed target around 13 MB, which holds \u2248 1 s of a remux regardless of its duration values \u2014 the values below are sized to this device instead</string>
     <string name="assessment_grounds_managed_budget">Managed mode pins the target to the safe limit and ignores parallel-connection overhead; the explicit target below accounts for both</string>
     <string name="assessment_grounds_target_buffer">Target %1$d + %2$d MB connection overhead = %3$d MB \u2264 the %4$d MB safe limit (largest %5$d MB step that fits)</string>
     <string name="assessment_grounds_allow_large_on">Needed so the target slider reaches %1$d MB on this device</string>
@@ -3044,5 +3044,7 @@
     <string name="assessment_profile_suggested_tag">Suggested</string>
     <string name="assessment_grounds_res_choice">Display exposes multiple resolutions (%1$s) \u2014 matching lets the panel\'s scaler handle upscaling instead of this box\'s; which looks better is panel-dependent, so this stays your call</string>
     <string name="assessment_grounds_res_inert">Single-resolution display \u2014 this setting is inert here</string>
+
+    <string name="assessment_already_set">\u2713 Already set</string>
 
 </resources>
