@@ -27,15 +27,17 @@ object StreamSpeedTester {
     private const val MEASURE_BYTES = 64L * 1024 * 1024
     private const val MEASURE_MAX_MS = 8_000L
 
-    // Stability sub-windows: snapshot the NETWORK tally roughly every
-    // SUB_WINDOW_MS during the measured window and record per-window Mbps.
-    // Same tally the headline figure uses - zero extra network cost. Windows
-    // are normalised by their actual elapsed time, so a read blocking past
-    // the nominal boundary widens the window rather than skewing the rate.
-    // A trailing partial window shorter than SUB_WINDOW_MIN_TAIL_MS is
-    // discarded as noise.
+    // Stability sub-windows: a TIMER coroutine snapshots the NETWORK tally
+    // every SUB_WINDOW_MS and records per-window Mbps - same tally as the
+    // headline, zero extra network cost. Sampling must NOT live inside the
+    // read loop: with chunk-granular prefetch a single read can block for a
+    // whole chunk's download, so an in-loop clock check fired once or twice
+    // per pass on large chunks and starved the sampler (field-diagnosed as
+    // "0 passes with >= 4 sub-windows"). MEASURE_MIN_MS floors the window
+    // so fast links can't finish the byte budget before enough windows
+    // exist; the headline stays delta/elapsed either way.
     private const val SUB_WINDOW_MS = 500L
-    private const val SUB_WINDOW_MIN_TAIL_MS = 250L
+    private const val MEASURE_MIN_MS = 2_500L
 
     /** Headline Mbps plus the per-sub-window Mbps series behind it. */
     data class ParallelPassResult(val mbps: Double, val subWindowMbps: List<Double>)
@@ -150,29 +152,32 @@ object StreamSpeedTester {
             val tStart = System.currentTimeMillis()
             val tDeadline = tStart + MEASURE_MAX_MS
             val subWindowMbps = mutableListOf<Double>()
-            var windowStartMs = tStart
-            var windowStartBytes = networkAtMeasureStart
+            val sampler = launch {
+                var wStartMs = System.currentTimeMillis()
+                var wStartBytes = totalBytesDownloaded.get()
+                while (true) {
+                    kotlinx.coroutines.delay(SUB_WINDOW_MS)
+                    val now = System.currentTimeMillis()
+                    val bytes = totalBytesDownloaded.get()
+                    subWindowMbps += ((bytes - wStartBytes) * 8.0) /
+                        ((now - wStartMs) * 1000.0)
+                    wStartMs = now
+                    wStartBytes = bytes
+                }
+            }
+            // Run to BOTH the byte budget and the minimum duration; the last
+            // partial window is simply dropped when the sampler is cancelled.
             while (!eof &&
-                totalBytesDownloaded.get() - networkAtMeasureStart < MEASURE_BYTES &&
+                (totalBytesDownloaded.get() - networkAtMeasureStart < MEASURE_BYTES ||
+                    System.currentTimeMillis() - tStart < MEASURE_MIN_MS) &&
                 System.currentTimeMillis() < tDeadline
             ) {
                 val read = dataSource.read(buffer, 0, buffer.size)
                 if (read == -1) { eof = true }
-                val nowMs = System.currentTimeMillis()
-                if (nowMs - windowStartMs >= SUB_WINDOW_MS) {
-                    val bytesNow = totalBytesDownloaded.get()
-                    subWindowMbps += ((bytesNow - windowStartBytes) * 8.0) /
-                        ((nowMs - windowStartMs) * 1000.0)
-                    windowStartMs = nowMs
-                    windowStartBytes = bytesNow
-                }
             }
             val endMs = System.currentTimeMillis()
-            if (endMs - windowStartMs >= SUB_WINDOW_MIN_TAIL_MS) {
-                val bytesNow = totalBytesDownloaded.get()
-                subWindowMbps += ((bytesNow - windowStartBytes) * 8.0) /
-                    ((endMs - windowStartMs) * 1000.0)
-            }
+            sampler.cancel()
+            sampler.join()
             val elapsed = (endMs - tStart).coerceAtLeast(1)
             val networkDelta = totalBytesDownloaded.get() - networkAtMeasureStart
             dataSource.close()

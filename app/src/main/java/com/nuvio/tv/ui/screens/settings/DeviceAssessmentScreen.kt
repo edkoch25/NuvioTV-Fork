@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -69,6 +70,13 @@ internal fun assessmentDataStore(context: Context): com.nuvio.tv.data.local.Play
         context.applicationContext,
         AssessmentDataStoreEntryPoint::class.java
     ).playerSettingsDataStore()
+
+// Assessment inner cards use a gently rounded rectangle instead of the
+// settings pill: with multi-line content the pill's corner curvature
+// clipped first/last-line text at the card edges (field-reported on the
+// Device-facts card).
+@Composable
+private fun assessmentCardShape() = RoundedCornerShape(12.dp)
 
 internal class DeviceAssessmentState {
     var running by mutableStateOf(false)
@@ -463,11 +471,11 @@ private fun AssessmentItemRow(item: AssessmentItem) {
             CardDefaults.border(
                 focusedBorder = Border(
                     border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
-                    shape = settingsRowShape()
+                    shape = assessmentCardShape()
                 )
             )
         },
-        shape = CardDefaults.shape(settingsRowShape()),
+        shape = CardDefaults.shape(assessmentCardShape()),
         scale = CardDefaults.scale(focusedScale = 1f, pressedScale = 1f)
     ) {
         Column(
@@ -533,11 +541,11 @@ private fun AssessmentFocusCard(content: @Composable androidx.compose.foundation
             CardDefaults.border(
                 focusedBorder = Border(
                     border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
-                    shape = settingsRowShape()
+                    shape = assessmentCardShape()
                 )
             )
         },
-        shape = CardDefaults.shape(settingsRowShape()),
+        shape = CardDefaults.shape(assessmentCardShape()),
         scale = CardDefaults.scale(focusedScale = 1f, pressedScale = 1f)
     ) {
         Column(
