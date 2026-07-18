@@ -525,6 +525,10 @@ fun SettingsScreen(
                                 experienceModeViewModel = experienceModeViewModel,
                                 integrationSection = integrationSection,
                                 onSelectIntegrationSection = { integrationSection = it },
+                                onOpenConnectedServices = {
+                                    selectedCategory = SettingsCategory.INTEGRATION
+                                    integrationSection = IntegrationSettingsSection.Debrid
+                                },
                                 integrationHubFocusRequester = integrationHubFocusRequester,
                                 integrationDebridFocusRequester = integrationDebridFocusRequester,
                                 integrationTmdbFocusRequester = integrationTmdbFocusRequester,
@@ -675,6 +679,10 @@ fun SettingsScreen(
                         experienceModeViewModel = experienceModeViewModel,
                         integrationSection = integrationSection,
                         onSelectIntegrationSection = { integrationSection = it },
+                        onOpenConnectedServices = {
+                            selectedCategory = SettingsCategory.INTEGRATION
+                            integrationSection = IntegrationSettingsSection.Debrid
+                        },
                         integrationHubFocusRequester = integrationHubFocusRequester,
                         integrationDebridFocusRequester = integrationDebridFocusRequester,
                         integrationTmdbFocusRequester = integrationTmdbFocusRequester,
@@ -702,6 +710,7 @@ private fun SettingsDetailPane(
     experienceModeViewModel: ExperienceModeSettingsViewModel,
     integrationSection: IntegrationSettingsSection,
     onSelectIntegrationSection: (IntegrationSettingsSection) -> Unit,
+    onOpenConnectedServices: (() -> Unit)? = null,
     integrationHubFocusRequester: FocusRequester,
     integrationDebridFocusRequester: FocusRequester,
     integrationTmdbFocusRequester: FocusRequester,
@@ -755,6 +764,7 @@ private fun SettingsDetailPane(
             )
         } else {
             PlaybackSettingsContent(
+                onOpenConnectedServices = onOpenConnectedServices,
                 initialFocusRequester = if (allowDetailAutofocus) {
                     contentFocusRequesters[SettingsCategory.PLAYBACK]
                 } else {

@@ -112,7 +112,8 @@ fun PlaybackSettingsScreen(
 @Composable
 fun PlaybackSettingsContent(
     viewModel: PlaybackSettingsViewModel = hiltViewModel(),
-    initialFocusRequester: FocusRequester? = null
+    initialFocusRequester: FocusRequester? = null,
+    onOpenConnectedServices: (() -> Unit)? = null
 ) {
     val playerSettings by viewModel.playerSettings.collectAsStateWithLifecycle(initialValue = PlayerSettings())
     val torrentSettings by viewModel.torrentSettingsFlow.collectAsStateWithLifecycle(
@@ -202,6 +203,7 @@ fun PlaybackSettingsContent(
             PlaybackSettingsSections(
                 initialFocusRequester = initialFocusRequester,
                 playerSettings = playerSettings,
+                onOpenConnectedServices = onOpenConnectedServices,
                 onShowPlayerPreferenceDialog = { openDialog { showPlayerPreferenceDialog = true } },
                 onShowInternalPlayerEngineDialog = { openDialog { showInternalPlayerEngineDialog = true } },
                 onShowAudioLanguageDialog = { openDialog { showAudioLanguageDialog = true } },

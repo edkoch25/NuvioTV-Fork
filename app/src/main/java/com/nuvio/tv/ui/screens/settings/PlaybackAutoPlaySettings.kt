@@ -82,6 +82,7 @@ internal fun LazyListScope.autoPlaySettingsItems(
     onShowRegexDialog: () -> Unit,
     onShowNextEpisodeThresholdModeDialog: () -> Unit,
     onShowReuseLastLinkCacheDialog: () -> Unit,
+    onOpenConnectedServices: (() -> Unit)? = null,
     onSetStreamAutoPlayNextEpisodeEnabled: (Boolean) -> Unit,
     onSetStreamAutoPlayPreferBingeGroupForNextEpisode: (Boolean) -> Unit,
     onSetStreamAutoPlayReuseBingeGroup: (Boolean) -> Unit,
@@ -139,6 +140,18 @@ internal fun LazyListScope.autoPlaySettingsItems(
             onClick = onShowModeDialog,
             onFocused = onItemFocused
         )
+    }
+
+    if (onOpenConnectedServices != null) {
+        item(key = "autoplay_quality_rules_link") {
+            NavigationSettingsItem(
+                icon = Icons.Default.Tune,
+                title = stringResource(R.string.autoplay_quality_rules_title),
+                subtitle = stringResource(R.string.autoplay_quality_rules_subtitle),
+                onClick = onOpenConnectedServices,
+                onFocused = onItemFocused
+            )
+        }
     }
 
     item(key = "autoplay_stream_timeout") {

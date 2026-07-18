@@ -788,6 +788,8 @@
     <string name="autoplay_mode_first">Auto-play first source</string>
     <string name="autoplay_mode_regex">Auto-play regex match</string>
     <string name="autoplay_stream_selection">Auto Stream Selection</string>
+    <string name="autoplay_quality_rules_title">Quality rules</string>
+    <string name="autoplay_quality_rules_subtitle">Filters, sorting and release-group tiers in Connected Services.</string>
     <string name="autoplay_next_episode">Auto-play Next Episode</string>
     <string name="autoplay_next_episode_sub">Start next episode automatically when prompt appears.</string>
     <string name="autoplay_prefer_binge_group">Prefer Binge Group (Next Episode)</string>
