@@ -68,12 +68,29 @@ object StreamSweepEngine {
         NONE
     }
 
+    /**
+     * Set when the buffer-trade refinement replaced the cheapest 2x config:
+     * the chosen config meets only TRADE_BAR_OF_BITRATE x the title bitrate,
+     * but leaves chosenBufferMb/S of target buffer on this device's safe
+     * budget instead of the overBufferMb/S the 2x config (over*) would have.
+     */
+    data class BufferTrade(
+        val overConnections: Int,
+        val overChunkMb: Int,
+        val overMbps: Double,
+        val chosenBufferMb: Int,
+        val chosenBufferS: Int,
+        val overBufferMb: Int,
+        val overBufferS: Int
+    )
+
     data class Recommendation(
         val connections: Int,
         val chunkMb: Int,
         val mbps: Double,
         val meetsTarget: Boolean,
-        val fitsSafeBudget: Boolean
+        val fitsSafeBudget: Boolean,
+        val bufferTrade: BufferTrade? = null
     )
 
     data class SweepOutcome(
@@ -347,23 +364,80 @@ object StreamSweepEngine {
                 val cheapest = (sufficientAndSafe.ifEmpty { sufficient })
                     .minByOrNull { overheadMb(it.connections, it.chunkMb) }
                 if (cheapest != null) {
+                    // Buffer-trade refinement: the pipe (parallel overhead) and
+                    // the tank (target buffer) share one safe budget. Insisting
+                    // on 2x can spend so much on the pipe that the tank shrinks
+                    // below usefulness on constrained tiers. If a config meeting
+                    // TRADE_BAR_OF_BITRATE x buys >= TRADE_MIN_GAIN_S more
+                    // seconds of buffer, recommend it instead and say why.
+                    val bitrateMbps = targetMbps / 2.0
+                    fun bufferMbAt(connections: Int, chunkMb: Int): Int =
+                        (((safeLimitMb - overheadMb(connections, chunkMb)) / MemoryBudget.BUFFER_STEP_MB) *
+                            MemoryBudget.BUFFER_STEP_MB)
+                            .coerceAtLeast(MemoryBudget.MIN_BUFFER_MB)
+                            .coerceAtMost(com.nuvio.tv.data.local.PlayerSettings.LARGE_TARGET_BUFFER_MAX_MB)
+                    fun bufferSecondsAt(mb: Int): Int = (mb * 8.0 / bitrateMbps).toInt()
+                    val tradeBar = bitrateMbps * TRADE_BAR_OF_BITRATE
+                    val nearSufficient = measured.filter { it.mbps >= tradeBar }
+                    val nearAndSafe = nearSufficient.filter {
+                        overheadMb(it.connections, it.chunkMb) <= safeLimitMb
+                    }
+                    val cheaper = (nearAndSafe.ifEmpty { nearSufficient })
+                        .minByOrNull { overheadMb(it.connections, it.chunkMb) }
+                    var chosen = cheapest
+                    var trade: BufferTrade? = null
+                    if (cheaper != null &&
+                        (cheaper.connections != cheapest.connections || cheaper.chunkMb != cheapest.chunkMb)
+                    ) {
+                        val chosenMb = bufferMbAt(cheaper.connections, cheaper.chunkMb)
+                        val overMb = bufferMbAt(cheapest.connections, cheapest.chunkMb)
+                        val chosenS = bufferSecondsAt(chosenMb)
+                        val overS = bufferSecondsAt(overMb)
+                        if (chosenS - overS >= TRADE_MIN_GAIN_S) {
+                            chosen = cheaper
+                            trade = BufferTrade(
+                                overConnections = cheapest.connections,
+                                overChunkMb = cheapest.chunkMb,
+                                overMbps = cheapest.mbps,
+                                chosenBufferMb = chosenMb,
+                                chosenBufferS = chosenS,
+                                overBufferMb = overMb,
+                                overBufferS = overS
+                            )
+                        }
+                    }
+                    val verdict = if (trade != null) {
+                        context.getString(
+                            R.string.stream_test_verdict_recommend_trade,
+                            chosen.connections,
+                            chosen.chunkMb,
+                            "%.1f Mbps".format(chosen.mbps),
+                            "%.1f".format(chosen.mbps / bitrateMbps),
+                            trade.overConnections,
+                            trade.overChunkMb,
+                            trade.chosenBufferMb,
+                            trade.chosenBufferS,
+                            trade.overBufferMb,
+                            trade.overBufferS
+                        )
+                    } else {
+                        context.getString(
+                            R.string.stream_test_verdict_recommend,
+                            chosen.connections,
+                            chosen.chunkMb,
+                            "%.1f Mbps".format(chosen.mbps)
+                        )
+                    }
                     return SweepOutcome(
                         verdictKind = VerdictKind.RECOMMEND_CONFIG,
-                        verdictText = withPmSuffix(
-                            context.getString(
-                                R.string.stream_test_verdict_recommend,
-                                cheapest.connections,
-                                cheapest.chunkMb,
-                                "%.1f Mbps".format(cheapest.mbps)
-                            ),
-                            cheapest.connections
-                        ),
+                        verdictText = withPmSuffix(verdict, chosen.connections),
                         recommendation = Recommendation(
-                            connections = cheapest.connections,
-                            chunkMb = cheapest.chunkMb,
-                            mbps = cheapest.mbps,
-                            meetsTarget = true,
-                            fitsSafeBudget = overheadMb(cheapest.connections, cheapest.chunkMb) <= safeLimitMb
+                            connections = chosen.connections,
+                            chunkMb = chosen.chunkMb,
+                            mbps = chosen.mbps,
+                            meetsTarget = chosen.mbps >= targetMbps,
+                            fitsSafeBudget = overheadMb(chosen.connections, chosen.chunkMb) <= safeLimitMb,
+                            bufferTrade = trade
                         ),
                         baselineMbps = baseline,
                         targetMbps = targetMbps,
@@ -484,6 +558,15 @@ object StreamSweepEngine {
     // passes for the sweep-level median. [inferred] initial values.
     private const val STABILITY_MIN_WINDOWS = 4
     private const val STABILITY_MIN_PASSES = 2
+
+    // Buffer-trade refinement. [inferred] initial values: a config meeting
+    // >= 1.5x the title bitrate refills the buffer at ~0.5 s of content per
+    // real second - enough to outpace ordinary dips - so when it leaves at
+    // least TRADE_MIN_GAIN_S more seconds of target buffer than the cheapest
+    // 2x config on this device's safe budget, tank depth beats refill rate.
+    // On large budgets the gain never reaches the gate and 2x keeps winning.
+    private const val TRADE_BAR_OF_BITRATE = 1.5
+    private const val TRADE_MIN_GAIN_S = 8
 
     private fun coefficientOfVariation(samples: List<Double>): Double? {
         if (samples.size < STABILITY_MIN_WINDOWS) return null

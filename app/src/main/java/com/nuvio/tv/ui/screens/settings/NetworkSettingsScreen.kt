@@ -352,6 +352,12 @@ fun AdvancedSettingsContent(
         }
     }
 
+    // Device assessment state lives at screen level so scrolling result
+    // cards out of composition can't destroy them (lazy items are disposed;
+    // the screen composable is not), and a mid-run scroll can't cancel the
+    // sweep (the run launches on this screen's scope).
+    val assessmentState = rememberDeviceAssessmentState()
+
     val networkListState = rememberLazyListState()
 
     // Keep the growing stream-test results card in view: each completed pass adds
@@ -711,12 +717,19 @@ fun AdvancedSettingsContent(
             )
         }
 
-        item(key = "device_assessment") {
-            DeviceAssessmentCard(
-                playerSettings = dvPlayerSettings,
-                diagnostics = dvDiagnostics
-            )
-        }
+        deviceAssessmentItems(
+            state = assessmentState,
+            diagnostics = dvDiagnostics,
+            onRun = {
+                runDeviceAssessment(
+                    scope = scope,
+                    context = context,
+                    state = assessmentState,
+                    settings = dvPlayerSettings,
+                    diagnostics = dvDiagnostics
+                )
+            }
+        )
 
         item(key = "cache_header") {
             Text(

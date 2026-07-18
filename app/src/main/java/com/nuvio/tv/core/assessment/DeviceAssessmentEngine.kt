@@ -14,8 +14,10 @@ import com.nuvio.tv.core.player.LastPlaybackDiagnostics
 import com.nuvio.tv.core.player.VodCacheSizing
 import com.nuvio.tv.data.local.Dv7HandlingMode
 import com.nuvio.tv.data.local.FrameRateMatchingMode
+import com.nuvio.tv.data.local.InternalPlayerEngine
 import com.nuvio.tv.data.local.PlayerSettings
 import com.nuvio.tv.data.local.VodCacheSizeMode
+import com.nuvio.tv.ui.screens.player.AudioOutputRouteDetector
 import com.nuvio.tv.ui.screens.player.NuvioExoPlayerPerformanceHelper
 import com.nuvio.tv.ui.screens.settings.MemoryBudget
 import com.nuvio.tv.ui.screens.settings.MemoryUsageStatus
@@ -174,7 +176,20 @@ object DeviceAssessmentEngine {
                                 rec.connections,
                                 s(R.string.assessment_unit_mb, rec.chunkMb)
                             ),
-                            grounds = s(
+                            grounds = rec.bufferTrade?.let { trade ->
+                                s(
+                                    R.string.assessment_grounds_parallel_trade,
+                                    "%.1f Mbps".format(rec.mbps),
+                                    rec.connections,
+                                    rec.chunkMb,
+                                    trade.overConnections,
+                                    trade.overChunkMb,
+                                    trade.chosenBufferMb,
+                                    trade.chosenBufferS,
+                                    trade.overBufferMb,
+                                    trade.overBufferS
+                                )
+                            } ?: s(
                                 groundsRes,
                                 "%.1f Mbps".format(rec.mbps),
                                 rec.connections,
@@ -210,6 +225,27 @@ object DeviceAssessmentEngine {
                 MemoryBudget.parallelOverheadMb(settings.parallelConnectionCount, currentChunkMbForOverhead)
             else -> 0
         }
+
+        // The whole assessed feature set (buffers, parallel network, VOD
+        // cache, DV pipeline) is the ExoPlayer path; under the MVP player
+        // none of it takes effect, so say so before recommending any of it.
+        val engineOk = settings.internalPlayerEngine == InternalPlayerEngine.EXOPLAYER ||
+            settings.internalPlayerEngine == InternalPlayerEngine.AUTO
+        items += AssessmentItem(
+            key = "engine",
+            title = s(R.string.assessment_item_engine),
+            currentValue = when (settings.internalPlayerEngine) {
+                InternalPlayerEngine.EXOPLAYER -> s(R.string.assessment_value_engine_exo)
+                InternalPlayerEngine.AUTO -> s(R.string.assessment_value_engine_auto)
+                InternalPlayerEngine.MVP_PLAYER -> s(R.string.assessment_value_engine_mvp)
+            },
+            recommendedValue = if (engineOk) s(R.string.assessment_value_no_change)
+            else s(R.string.assessment_value_engine_exo),
+            grounds = if (engineOk) s(R.string.assessment_grounds_engine_ok)
+            else s(R.string.assessment_grounds_engine_switch),
+            tier = AssessmentTier.CALCULATED,
+            changeNeeded = !engineOk
+        )
 
         items += AssessmentItem(
             key = "network_master",
@@ -280,12 +316,51 @@ object DeviceAssessmentEngine {
             title = s(R.string.assessment_item_target_buffer),
             currentValue = s(R.string.assessment_unit_mb, settings.bufferSettings.targetBufferSizeMb),
             recommendedValue = s(R.string.assessment_unit_mb, recTargetMb),
-            grounds = s(
-                R.string.assessment_grounds_target_buffer,
-                MemoryBudget.BUFFER_STEP_MB,
-                overheadForTargetMb,
-                safeLimitMb
-            ),
+            grounds = buildString {
+                append(
+                    s(
+                        R.string.assessment_grounds_target_buffer,
+                        recTargetMb,
+                        overheadForTargetMb,
+                        recTargetMb + overheadForTargetMb,
+                        safeLimitMb,
+                        MemoryBudget.BUFFER_STEP_MB
+                    )
+                )
+                // Acknowledge a working current config honestly instead of
+                // implying it is broken: warning band = reduced headroom,
+                // not failure; past the warning limit = genuine kill risk.
+                val currentOverheadMb = if (settings.useParallelConnections) {
+                    MemoryBudget.parallelOverheadMb(
+                        settings.parallelConnectionCount, currentChunkMbForOverhead
+                    )
+                } else 0
+                val currentSumMb = settings.bufferSettings.targetBufferSizeMb + currentOverheadMb
+                if (currentSumMb > warningLimitMb) {
+                    append('\n')
+                    append(
+                        s(
+                            R.string.assessment_grounds_target_current_danger,
+                            settings.bufferSettings.targetBufferSizeMb,
+                            currentOverheadMb,
+                            currentSumMb,
+                            warningLimitMb
+                        )
+                    )
+                } else if (currentSumMb > safeLimitMb) {
+                    append('\n')
+                    append(
+                        s(
+                            R.string.assessment_grounds_target_current_warning,
+                            settings.bufferSettings.targetBufferSizeMb,
+                            currentOverheadMb,
+                            currentSumMb,
+                            safeLimitMb,
+                            warningLimitMb
+                        )
+                    )
+                }
+            },
             tier = AssessmentTier.CALCULATED,
             changeNeeded = settings.bufferSettings.targetBufferSizeMb != recTargetMb,
             memoryStatus = MemoryBudget.getUsageStatus(
@@ -319,12 +394,27 @@ object DeviceAssessmentEngine {
             currentValue = s(R.string.assessment_value_seconds, settings.bufferSettings.maxBufferMs / 1000),
             recommendedValue = s(R.string.assessment_value_seconds, recMaxS),
             grounds = if (capacityS != null && bitrateMbps != null) {
-                s(
-                    R.string.assessment_grounds_max_buffer,
-                    recTargetMb,
-                    capacityS,
-                    "%.1f Mbps".format(bitrateMbps)
-                )
+                buildString {
+                    append(
+                        s(
+                            R.string.assessment_grounds_max_buffer,
+                            recTargetMb,
+                            capacityS,
+                            "%.1f Mbps".format(bitrateMbps)
+                        )
+                    )
+                    val currentTargetMb = settings.bufferSettings.targetBufferSizeMb
+                    if (currentTargetMb != recTargetMb) {
+                        append('\n')
+                        append(
+                            s(
+                                R.string.assessment_grounds_max_buffer_current,
+                                currentTargetMb,
+                                (currentTargetMb * 8.0 / bitrateMbps).toInt()
+                            )
+                        )
+                    }
+                }
             } else {
                 s(R.string.assessment_grounds_max_buffer_nobitrate, MAX_BUFFER_CAP_S)
             },
@@ -364,6 +454,33 @@ object DeviceAssessmentEngine {
                 grounds = s(R.string.assessment_grounds_vod_off),
                 tier = AssessmentTier.CALCULATED,
                 changeNeeded = settings.vodCacheEnabled
+            )
+        }
+
+        // Force AC-3 transcode vs the actual audio route. The audio-decode
+        // scope-out stands (no silent AVR probe exists); the ROUTE TYPE is
+        // silently queryable, and on an HDMI chain this setting only turns
+        // lossless passthrough into lossy AC-3.
+        val audioRoute = AudioOutputRouteDetector.detect(context)
+        if (audioRoute != null && audioRoute.key.startsWith("type:hdmi")) {
+            items += AssessmentItem(
+                key = "force_ac3",
+                title = s(R.string.assessment_item_ac3),
+                currentValue = if (settings.forceOpticalPassthrough) on else off,
+                recommendedValue = off,
+                grounds = s(R.string.assessment_grounds_ac3_hdmi, audioRoute.label),
+                tier = AssessmentTier.CALCULATED,
+                changeNeeded = settings.forceOpticalPassthrough
+            )
+        } else {
+            items += AssessmentItem(
+                key = "force_ac3",
+                title = s(R.string.assessment_item_ac3),
+                currentValue = if (settings.forceOpticalPassthrough) on else off,
+                recommendedValue = s(R.string.assessment_value_no_change),
+                grounds = s(R.string.assessment_grounds_ac3_unknown),
+                tier = AssessmentTier.VERIFY,
+                changeNeeded = false
             )
         }
 

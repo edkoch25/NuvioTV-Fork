@@ -2909,23 +2909,23 @@
     <string name="assessment_unit_kb">%1$d KB</string>
     <string name="assessment_current_parallel_on">On \u2014 %1$d \u00d7 %2$s</string>
 
-    <string name="assessment_item_parallel">Parallel connections</string>
-    <string name="assessment_item_chunk">Chunk size</string>
-    <string name="assessment_item_network_master">Custom network pipeline</string>
-    <string name="assessment_item_http2">HTTP/2</string>
-    <string name="assessment_item_perf_mode">Nuvio performance mode (native memory)</string>
-    <string name="assessment_item_buffer_master">Custom buffers</string>
+    <string name="assessment_item_parallel">Parallel Connections</string>
+    <string name="assessment_item_chunk">Chunk Size</string>
+    <string name="assessment_item_network_master">Custom Network</string>
+    <string name="assessment_item_http2">Enable HTTP/2</string>
+    <string name="assessment_item_perf_mode">ExoPlayer Native Memory</string>
+    <string name="assessment_item_buffer_master">Custom Playback Buffers</string>
     <string name="assessment_item_managed_budget">Managed memory budget</string>
-    <string name="assessment_item_target_buffer">Target buffer size</string>
-    <string name="assessment_item_allow_large">Allow larger target buffer</string>
-    <string name="assessment_item_max_buffer">Max buffer</string>
-    <string name="assessment_item_vod_cache">VOD disk cache</string>
-    <string name="assessment_item_afr">Frame-rate matching (AFR)</string>
-    <string name="assessment_item_res_match">Resolution matching</string>
-    <string name="assessment_item_dv7">DV Profile 7 handling</string>
-    <string name="assessment_item_dv5">DV Profile 5 \u2192 8.1 conversion</string>
-    <string name="assessment_item_strip_hdr10plus">Strip HDR10+ metadata</string>
-    <string name="assessment_item_tunneling">Tunnelled playback</string>
+    <string name="assessment_item_target_buffer">Target Buffer Size</string>
+    <string name="assessment_item_allow_large">Allow Larger Target Buffer</string>
+    <string name="assessment_item_max_buffer">Max Buffer Duration</string>
+    <string name="assessment_item_vod_cache">VOD Disk Cache</string>
+    <string name="assessment_item_afr">Auto Frame Rate &amp; Resolution</string>
+    <string name="assessment_item_res_match">Resolution Matching</string>
+    <string name="assessment_item_dv7">Dolby Vision Handling</string>
+    <string name="assessment_item_dv5">Convert DV5 to DV8.1</string>
+    <string name="assessment_item_strip_hdr10plus">Strip HDR10+ Metadata</string>
+    <string name="assessment_item_tunneling">Tunneled Playback</string>
 
     <string name="assessment_grounds_parallel_off">Single connection measured %1$s \u2014 already \u2265 2\u00d7 this title\'s bitrate; parallel adds memory for no benefit</string>
     <string name="assessment_grounds_parallel_rec">Measured %1$s at %2$d \u00d7 %3$d MB \u2014 cheapest configuration meeting 2\u00d7 bitrate within the safe memory budget</string>
@@ -2940,7 +2940,7 @@
     <string name="assessment_grounds_perf_mode_unsupported">Requires Android 8.0 or newer</string>
     <string name="assessment_grounds_buffer_master">Applies the buffer values below</string>
     <string name="assessment_grounds_managed_budget">Managed mode pins the target to the safe limit and ignores parallel-connection overhead; the explicit target below accounts for both</string>
-    <string name="assessment_grounds_target_buffer">Largest %1$d MB step where target + %2$d MB connection overhead stays \u2264 the %3$d MB safe limit</string>
+    <string name="assessment_grounds_target_buffer">Target %1$d + %2$d MB connection overhead = %3$d MB \u2264 the %4$d MB safe limit (largest %5$d MB step that fits)</string>
     <string name="assessment_grounds_allow_large_on">Needed so the target slider reaches %1$d MB on this device</string>
     <string name="assessment_grounds_allow_large_off">The recommended target fits the standard slider range</string>
     <string name="assessment_grounds_max_buffer">A %1$d MB target holds \u2248%2$d s of this title (%3$s) \u2014 seconds beyond that can\'t materialise</string>
@@ -3003,5 +3003,22 @@
     <string name="assessment_stability_line">Link stability during the sweep: CoV %1$s (lower is steadier). [inferred] thresholds; profiles are your call.</string>
     <string name="assessment_error_prefix">Sweep error: %1$s \u2014 the calculated rows below are still valid</string>
     <string name="assessment_footer">Review-only: nothing has been changed. Measured rows were tested on this device; calculated rows are derived from queryable facts; the apply step arrives in a later build.</string>
+
+
+    <!-- Device Settings Assessment: buffer-trade, band notes, engine and AC-3 rows -->
+    <string name="stream_test_verdict_recommend_trade">Recommendation: %1$d connections / %2$d MB chunks \u2014 %3$s (%4$s\u00d7 this title\'s bitrate). Chosen over %5$d \u00d7 %6$d MB (2\u00d7+) because on this device\'s memory budget it leaves %7$d MB \u2248 %8$d s of playback buffer instead of %9$d MB \u2248 %10$d s \u2014 tank depth beats refill rate here.</string>
+    <string name="assessment_grounds_parallel_trade">Measured %1$s at %2$d \u00d7 %3$d MB \u2014 meets 1.5\u00d7 bitrate and leaves %6$d MB \u2248 %7$d s of buffer; the 2\u00d7 config (%4$d \u00d7 %5$d MB) would leave only %8$d MB \u2248 %9$d s</string>
+    <string name="assessment_grounds_target_current_warning">Current %1$d MB + %2$d MB overhead = %3$d MB sits in the warning band (%4$d\u2013%5$d MB) \u2014 workable, with reduced headroom</string>
+    <string name="assessment_grounds_target_current_danger">Current %1$d MB + %2$d MB overhead = %3$d MB exceeds the %4$d MB warning limit \u2014 at risk of low-memory kills</string>
+    <string name="assessment_grounds_max_buffer_current">At your current %1$d MB target: \u2248 %2$d s effective, whatever the seconds slider says \u2014 bytes bind first</string>
+    <string name="assessment_item_engine">Internal Engine</string>
+    <string name="assessment_value_engine_exo">ExoPlayer</string>
+    <string name="assessment_value_engine_auto">Auto</string>
+    <string name="assessment_value_engine_mvp">MVP Player (libmpv)</string>
+    <string name="assessment_grounds_engine_ok">Every assessed row below applies to the ExoPlayer path</string>
+    <string name="assessment_grounds_engine_switch">Every assessed row below applies to the ExoPlayer path \u2014 under the MVP player these settings don\'t take effect</string>
+    <string name="assessment_item_ac3">Force AC-3 Transcoding (Optical/SPDIF)</string>
+    <string name="assessment_grounds_ac3_hdmi">Audio route is %1$s \u2014 on an HDMI chain this setting only turns lossless passthrough into lossy AC-3</string>
+    <string name="assessment_grounds_ac3_unknown">Couldn\'t confirm an optical route from here \u2014 this setting only belongs on Optical/SPDIF outputs</string>
 
 </resources>
