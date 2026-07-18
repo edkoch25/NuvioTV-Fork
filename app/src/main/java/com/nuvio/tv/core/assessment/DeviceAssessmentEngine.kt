@@ -8,6 +8,7 @@ import com.nuvio.tv.R
 import com.nuvio.tv.core.network.StreamSpeedTester
 import com.nuvio.tv.core.network.StreamSweepEngine
 import com.nuvio.tv.core.player.DisplayCapabilities
+import com.nuvio.tv.core.player.DolbyVisionBaseLayerPolicy
 import com.nuvio.tv.core.player.DoviBridge
 import com.nuvio.tv.core.player.LastPlaybackDiagnostics
 import com.nuvio.tv.core.player.VodCacheSizing
@@ -15,7 +16,6 @@ import com.nuvio.tv.data.local.Dv7HandlingMode
 import com.nuvio.tv.data.local.FrameRateMatchingMode
 import com.nuvio.tv.data.local.PlayerSettings
 import com.nuvio.tv.data.local.VodCacheSizeMode
-import com.nuvio.tv.ui.screens.player.DolbyVisionBaseLayerPolicy
 import com.nuvio.tv.ui.screens.player.NuvioExoPlayerPerformanceHelper
 import com.nuvio.tv.ui.screens.settings.MemoryBudget
 import com.nuvio.tv.ui.screens.settings.MemoryUsageStatus
