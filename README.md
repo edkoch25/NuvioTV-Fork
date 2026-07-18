@@ -18,45 +18,69 @@ This fork is a set of targeted optimisations layered on top of their work, not a
 
 ## What this fork adds
 
-Optimisation and playback-quality work, most of it aimed at high-bitrate remux and lossless audio:
+Optimisation and playback-quality work, most of it aimed at high-bitrate remux and lossless audio.
+The short version: streams start faster, buffer deeper, stall less, and you can *see* that your
+device is genuinely delivering lossless audio and the right HDR -- without needing to be the kind
+of person who tunes buffer settings for fun.
 
-- **Lighter, faster build** -- unused engine components stripped out (see *What's been removed*).
-- **Improved throughput & buffering** -- two fixes to NuvioTV's parallel-connections downloading.
-  First, upstream only schedules a shallow `connections + 1` chunks of read-ahead; the fork deepens
-  that to a memory-budgeted `connections x 4`, so more data stays queued ahead of the reader and the
-  buffer actually builds. Second, upstream's chunk eviction re-downloaded data it had already
-  fetched (measured ~47% of transfer wasted on a 4K remux); the fork makes eviction position-aware
-  so it stops discarding chunks the reader is about to need. Together the buffer fills close to the
-  speed the source can deliver and holds through bitrate peaks, and about half the wasted debrid
-  data goes away. Plus off-heap custom buffers and a seek-reopen fix that makes non-faststart MP4s
-  watchable.
-- **Dolby Vision** -- app-side Profile 7 and Profile 5 -> 8.1 conversion via libdovi with no
-  per-frame GC stutter, correct in-band enhancement-layer stripping for single-track remuxes, and
-  fixes so DV5 and preserve-mapping no longer convert to the wrong profile (they were silently
-  producing static 8.4 output).
-- **High-resolution / lossless audio** -- a hardened bitstream passthrough stack (TrueHD, DTS-HD MA,
-  Atmos, DTS:X) that resists mid-playback renegotiation, DTS-HD MA/DTS:X detection that works on
-  native-DV boxes, a hi-res AC-3 transcode fix, an audio-path diagnostics row, and lossless-track
-  auto-selection.
+- **Lighter, faster build** -- unused engine components stripped out, so the app itself is smaller
+  and snappier (see *What's been removed*).
+- **Device settings assessment -- your settings, tuned for *your* hardware in one press.** Stop
+  guessing what connection count, buffer size or Dolby Vision mode your box wants: the assessment
+  measures your link against the last thing you actually played, reads what your device and
+  display genuinely support, and lays out recommended settings with the reasoning next to every
+  one -- what was measured, what was calculated from your hardware, what's a personal trade-off
+  (pick a buffer profile; it'll suggest one based on how steady your connection looked), and what
+  it can't honestly know so won't touch. Like the answers? Apply them all in one press. Change
+  your mind? Revert restores every previous value, even after a restart. You stay in charge; it
+  just does the homework.
+- **Fewer stalls, less wasted bandwidth** -- upstream's parallel downloading kept too little data
+  queued ahead of playback and threw away chunks it had already paid to download (measured ~47% of
+  transfer wasted on a 4K remux). This fork keeps the pipeline properly fed and stops the
+  re-downloading, so the buffer builds close to the speed your source can deliver, holds through
+  bitrate peaks, and roughly halves the debrid data burned per title. If a debrid CDN rate-limits
+  you mid-film, speeds now recover on their own instead of staying throttled to the credits. Plus
+  off-heap buffers and a seek fix that makes non-faststart MP4s actually watchable.
+- **A speed test that tells you what to do about it** -- not a generic number from a test server:
+  an adaptive sweep of connection and chunk-size combinations against the *actual* stream you last
+  played, over the same path playback uses. It finds the cheapest configuration that comfortably
+  sustains the title and says so in plain terms -- and on memory-tight boxes it's smart enough to
+  prefer a config that leaves room for a deeper playback buffer, telling you the trade in MB and
+  seconds. It also watches how steady your connection held during the test, which feeds the
+  assessment's buffer suggestion. Slow source or buffering bug? Now you can tell them apart.
+- **Better streams picked for you, automatically** -- source filtering and sorting re-baselined
+  around TRaSH-guides-aligned release-group quality tiers, so the best-quality trustworthy release
+  floats to the top and auto-play grabs the right one without you reading twenty filenames. Safe
+  to experiment: one tap resets to the recommended baseline, another shows everything unfiltered
+  while keeping best-first ordering, and the auto-play settings link straight to the quality rules
+  that drive them.
+- **Dolby Vision that just works** -- app-side Profile 7 and Profile 5 -> 8.1 conversion via
+  libdovi with no per-frame stutter, correct enhancement-layer handling for single-track remuxes,
+  and fixes for cases that silently produced wrong or static output before. DV titles look the way
+  they're meant to on hardware that was never sold as supporting them.
+- **Lossless audio you can trust** -- a hardened bitstream passthrough stack (TrueHD, DTS-HD MA,
+  Atmos, DTS:X) that resists mid-playback renegotiation dropping you to lossy without telling
+  you, format detection that works on native-DV boxes, a hi-res AC-3 transcode fix, and automatic
+  selection of the lossless track so you don't start every film in the wrong audio.
 - **Kodi-style MAT audio** -- an app-side MAT / IEC61937 packing path (ported from Kodi's
-  CPackerMAT) to decouple TrueHD from vendor HALs. Behind an Advanced toggle, off by default,
-  experimental.
-- **Improved AFR** -- precise 23.976-vs-24 frame-rate matching, seamless-switch detection, and a
-  settle-then-resume for HDMI renegotiation on eARC/soundbar chains.
-- **MP4 video fixes** -- non-faststart / poorly-interleaved MP4s no longer thrash on seeks.
-- **Faster stream start** -- startup instrumentation plus a bootstrap fast-path so first frame
-  doesn't wait on a full chunk or the file's tail index.
-- **Faster / optimised UI** -- home-grid scroll-jank reduction and poster prefetch/pre-decode.
-- **Improved speed-test** -- runs a real throughput test against the actual last stream URL (same
-  source and path playback uses), so the number reflects what you can really pull from that debrid/
-  Emby endpoint -- useful for telling a slow source apart from a buffering bug and for tuning
-  connection count / chunk size.
-- **Stats-for-nerds overlay** -- a live playback diagnostics HUD built for high-bitrate/lossless
-  content: measured video bitrate, audio codec by name and its measured passthrough bitrate, whether
-  passthrough is genuinely reaching the sink, HDR/Dolby Vision detection, live network throughput, buffer health, 
-  the negotiated audio path, SoC performance against per-chip throttle thresholds, audio-clock
-  jitter, and AudioTrack underrun cross-checks. Confirms you're actually getting lossless audio and
-  the right HDR mode, and doubles as a triage tool.
+  CPackerMAT) that takes TrueHD delivery out of the hands of flaky vendor audio drivers. Behind an
+  Advanced toggle, off by default, experimental -- for when your box's HAL is the problem.
+- **Judder-free frame rates** -- precise 23.976-vs-24 matching so films play at their native
+  cadence, seamless-switch detection, and a settle-then-resume that stops eARC/soundbar chains
+  dropping audio while HDMI renegotiates.
+- **MP4s that seek properly** -- non-faststart / poorly-interleaved MP4s no longer thrash and
+  stall every time you skip around.
+- **Faster stream start** -- first frame no longer waits on a full chunk download or the file's
+  tail index, so pressing play feels like pressing play.
+- **Smoother browsing** -- home-grid scroll-jank reduction and poster prefetch/pre-decode, so the
+  UI keeps up with your remote.
+- **Stats-for-nerds overlay -- proof, not vibes.** A live diagnostics HUD built for
+  high-bitrate/lossless content: measured video bitrate, the audio codec by name with its measured
+  passthrough bitrate, whether bitstream is *genuinely* reaching your AVR, HDR/Dolby Vision
+  detection, live network throughput and buffer health, the negotiated audio path, SoC thermals
+  against per-chip throttle thresholds, audio-clock jitter and underrun cross-checks. When it says
+  TrueHD Atmos is hitting the sink, it measured it. The assessment configures; this overlay
+  verifies.
 
 ## New stats for nerds overlay -
 
