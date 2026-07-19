@@ -39,7 +39,16 @@ internal suspend fun PlayerRuntimeController.fetchAddonSubtitlesNow(
     onProgress: ((completed: Int, total: Int, addonName: String?) -> Unit)? = null
 ): List<Subtitle> {
     // 1.7 audit: addon subtitles are opt-in on this fork; embedded-only otherwise.
-    if (!addonSubtitlesEnabled) return emptyList()
+    // nt6 race hardening: this var's only writer is the settings collector, so a
+    // fetch that runs before its first emission reads a stale false and the whole
+    // session silently loses external subtitles with no retry (the startup phase
+    // then reports fetchCompleted with an empty list, skipping the fallback).
+    // Confirm against the store before denying; zero cost when already enabled.
+    if (!addonSubtitlesEnabled) {
+        addonSubtitlesEnabled =
+            playerSettingsDataStore.settings.firstOrNull()?.addonSubtitlesEnabled == true
+        if (!addonSubtitlesEnabled) return emptyList()
+    }
     val request = buildSubtitleFetchRequest() ?: return emptyList()
     val installedAddonOrder = addonRepository.getInstalledAddons().firstOrNull()
         ?.enabledAddons()
@@ -108,10 +117,16 @@ internal suspend fun PlayerRuntimeController.fetchAddonSubtitlesNow(
 }
 
 internal fun PlayerRuntimeController.fetchAddonSubtitles() {
-    if (!addonSubtitlesEnabled) return
     if (buildSubtitleFetchRequest() == null) return
 
     scope.launch {
+        // nt6 race hardening: gate check runs inside the coroutine so it can
+        // suspend to confirm against the store (see fetchAddonSubtitlesNow).
+        if (!addonSubtitlesEnabled &&
+            playerSettingsDataStore.settings.firstOrNull()?.addonSubtitlesEnabled != true
+        ) {
+            return@launch
+        }
         _uiState.update { it.copy(isLoadingAddonSubtitles = true, addonSubtitlesError = null) }
 
         try {
