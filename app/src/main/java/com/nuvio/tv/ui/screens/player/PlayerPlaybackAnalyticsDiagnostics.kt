@@ -89,6 +89,13 @@ internal class PlayerPlaybackAnalyticsDiagnostics {
     private var totalBytesLoaded: Long = 0L
     private var lastLoad: PlaybackIssuePlaybackLoadInput? = null
     private var lastLoadError: PlaybackIssuePlaybackLoadErrorInput? = null
+    // nt6: last COMPLETED load of dataType MEDIA only. The HUD's Request row
+    // reads this instead of lastLoad: on progressive streams the single long
+    // read only ever ends by CANCELLATION (seek/stop/track change), and its
+    // multi-minute running duration surfaced as a bogus "Request" figure
+    // (field report: 606,014 ms = ten minutes since the last seek). The
+    // issue-report path still uses lastLoad, cancellations included.
+    private var lastCompletedMediaLoad: PlaybackIssuePlaybackLoadInput? = null
     private var traceHost: String = "unknown"
     private var traceEngine: String = "unknown"
     private var launchStartedAtElapsedMs: Long? = null
@@ -129,6 +136,8 @@ internal class PlayerPlaybackAnalyticsDiagnostics {
         val loadErrorCount: Int,
         val lastLoadDurationMs: Long?,
         val lastLoadHost: String?,
+        val lastCompletedMediaLoadDurationMs: Long?,
+        val lastCompletedMediaLoadHost: String?,
         val positionStallCount: Int,
         val longestPositionStallMs: Long,
         val frameProcessingOffsetAvgUs: Long?,
@@ -150,6 +159,8 @@ internal class PlayerPlaybackAnalyticsDiagnostics {
         loadErrorCount = loadErrorCount,
         lastLoadDurationMs = lastLoad?.durationMs,
         lastLoadHost = lastLoad?.host,
+        lastCompletedMediaLoadDurationMs = lastCompletedMediaLoad?.durationMs,
+        lastCompletedMediaLoadHost = lastCompletedMediaLoad?.host,
         positionStallCount = positionStallCount,
         longestPositionStallMs = longestPositionStallMs,
         frameProcessingOffsetAvgUs = if (videoFrameProcessingOffsetCount > 0) {
@@ -216,6 +227,7 @@ internal class PlayerPlaybackAnalyticsDiagnostics {
         totalBytesLoaded = 0L
         lastLoad = null
         lastLoadError = null
+        lastCompletedMediaLoad = null
         rawEventLines.clear()
         launchStartedAtElapsedMs = null
         initializationStartedAtWallTimeMs = 0L
@@ -630,6 +642,9 @@ internal class PlayerPlaybackAnalyticsDiagnostics {
         loadCompletedCount += 1
         totalBytesLoaded += loadEventInfo.bytesLoaded.coerceAtLeast(0L)
         lastLoad = loadEventInfo.toPlaybackLoad(mediaLoadData)
+        if (mediaLoadData.dataType == C.DATA_TYPE_MEDIA) {
+            lastCompletedMediaLoad = lastLoad
+        }
         record(
             name = "load_completed",
             eventTime = eventTime,

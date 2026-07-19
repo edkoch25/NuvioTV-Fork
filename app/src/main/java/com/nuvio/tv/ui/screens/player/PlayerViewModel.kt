@@ -585,7 +585,11 @@ class PlayerViewModel @Inject constructor(
 
         // Last media request duration (dotless in v1: legitimate values vary
         // too much with chunk size and path for honest absolute thresholds).
-        hud.lastLoadDurationMs?.takeIf { it > 0L }?.let {
+        // nt6: completed MEDIA loads only. On progressive streams the single
+        // long read only ever ends by cancellation (seek/stop), so its running
+        // duration is playback bookkeeping, not request latency — the row now
+        // goes honestly absent there, as nt27 intended.
+        hud.lastCompletedMediaLoadDurationMs?.takeIf { it > 0L }?.let {
             rows += StatsRow("Request", "$it ms")
         }
         if (hud.loadErrorCount > 0) {
