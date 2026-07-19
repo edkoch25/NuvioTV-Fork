@@ -35,8 +35,14 @@ import org.json.JSONObject
  * Grounding rules, agreed and enforced:
  *  - Tier 1 rows come only from the sweep verdict (cheapest configuration
  *    meeting 2x the title bitrate within the safe memory budget - nt38).
- *  - Tier 2 rows cite the queryable fact they were derived from; the DV rows
- *    demote themselves to VERIFY whenever hdrCapsKnown is false.
+ *  - Tier 2 rows cite the queryable fact they were derived from. The dv7
+ *    row demotes itself to VERIFY whenever hdrCapsKnown is false; the dv5
+ *    and strip-HDR10+ rows are ALWAYS VERIFY and never enter the apply
+ *    plan (nt6): their deciding facts ride the display chain's EDID (a
+ *    soundbar in the path answers for the TV), so the probe can be
+ *    confidently wrong, and strip adds per-sample work on the demux hot
+ *    path - field-observed destabilising a 3 GB Tegra on 100 Mbit/s
+ *    remuxes. Advisory text stays; one-tap apply does not touch them.
  *  - dv7ToDv81PreserveMappingEnabled and dv7LibdoviModeOverride are
  *    deliberately ABSENT: no queryable fact decides them (panel-dependent,
  *    eyes-on only), so the assessment does not mention them at all.
@@ -584,9 +590,11 @@ object DeviceAssessmentEngine {
             )
         }
 
-        // DV rows: CALCULATED when the display's HDR types are readable,
+        // dv7 row: CALCULATED when the display's HDR types are readable,
         // VERIFY otherwise (the policy still acts, but the deciding fact is
-        // not queryable - say so instead of pretending).
+        // not queryable - say so instead of pretending). dv5 and strip are
+        // permanent VERIFY advisories and never machine-applied (nt6, see
+        // class doc).
         val dvTier = if (policy.hdrCapsKnown) AssessmentTier.CALCULATED else AssessmentTier.VERIFY
         val dv7DecisionLabel = when (policy.decision) {
             DolbyVisionBaseLayerPolicy.Decision.NATIVE_DV7 -> s(R.string.assessment_dv7_native)
@@ -620,7 +628,7 @@ object DeviceAssessmentEngine {
                 dv5RecommendOn -> s(R.string.assessment_grounds_dv5_on)
                 else -> s(R.string.assessment_grounds_dv5_off_nopath)
             },
-            tier = dvTier,
+            tier = AssessmentTier.VERIFY,
             changeNeeded = settings.dv5ToDv81Enabled != dv5RecommendOn
         )
 
@@ -635,7 +643,7 @@ object DeviceAssessmentEngine {
                 stripRecommendOn -> s(R.string.assessment_grounds_strip_on)
                 else -> s(R.string.assessment_grounds_strip_off)
             },
-            tier = dvTier,
+            tier = AssessmentTier.VERIFY,
             changeNeeded = settings.stripHdr10PlusSei != stripRecommendOn
         )
 
@@ -769,12 +777,9 @@ object DeviceAssessmentEngine {
             dv7HandlingMode = Dv7HandlingMode.AUTO.takeIf {
                 policy.hdrCapsKnown && settings.dv7HandlingMode != Dv7HandlingMode.AUTO
             },
-            dv5ToDv81Enabled = dv5RecommendOn.takeIf {
-                policy.hdrCapsKnown && settings.dv5ToDv81Enabled != dv5RecommendOn
-            },
-            stripHdr10PlusSei = stripRecommendOn.takeIf {
-                policy.hdrCapsKnown && settings.stripHdr10PlusSei != stripRecommendOn
-            },
+            // nt6: advisory-only rows - never machine-applied (see class doc).
+            dv5ToDv81Enabled = null,
+            stripHdr10PlusSei = null,
             forceOpticalPassthrough = false.takeIf {
                 audioRoute != null && audioRoute.key.startsWith("type:hdmi") &&
                     settings.forceOpticalPassthrough
