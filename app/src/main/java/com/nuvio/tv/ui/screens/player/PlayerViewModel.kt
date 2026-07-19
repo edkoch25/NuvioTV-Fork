@@ -592,6 +592,19 @@ class PlayerViewModel @Inject constructor(
         hud.lastCompletedMediaLoadDurationMs?.takeIf { it > 0L }?.let {
             rows += StatsRow("Request", "$it ms")
         }
+        // Rate-limit clamp (nt6): absent until the parallel engine's 429
+        // clamp has tripped this session; WARN while latched (cooldown
+        // counting down), informational once recovered. Reads the
+        // ParallelRangeDataSource companion mirror (same package).
+        if (ParallelRangeDataSource.hudClampTrips > 0) {
+            if (ParallelRangeDataSource.hudClampLatched) {
+                val leftS = ParallelRangeDataSource
+                    .hudClampCooldownRemainingMs(android.os.SystemClock.uptimeMillis()) / 1000L
+                rows += StatsRow("Clamp", "latched \u00b7 ${leftS}s left", StatsDot.WARN)
+            } else {
+                rows += StatsRow("Clamp", "recovered \u00b7 ${ParallelRangeDataSource.hudClampTrips} trips")
+            }
+        }
         if (hud.loadErrorCount > 0) {
             rows += StatsRow("Load errors", hud.loadErrorCount.toString(), StatsDot.WARN)
         }

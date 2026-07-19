@@ -143,6 +143,26 @@ internal class ParallelRangeDataSource(
         private const val RATE_LIMIT_RECOVERY_BASE_MS = 45_000L
         private const val RATE_LIMIT_RECOVERY_MAX_MS = 360_000L
 
+        // nt6: HUD mirror of the rate-limit clamp. Written ONLY by the
+        // download/read paths below; read by the stats overlay
+        // (PlayerViewModel.samplePlaybackStats). Companion scope on purpose:
+        // playback runs one chunk session at a time, and the overlay must
+        // see state that survives ExoPlayer recreating DataSource instances
+        // across seeks. Reset where a fresh session is created so a stale
+        // clamp never carries across titles.
+        @Volatile var hudClampLatched: Boolean = false
+        @Volatile var hudClampTrips: Int = 0
+        @Volatile var hudClampLastHitAtMs: Long = 0L
+
+        /** Cooldown left before the clamp may lift; 0 when not latched. HUD read only. */
+        fun hudClampCooldownRemainingMs(nowUptimeMs: Long): Long {
+            if (!hudClampLatched) return 0L
+            val trips = hudClampTrips.coerceAtLeast(1)
+            val cooldownMs = (RATE_LIMIT_RECOVERY_BASE_MS shl (trips - 1).coerceAtMost(3))
+                .coerceAtMost(RATE_LIMIT_RECOVERY_MAX_MS)
+            return (cooldownMs - (nowUptimeMs - hudClampLastHitAtMs)).coerceAtLeast(0L)
+        }
+
         private class ChunkSession(
             val requestUri: Uri,
             val requestHeaders: Map<String, String>,
@@ -211,6 +231,7 @@ internal class ParallelRangeDataSource(
                 if (SystemClock.uptimeMillis() - lastRateLimitAtMs < cooldownMs) return false
                 if (rateLimited.compareAndSet(true, false)) {
                     rateLimit429s.set(0)
+                    hudClampLatched = false
                     Log.i(TAG, "Rate-limit cooldown (${cooldownMs}ms) elapsed with no further " +
                         "429/503; restoring parallel prefetch (clamp trips this session: $trips)")
                 }
@@ -297,6 +318,10 @@ internal class ParallelRangeDataSource(
                     }
                     teardownSessionLocked(existing, poolCap)
                 }
+                // nt6: fresh session, fresh clamp story for the HUD.
+                hudClampLatched = false
+                hudClampTrips = 0
+                hudClampLastHitAtMs = 0L
                 val created = ChunkSession(requestUri, requestHeaders, chunkSz, chunkCap, prefetchWindow)
                 currentChunkSession = created
                 return created
@@ -956,9 +981,12 @@ internal class ParallelRangeDataSource(
             // cooldown measures quiet time since the LAST hit, not since the
             // moment the clamp tripped.
             activeSession.lastRateLimitAtMs = SystemClock.uptimeMillis()
+            hudClampLastHitAtMs = activeSession.lastRateLimitAtMs
             if (activeSession.rateLimit429s.incrementAndGet() >= RATE_LIMIT_CLAMP_THRESHOLD &&
                 activeSession.rateLimited.compareAndSet(false, true)) {
                 val trips = activeSession.rateLimitClampCount.incrementAndGet()
+                hudClampLatched = true
+                hudClampTrips = trips
                 Log.w(TAG, "Rate-limited (HTTP ${rl.responseCode}) repeatedly; clamping session to " +
                     "single connection (trip #$trips this session)")
             }
