@@ -144,9 +144,7 @@ internal fun PlayerRuntimeController.fetchAddonSubtitles() {
                 val match = visibleSubtitles.firstOrNull { it.id == pendingAddon.id }
                     ?: visibleSubtitles.firstOrNull { PlayerSubtitleUtils.matchesLanguageCode(it.lang, pendingAddon.lang) }
                 if (match != null) {
-                    autoSubtitleSelected = true
-                    selectAddonSubtitle(match)
-                    _uiState.update { it.copy(selectedAddonSubtitle = match, selectedSubtitleTrackIndex = -1) }
+                    autoSelectAddonSubtitleDeferringReload(match)
                     return@launch
                 }
             }
@@ -166,11 +164,49 @@ internal fun PlayerRuntimeController.fetchAddonSubtitles() {
     }
 }
 
+// nt6: attaching an addon subtitle that was NOT pre-attached at startup runs a
+// full setMediaSource+prepare at the current position (see selectAddonSubtitle)
+// - a mid-playback transition that latches bad frame pacing on some vendor HALs
+// (the Prism+ class; the nt5 fix covered audio switches under tunnelling only).
+// Auto-restore must never trigger that while the user is actively watching:
+// seamless cases apply immediately, reload cases park the pick and attach at
+// the next user pause. Explicit user picks are untouched - someone choosing a
+// subtitle accepts the hiccup.
+internal fun PlayerRuntimeController.autoSelectAddonSubtitleDeferringReload(subtitle: Subtitle) {
+    val seamless = isUsingMpvEngine() ||
+        attachedAddonSubtitleKeys.contains(addonSubtitleKey(subtitle)) ||
+        !isPlaybackCurrentlyPlaying()
+    if (seamless) {
+        autoSubtitleSelected = true
+        selectAddonSubtitle(subtitle)
+        _uiState.update { it.copy(selectedAddonSubtitle = subtitle, selectedSubtitleTrackIndex = -1) }
+        return
+    }
+    Log.i(
+        PlayerRuntimeController.TAG,
+        "deferred addon subtitle attach (would reload mid-play): id=${subtitle.id} lang=${subtitle.lang}"
+    )
+    deferredAutoAddonSubtitle = subtitle
+}
+
+internal fun PlayerRuntimeController.maybeAttachDeferredAddonSubtitle() {
+    val subtitle = deferredAutoAddonSubtitle ?: return
+    deferredAutoAddonSubtitle = null
+    Log.i(
+        PlayerRuntimeController.TAG,
+        "attaching deferred addon subtitle at pause: id=${subtitle.id} lang=${subtitle.lang}"
+    )
+    autoSubtitleSelected = true
+    selectAddonSubtitle(subtitle)
+    _uiState.update { it.copy(selectedAddonSubtitle = subtitle, selectedSubtitleTrackIndex = -1) }
+}
+
 internal fun PlayerRuntimeController.refreshSubtitlesForCurrentEpisode() {
     autoSubtitleSelected = false
     subtitleDisabledByPersistedPreference = false
     subtitleAddonRestoredByPersistedPreference = false
     pendingRestoredAddonSubtitle = null
+    deferredAutoAddonSubtitle = null
     hasScannedTextTracksOnce = false
     pendingAddonSubtitleLanguage = null
     pendingAddonSubtitleTrackId = null

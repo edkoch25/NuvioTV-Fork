@@ -399,6 +399,11 @@ class PlayerRuntimeController(
     internal var subtitleDisabledByPersistedPreference: Boolean = false
     internal var subtitleAddonRestoredByPersistedPreference: Boolean = false
     internal var pendingRestoredAddonSubtitle: com.nuvio.tv.domain.model.Subtitle? = null
+    // nt6: an auto-restored addon subtitle whose attach would require a
+    // mid-playback media reload is parked here and attached at the next user
+    // pause (or superseded by any explicit selection). See
+    // autoSelectAddonSubtitleDeferringReload.
+    internal var deferredAutoAddonSubtitle: com.nuvio.tv.domain.model.Subtitle? = null
     internal var attachedAddonSubtitleKeys: Set<String> = emptySet()
     internal var hasScannedTextTracksOnce: Boolean = false
     internal var streamReuseLastLinkEnabled: Boolean = false
