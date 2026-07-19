@@ -46,7 +46,7 @@ internal suspend fun PlayerRuntimeController.fetchAddonSubtitlesNow(
     // Confirm against the store before denying; zero cost when already enabled.
     if (!addonSubtitlesEnabled) {
         addonSubtitlesEnabled =
-            playerSettingsDataStore.settings.firstOrNull()?.addonSubtitlesEnabled == true
+            playerSettingsDataStore.playerSettings.firstOrNull()?.addonSubtitlesEnabled == true
         if (!addonSubtitlesEnabled) return emptyList()
     }
     val request = buildSubtitleFetchRequest() ?: return emptyList()
@@ -123,7 +123,7 @@ internal fun PlayerRuntimeController.fetchAddonSubtitles() {
         // nt6 race hardening: gate check runs inside the coroutine so it can
         // suspend to confirm against the store (see fetchAddonSubtitlesNow).
         if (!addonSubtitlesEnabled &&
-            playerSettingsDataStore.settings.firstOrNull()?.addonSubtitlesEnabled != true
+            playerSettingsDataStore.playerSettings.firstOrNull()?.addonSubtitlesEnabled != true
         ) {
             return@launch
         }
