@@ -685,6 +685,14 @@ class PlayerViewModel @Inject constructor(
             }
         )
 
+        // Route (nt6): the AudioTrack's routed output device and how many times it has
+        // changed mid-track this playback. A count ticking up while Buffer stays healthy
+        // and Underruns stays flat is the route-steal static signature (system sounds,
+        // capture tools, HDMI renegotiation). Dotless: the number judges itself in context.
+        controller.playbackSpeedAwareAudioSink?.sampleAudioRoute()?.let { route ->
+            rows += StatsRow("Route", "${route.deviceLabel} · ${route.changeCount} changes")
+        }
+
         // Audio-clock jitter. Under passthrough the audio clock is the master clock, so a
         // clock that jumps drags the video renderer into bulk frame drops — the visible skips
         // of a vendor HAL failing to pack its output. Nothing else on this panel sees that.

@@ -1,5 +1,6 @@
 package com.nuvio.tv.ui.screens.player
 
+import android.media.AudioDeviceInfo
 import android.media.AudioTrack
 import android.os.SystemClock
 import android.util.Log
@@ -354,6 +355,17 @@ internal class PlaybackSpeedAwareAudioSink(
 
     private var cachedAudioTrackField: Field? = null
 
+    // nt6 Route row state. Single writer (the HUD sampler, ~1 Hz, panel
+    // visible only), so the read-modify-write on the counter is safe.
+    // A brand-new AudioTrack instance re-baselines WITHOUT counting —
+    // flush() recreates the track on every seek by design (nt51) and
+    // that must not read as a route change. Counting rule: same track,
+    // transition FROM a known device to a different device or to null
+    // (device lost mid-track) = one route change.
+    @Volatile private var routeLastTrackIdentity: Int = 0
+    @Volatile private var routeLastDeviceId: Int = -1
+    @Volatile private var routeChangeCount: Int = 0
+
     /**
      * The native AudioTrack's own underrun count, read straight off the track.
      *
@@ -386,6 +398,64 @@ internal class PlaybackSpeedAwareAudioSink(
             audioTrackFieldLookupFailed = true
             Log.w(TAG, "native AudioTrack underrun count unavailable: ${t.message}")
             null
+        }
+    }
+
+    /** One HUD-tick sample of the AudioTrack's routed output device (nt6). */
+    data class AudioRouteSnapshot(val deviceLabel: String, val changeCount: Int)
+
+    /**
+     * nt6: poll the current AudioTrack's routed device for the stats HUD's
+     * Route row. Same reflection pattern and fail-closed behaviour as
+     * nativeAudioTrackUnderrunCount() above; called only from the HUD
+     * sampler, never from the write path. A count ticking up while Buffer
+     * stays healthy is the route-steal static signature (system capture
+     * tool, HDMI renegotiation) — the class of fault the pinned-
+     * capabilities design deliberately keeps the app blind to elsewhere.
+     */
+    fun sampleAudioRoute(): AudioRouteSnapshot? {
+        if (audioTrackFieldLookupFailed) return null
+        val defaultSink = delegate as? DefaultAudioSink ?: return null
+        return try {
+            val field = cachedAudioTrackField
+                ?: DefaultAudioSink::class.java.getDeclaredField("audioTrack")
+                    .apply { isAccessible = true }
+                    .also { cachedAudioTrackField = it }
+            val track = field.get(defaultSink) as? AudioTrack ?: return null
+            val identity = System.identityHashCode(track)
+            val device = track.routedDevice
+            val deviceId = device?.id ?: -1
+            when {
+                identity != routeLastTrackIdentity -> {
+                    routeLastTrackIdentity = identity
+                    routeLastDeviceId = deviceId
+                }
+                routeLastDeviceId != -1 && deviceId != routeLastDeviceId -> {
+                    routeChangeCount += 1
+                    routeLastDeviceId = deviceId
+                }
+                routeLastDeviceId == -1 -> routeLastDeviceId = deviceId
+            }
+            AudioRouteSnapshot(routeDeviceLabel(device), routeChangeCount)
+        } catch (t: Throwable) {
+            audioTrackFieldLookupFailed = true
+            Log.w(TAG, "audio route sample unavailable: ${t.message}")
+            null
+        }
+    }
+
+    private fun routeDeviceLabel(device: AudioDeviceInfo?): String {
+        val type = device?.type ?: return "none"
+        return when (type) {
+            AudioDeviceInfo.TYPE_HDMI -> "HDMI"
+            AudioDeviceInfo.TYPE_HDMI_ARC -> "HDMI ARC"
+            AudioDeviceInfo.TYPE_HDMI_EARC -> "HDMI eARC"
+            AudioDeviceInfo.TYPE_LINE_DIGITAL -> "SPDIF"
+            AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "Speaker"
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "Bluetooth"
+            AudioDeviceInfo.TYPE_REMOTE_SUBMIX -> "Submix"
+            AudioDeviceInfo.TYPE_USB_DEVICE -> "USB"
+            else -> "type $type"
         }
     }
 
