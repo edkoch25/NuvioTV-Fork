@@ -305,7 +305,7 @@ class HomeViewModel @Inject constructor(
 
             viewModelScope.launch {
                 combine(
-                    _uiState.map { it.continueWatchingItems }.distinctUntilChanged(),
+                    _uiState.map { it.continueWatchingItems + it.upcomingItems }.distinctUntilChanged(),
                     TvRecommendationManager.isPlaybackActive
                 ) { items, isPlaying ->
                     Pair(items, isPlaying)
@@ -339,7 +339,7 @@ class HomeViewModel @Inject constructor(
                     cwEnrichedInProgressOverlay.clear()
                     cwLastBadgeEpisodeKeys = emptySet()
                     _uiState.update {
-                        it.copy(layoutPreferencesReady = false)
+                        it.copy(layoutPreferencesReady = false, continueWatchingItems = emptyList())
                     }
                     clearFocusState()
                     _gridFocusState.value = HomeScreenFocusState()
@@ -347,7 +347,8 @@ class HomeViewModel @Inject constructor(
                     _initialCwResolved.value = false
                     loadContinueWatching()
                     // Clear watched badges so they don't leak between profiles.
-                    watchedSeriesStateHolder.update(emptySet())
+                    watchedSeriesStateHolder.clearInMemory()
+                    watchedSeriesStateHolder.loadFromDisk(profileId = newId)
                     _movieWatchedStatus.value = emptyMap()
                     _pendingWatchedBatch.value = emptyMap()
                     _uiState.update { it.copy(movieWatchedStatus = emptyMap()) }
@@ -390,7 +391,7 @@ class HomeViewModel @Inject constructor(
         cwEnrichedInProgressOverlay.clear()
         cwLastBadgeEpisodeKeys = emptySet()
         watchedSeriesStateHolder.clearValidationState()
-        _uiState.update { it.copy(continueWatchingItems = emptyList()) }
+        _uiState.update { it.copy(continueWatchingItems = emptyList(), upcomingItems = emptyList()) }
         // Bump trigger so the pipeline's collectLatest restarts with fresh state.
         cwPipelineRefreshTrigger.value++
     }
@@ -640,13 +641,15 @@ class HomeViewModel @Inject constructor(
                     )
                 )
             }
+            val sortMode = layoutPreferenceDataStore.continueWatchingSortMode.first()
             val items = mergeContinueWatchingItems(
                 inProgressItems = inProgressItems,
                 nextUpItems = nextUpItems,
-                mode = layoutPreferenceDataStore.continueWatchingSortMode.first()
+                mode = sortMode
             )
             if (items.isNotEmpty()) {
-                _uiState.update { it.copy(continueWatchingItems = items) }
+                val (mainItems, upcomingOnly) = splitUpcomingItems(items, sortMode)
+                _uiState.update { it.copy(continueWatchingItems = mainItems, upcomingItems = upcomingOnly) }
                 _initialCwResolved.value = true
             }
         }
