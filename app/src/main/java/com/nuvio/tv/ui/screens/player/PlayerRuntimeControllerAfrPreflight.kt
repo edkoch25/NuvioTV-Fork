@@ -56,7 +56,11 @@ internal suspend fun PlayerRuntimeController.runAfrCachePreflightIfEnabled(
         return
     }
 
-    val cached = FrameRateUtils.getCachedFrameRate(url, headers) ?: run {
+    // Keyed with the filename so entries written by the MPV probing preflight
+    // (the sole cache writer, filename-keyed since upstream 0.7.19) are
+    // visible here. Falls back to the URL-based key when no filename is known
+    // — same rule the writer uses, so the two sides can never disagree.
+    val cached = FrameRateUtils.getCachedFrameRate(url, headers, currentFilename) ?: run {
         Log.d(PlayerRuntimeController.TAG, "AFR cache preflight: miss; deferring to track-format AFR after prepare")
         return
     }

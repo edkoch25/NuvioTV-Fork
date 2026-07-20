@@ -772,6 +772,12 @@ internal fun PlayerRuntimeController.switchToSourceStream(
             detectedFrameRateSource = null
         )
     }
+    // Refresh the filename for the NEW stream before anything derives state
+    // from it (the AFR cache key below, createMediaSource's filename, media
+    // session metadata). This function never updated it, so a source switch
+    // carried the previous stream's filename forward. Same pattern as the
+    // initial-play and torrent-switch paths.
+    currentFilename = stream.behaviorHints?.filename ?: navigationArgs.filename
     showStreamSourceIndicator(stream)
     resetPostPlayOverlayState(clearEpisode = false)
 
