@@ -112,6 +112,45 @@ object MemoryBudget {
         )
     }
 
+    // ── Assessment-sweep cell budgeting (crash-hardening leg 2, 19 Jul 2026 incident) ──
+    //
+    // A sweep cell's true memory ceiling is the tester's prefetch WINDOW, not
+    // connections x chunk: ParallelRangeDataSource may hold up to its prefetch
+    // depth in live chunks (plus the memory-tiered session-cap headroom). The
+    // tester's old unconditional connections*4 window gave the 3 conn / 64 MB
+    // crash cell a permitted ceiling near 1 GB on the 250 MB-budget S905X5M.
+    //
+    // SWEEP_BUDGET_FRACTION reserves headroom for the app's own native use
+    // while a sweep runs; SWEEP_CELL_MAX_CONCURRENT_MB is the absolute cap on
+    // the nominal concurrent-download footprint (connections x chunk) on ANY
+    // device — 3 x 64 MB never runs, on the 4 GB tier included. Both are
+    // [inferred] initial values, field-tunable like the trade constants.
+    private const val SWEEP_BUDGET_FRACTION = 0.75
+    const val SWEEP_CELL_MAX_CONCURRENT_MB = 128
+
+    /**
+     * Prefetch depth (in chunks) a sweep cell may run with on this device, or
+     * null when the cell must NOT be scheduled at all. Null when either the
+     * nominal concurrent footprint (connections x chunk) exceeds
+     * [SWEEP_CELL_MAX_CONCURRENT_MB], or the budget-derived depth falls below
+     * ParallelRangeDataSource's own floor of connections + 1 — a window that
+     * small cannot be honoured, so the cell cannot be memory-bounded.
+     * Single source of truth: the sweep's ladder gate and the tester's window
+     * both use this value, so the gate can never drift from the allocation.
+     */
+    fun sweepCellPrefetchDepth(
+        connections: Int,
+        chunkSizeMb: Int,
+        safeNativeLimitMb: Int
+    ): Int? {
+        val chunkMb = chunkSizeMb.coerceAtLeast(1)
+        if (connections * chunkMb > SWEEP_CELL_MAX_CONCURRENT_MB) return null
+        val budgetMb = (safeNativeLimitMb * SWEEP_BUDGET_FRACTION).toInt()
+        val depth = (budgetMb / chunkMb)
+            .coerceAtMost(connections * PREFETCH_DEPTH_UPPER_MULTIPLE)
+        return depth.takeIf { it >= connections + 1 }
+    }
+
     /**
      * Parallel overhead for the DISPLAYED memory-usage estimate only. nt-exact revision:
      * instead of always assuming the 4*connections upper clamp (which over-stated usage

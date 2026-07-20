@@ -40,8 +40,17 @@ object StreamSpeedTester {
     private const val SUB_WINDOW_MS = 500L
     private const val MEASURE_MIN_MS = 2_500L
 
-    /** Headline Mbps plus the per-sub-window Mbps series behind it. */
-    data class ParallelPassResult(val mbps: Double, val subWindowMbps: List<Double>)
+    /**
+     * Headline Mbps plus the per-sub-window Mbps series behind it.
+     * [failureReason] is non-null when the pass died (crash-hardening leg 1,
+     * 19 Jul 2026 incident): the cell failed, was cleaned up, and the sweep
+     * should record it and continue rather than abort or crash.
+     */
+    data class ParallelPassResult(
+        val mbps: Double,
+        val subWindowMbps: List<Double>,
+        val failureReason: String? = null
+    )
 
     // 1. Measures single connection baseline speed (standard OkHttp)
     suspend fun runBaselineTest(
@@ -96,7 +105,13 @@ object StreamSpeedTester {
         url: String,
         headers: Map<String, String>,
         chunkSizeBytes: Long,
-        parallelConnections: Int
+        parallelConnections: Int,
+        // Crash-hardening leg 2 (19 Jul 2026 incident): the window is now the
+        // CALLER's budget-derived figure (MemoryBudget.sweepCellPrefetchDepth),
+        // not an unconditional connections*4 — which on a 3 conn / 64 MB cell
+        // permitted a ~1 GB session ceiling against the S905X5M's 250 MB safe
+        // native budget and killed the app mid-sweep.
+        prefetchDepthChunks: Int
     ): ParallelPassResult = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         // AtomicLong: the tally is incremented from multiple connection threads,
         // and plain 64-bit writes can tear on 32-bit ABIs.
@@ -113,21 +128,31 @@ object StreamSpeedTester {
             override fun onTransferEnd(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
         }
 
+        var openSource: ParallelRangeDataSource? = null
+        var sampler: kotlinx.coroutines.Job? = null
         try {
+            // Fresh session per cell: a retained session from the previous cell
+            // (or from playback, nt6) carries THAT cell's chunk cap and warm
+            // chunks — wrong window bounds and a warm-start bias for a
+            // measurement. Tear it down so every cell opens cold with its own
+            // budget-derived cap. (The assessment flow runs with the player
+            // closed; anything a live player retained would be re-fetched on
+            // its next seek, a cost, not a correctness issue.)
+            ParallelRangeDataSource.releaseRetainedSession()
             val okHttpFactory = OkHttpDataSource.Factory(PlayerPlaybackNetworking.playbackHttpClient).apply {
                 setDefaultRequestProperties(headers)
             }
             // Use existing ParallelRangeDataSource from the app
-            val speedTestPrefetchDepth = parallelConnections * 4
             val dataSource = ParallelRangeDataSource(
                 upstreamFactory = okHttpFactory,
                 parallelConnections = parallelConnections,
                 chunkSize = chunkSizeBytes,
                 useNativeMemory = true,
-                prefetchDepthChunks = speedTestPrefetchDepth
+                prefetchDepthChunks = prefetchDepthChunks
             ).apply {
                 addTransferListener(transferListener)
             }
+            openSource = dataSource
             dataSource.open(DataSpec(android.net.Uri.parse(url)))
             val buffer = ByteArray(64 * 1024)
 
@@ -153,7 +178,7 @@ object StreamSpeedTester {
             val tStart = System.currentTimeMillis()
             val tDeadline = tStart + MEASURE_MAX_MS
             val subWindowMbps = mutableListOf<Double>()
-            val sampler = launch {
+            val samplerJob = launch {
                 var wStartMs = System.currentTimeMillis()
                 var wStartBytes = totalBytesDownloaded.get()
                 while (true) {
@@ -166,6 +191,7 @@ object StreamSpeedTester {
                     wStartBytes = bytes
                 }
             }
+            sampler = samplerJob
             // Run to BOTH the byte budget and the minimum duration; the last
             // partial window is simply dropped when the sampler is cancelled.
             while (!eof &&
@@ -177,8 +203,8 @@ object StreamSpeedTester {
                 if (read == -1) { eof = true }
             }
             val endMs = System.currentTimeMillis()
-            sampler.cancel()
-            sampler.join()
+            samplerJob.cancel()
+            samplerJob.join()
             val elapsed = (endMs - tStart).coerceAtLeast(1)
             val networkDelta = totalBytesDownloaded.get() - networkAtMeasureStart
             dataSource.close()
@@ -187,9 +213,31 @@ object StreamSpeedTester {
                 mbps = (networkDelta * 8.0) / (elapsed * 1000.0),
                 subWindowMbps = subWindowMbps.toList()
             )
-        } catch (e: Exception) {
-            e.printStackTrace()
-            return@withContext ParallelPassResult(0.0, emptyList())
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            // Crash-hardening leg 1 (19 Jul 2026 incident): a sweep cell must
+            // fail, never the process. Throwable, not Exception, because the
+            // proven killer is OutOfMemoryError — an Error — from chunk-buffer
+            // allocation. Free everything the dead cell holds (its session's
+            // chunks and the idle pool for this chunk size) so the next cell
+            // starts from a clean slate, then report the failure upward.
+            android.util.Log.e(
+                "StreamSpeedTester",
+                "Sweep cell failed (${parallelConnections}c/${chunkSizeBytes / (1024L * 1024L)}MB)",
+                t
+            )
+            ParallelRangeDataSource.releaseRetainedSession()
+            ParallelRangeDataSource.drainIdleBuffers(chunkSizeBytes)
+            val reason = t.javaClass.simpleName +
+                (t.message?.takeIf { it.isNotBlank() }?.let { ": $it" } ?: "")
+            return@withContext ParallelPassResult(0.0, emptyList(), failureReason = reason)
+        } finally {
+            sampler?.cancel()
+            try {
+                openSource?.close()
+            } catch (_: Exception) {
+            }
         }
         @Suppress("UNREACHABLE_CODE")
         ParallelPassResult(0.0, emptyList())

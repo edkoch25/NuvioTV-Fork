@@ -2904,6 +2904,7 @@
     <string name="stream_test_error_prefix">Error: %1$s</string>
     <string name="stream_test_video_bitrate">Average Video Bitrate: %1$s</string>
     <string name="stream_test_error_connection">Connection failed. The last played stream link may have expired or is unreachable. Please play the video again and retry.</string>
+    <string name="stream_test_cell_failed">%1$s failed (%2$s) \u2014 continuing sweep</string>
 
 
     <!-- Device Settings Assessment (Stage 1, review-only): engine strings -->

@@ -341,6 +341,26 @@ internal class ParallelRangeDataSource(
         }
 
         /**
+         * Sweep crash-hardening leg 1 (19 Jul 2026 incident): free every IDLE
+         * recycled buffer pooled for [chunkSize]. Called when a chunk-buffer
+         * allocation OOMs (relieve native pressure so the process survives) and
+         * when a sweep cell fails (so a dead cell's recycled buffers never
+         * carry into the next cell). Idle buffers only — in-flight buffers are
+         * owned by their session's futures and are torn down by the session.
+         */
+        internal fun drainIdleBuffers(chunkSize: Long) {
+            val pool = globalBufferPool[chunkSize] ?: return
+            while (true) {
+                val buf = pool.pollLast() ?: break
+                if (buf.allocation != null) {
+                    androidx.media3.exoplayer.upstream.DefaultAllocatorNative.freeAllocation(buf.allocation)
+                } else if (buf.byteBuffer.isDirect) {
+                    freeDirectBuffer(buf.byteBuffer)
+                }
+            }
+        }
+
+        /**
          * Enforce the session's chunk cap with touch-LRU eviction. Never
          * evicts [protectIndex] (the chunk being read) or anything touched in
          * the last EVICTION_TOUCH_GUARD_MS.
@@ -860,6 +880,19 @@ internal class ParallelRangeDataSource(
                     }
                 } catch (e: Exception) {
                     future.completeExceptionally(e)
+                } catch (e: OutOfMemoryError) {
+                    // Sweep crash-hardening leg 1 (19 Jul 2026 incident): chunk-buffer
+                    // allocation (acquireBuffer -> ByteBuffer.allocateDirect) throws
+                    // OutOfMemoryError, an Error the Exception catch above never sees —
+                    // it escaped this worker thread to the default uncaught-exception
+                    // handler and killed the process mid-assessment-sweep. Contain it:
+                    // free every idle pooled buffer of this chunk size to relieve
+                    // pressure, then fail the CHUNK (wrapped as IOException so every
+                    // downstream Exception handler keeps working), never the process.
+                    drainIdleBuffers(activeSession.chunkSize)
+                    future.completeExceptionally(
+                        IOException("Native chunk buffer allocation failed (out of memory)", e)
+                    )
                 }
             }
             future

@@ -53,6 +53,13 @@ object StreamSweepEngine {
 
     data class MeasuredPass(val connections: Int, val chunkMb: Int, val mbps: Double)
 
+    /**
+     * Crash-hardening leg 1 (19 Jul 2026 incident): a cell that died or was
+     * refused mid-sweep, recorded so the sweep can continue and still report
+     * what happened. Failed cells never enter [MeasuredPass] candidates.
+     */
+    data class FailedCell(val label: String, val reason: String)
+
     enum class VerdictKind {
         /** Baseline alone met the 2x target — parallel connections stay off. */
         LEAVE_PARALLEL_OFF,
@@ -110,7 +117,9 @@ object StreamSweepEngine {
          * not a throughput figure.
          */
         val stabilityCoV: Double?,
-        val stabilityPassCount: Int
+        val stabilityPassCount: Int,
+        /** Cells that died or were refused mid-sweep; see [FailedCell]. */
+        val failedCells: List<FailedCell> = emptyList()
     )
 
     suspend fun run(
@@ -140,8 +149,22 @@ object StreamSweepEngine {
         fun overheadMb(connections: Int, chunkMb: Int) =
             MemoryBudget.parallelOverheadMb(connections, chunkMb)
 
+        // Crash-hardening leg 2 (19 Jul 2026 incident): the depth the tester
+        // will actually be allowed to schedule with, budget-derived from the
+        // SAME single-source-of-truth function — null means the cell can not
+        // be memory-bounded on this device (or busts the absolute concurrent
+        // cap) and must never run. The old gate checked the (conn+2)*chunk
+        // display model against the WARNING limit while the tester ran an
+        // unconditional conn*4 window: model said 320 MB, reality permitted
+        // ~1 GB, and the S905X5M (250 MB safe / 325 MB warning) died on the
+        // 3 conn / 64 MB cell.
+        fun cellDepth(connections: Int, chunkMb: Int): Int? =
+            MemoryBudget.sweepCellPrefetchDepth(connections, chunkMb, safeLimitMb)
+
         fun allowed(connections: Int, chunkMb: Int) =
-            chunkMb in minChunkMb..maxChunkMb && overheadMb(connections, chunkMb) <= warningLimitMb
+            chunkMb in minChunkMb..maxChunkMb &&
+                overheadMb(connections, chunkMb) <= warningLimitMb &&
+                cellDepth(connections, chunkMb) != null
 
         fun mayContinue() =
             parallelPasses < maxParallelPasses && passesSinceSufficient < 2
@@ -165,6 +188,7 @@ object StreamSweepEngine {
 
         val measured = mutableListOf<MeasuredPass>()
         val passStabilityCovs = mutableListOf<Double>()
+        val failedCells = mutableListOf<FailedCell>()
 
         suspend fun measure(connections: Int, chunkMb: Int): Double {
             val label = rowLabel(connections, chunkMb)
@@ -172,12 +196,41 @@ object StreamSweepEngine {
             parallelPasses += 1
             onState(label)
             onPassAdded(label)
-            val pass = StreamSpeedTester.runParallelChunkTest(
-                streamUrl,
-                headers,
-                chunkMb * 1024L * 1024L,
-                connections
-            )
+            // allowed() gates every caller, so the depth is present; the
+            // fallback exists only so a future call-site slip degrades to a
+            // skipped cell instead of an unbounded one.
+            val depth = cellDepth(connections, chunkMb) ?: run {
+                failedCells += FailedCell(label, "budget gate")
+                onPassResult(label, 0.0)
+                return 0.0
+            }
+            // Crash-hardening leg 1 (19 Jul 2026 incident): a cell may die —
+            // OutOfMemoryError included — and the sweep must survive it, keep
+            // its measurements, and continue. The tester already contains its
+            // own failures; this catch is the sweep-level backstop for
+            // anything that still escapes. CancellationException stays
+            // transparent so aborting the sweep keeps working.
+            val pass = try {
+                StreamSpeedTester.runParallelChunkTest(
+                    streamUrl,
+                    headers,
+                    chunkMb * 1024L * 1024L,
+                    connections,
+                    depth
+                )
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                StreamSpeedTester.ParallelPassResult(
+                    0.0,
+                    emptyList(),
+                    failureReason = t.javaClass.simpleName
+                )
+            }
+            pass.failureReason?.let { reason ->
+                failedCells += FailedCell(label, reason)
+                onState(context.getString(R.string.stream_test_cell_failed, label, reason))
+            }
             val mbps = pass.mbps
             coefficientOfVariation(pass.subWindowMbps)?.let { passStabilityCovs += it }
             onPassResult(label, mbps)
@@ -219,7 +272,8 @@ object StreamSweepEngine {
                     measured = measured.toList(),
                     errorText = context.getString(R.string.stream_test_error_connection),
                     stabilityCoV = stabilityCoVOf(passStabilityCovs),
-                    stabilityPassCount = passStabilityCovs.size
+                    stabilityPassCount = passStabilityCovs.size,
+                    failedCells = failedCells.toList()
                 )
             }
 
@@ -236,7 +290,8 @@ object StreamSweepEngine {
                     measured = measured.toList(),
                     errorText = null,
                     stabilityCoV = stabilityCoVOf(passStabilityCovs),
-                    stabilityPassCount = passStabilityCovs.size
+                    stabilityPassCount = passStabilityCovs.size,
+                    failedCells = failedCells.toList()
                 )
             }
 
@@ -272,7 +327,8 @@ object StreamSweepEngine {
                     measured = measured.toList(),
                     errorText = null,
                     stabilityCoV = stabilityCoVOf(passStabilityCovs),
-                    stabilityPassCount = passStabilityCovs.size
+                    stabilityPassCount = passStabilityCovs.size,
+                    failedCells = failedCells.toList()
                 )
             }
 
@@ -351,13 +407,24 @@ object StreamSweepEngine {
                 }
             }
 
+            // Crash-hardening leg 3 (19 Jul 2026 incident): on the <= 2 GB
+            // native tier (safe budget <= 250 MB) the recommendation layer
+            // never surfaces chunk sizes above RECOMMEND_CHUNK_CAP_LOW_TIER_MB,
+            // even if a bounded probe measured one. Probe-to-warning vs
+            // recommend-to-safe asymmetry stands; this is a second, tier-keyed
+            // asymmetry on the chunk axis. Candidate selection only — measured
+            // rows are reported as run.
+            val recommendChunkCapMb =
+                if (safeLimitMb <= LOW_TIER_SAFE_LIMIT_MB) RECOMMEND_CHUNK_CAP_LOW_TIER_MB else maxChunkMb
+            val recommendable = measured.filter { it.chunkMb <= recommendChunkCapMb }
+
             // Verdict: cheapest config that BOTH meets the 2x target AND fits the
             // safe native-memory budget, so the tool never recommends a configuration
             // the memory-usage indicator would flag. If none of the sufficient configs
             // fit the safe budget, fall back to the cheapest sufficient one regardless
             // (a working recommendation beats none on a very memory-constrained device).
             if (targetMbps != null) {
-                val sufficient = measured.filter { it.mbps >= targetMbps * SUFFICIENCY_TOLERANCE }
+                val sufficient = recommendable.filter { it.mbps >= targetMbps * SUFFICIENCY_TOLERANCE }
                 val sufficientAndSafe = sufficient.filter {
                     overheadMb(it.connections, it.chunkMb) <= safeLimitMb
                 }
@@ -378,7 +445,7 @@ object StreamSweepEngine {
                             .coerceAtMost(com.nuvio.tv.data.local.PlayerSettings.LARGE_TARGET_BUFFER_MAX_MB)
                     fun bufferSecondsAt(mb: Int): Int = (mb * 8.0 / bitrateMbps).toInt()
                     val tradeBar = bitrateMbps * TRADE_BAR_OF_BITRATE
-                    val nearSufficient = measured.filter { it.mbps >= tradeBar }
+                    val nearSufficient = recommendable.filter { it.mbps >= tradeBar }
                     val nearAndSafe = nearSufficient.filter {
                         overheadMb(it.connections, it.chunkMb) <= safeLimitMb
                     }
@@ -444,10 +511,11 @@ object StreamSweepEngine {
                         measured = measured.toList(),
                         errorText = null,
                         stabilityCoV = stabilityCoVOf(passStabilityCovs),
-                        stabilityPassCount = passStabilityCovs.size
+                        stabilityPassCount = passStabilityCovs.size,
+                        failedCells = failedCells.toList()
                     )
                 }
-                val fastest = measured.maxByOrNull { it.mbps }
+                val fastest = recommendable.maxByOrNull { it.mbps }
                 if (fastest != null) {
                     // Below 2x is not the same as unplayable: above the
                     // title's own bitrate playback should work with thin
@@ -483,7 +551,8 @@ object StreamSweepEngine {
                         measured = measured.toList(),
                         errorText = null,
                         stabilityCoV = stabilityCoVOf(passStabilityCovs),
-                        stabilityPassCount = passStabilityCovs.size
+                        stabilityPassCount = passStabilityCovs.size,
+                        failedCells = failedCells.toList()
                     )
                 }
                 return SweepOutcome(
@@ -495,11 +564,12 @@ object StreamSweepEngine {
                     measured = measured.toList(),
                     errorText = null,
                     stabilityCoV = stabilityCoVOf(passStabilityCovs),
-                    stabilityPassCount = passStabilityCovs.size
+                    stabilityPassCount = passStabilityCovs.size,
+                    failedCells = failedCells.toList()
                 )
             }
 
-            val fastest = measured.maxByOrNull { it.mbps }
+            val fastest = recommendable.maxByOrNull { it.mbps }
             return if (fastest != null) {
                 SweepOutcome(
                     verdictKind = VerdictKind.FASTEST_NO_BITRATE,
@@ -524,7 +594,8 @@ object StreamSweepEngine {
                     measured = measured.toList(),
                     errorText = null,
                     stabilityCoV = stabilityCoVOf(passStabilityCovs),
-                    stabilityPassCount = passStabilityCovs.size
+                    stabilityPassCount = passStabilityCovs.size,
+                    failedCells = failedCells.toList()
                 )
             } else {
                 SweepOutcome(
@@ -536,10 +607,17 @@ object StreamSweepEngine {
                     measured = measured.toList(),
                     errorText = null,
                     stabilityCoV = stabilityCoVOf(passStabilityCovs),
-                    stabilityPassCount = passStabilityCovs.size
+                    stabilityPassCount = passStabilityCovs.size,
+                    failedCells = failedCells.toList()
                 )
             }
-        } catch (e: Exception) {
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Aborting the sweep must propagate, not masquerade as an error verdict.
+            throw e
+        } catch (e: Throwable) {
+            // Crash-hardening leg 1 (19 Jul 2026 incident): Throwable, not
+            // Exception — an Error escaping the per-cell isolation must still
+            // end as a structured outcome, never a process death.
             return SweepOutcome(
                 verdictKind = VerdictKind.NONE,
                 verdictText = null,
@@ -549,7 +627,8 @@ object StreamSweepEngine {
                 measured = measured.toList(),
                 errorText = e.localizedMessage ?: context.getString(R.string.error_unknown),
                 stabilityCoV = stabilityCoVOf(passStabilityCovs),
-                stabilityPassCount = passStabilityCovs.size
+                stabilityPassCount = passStabilityCovs.size,
+                failedCells = failedCells.toList()
             )
         }
     }
@@ -576,6 +655,13 @@ object StreamSweepEngine {
     // lowered 8 -> 5 on two runs of field data (6 s gain wrongly blocked,
     // 2 s gain correctly blocked).
     private const val SUFFICIENCY_TOLERANCE = 0.95
+
+    // Crash-hardening leg 3 (19 Jul 2026 incident). LOW_TIER matches
+    // getSafeNativeMemoryLimitMb's <= 2 GB rungs (150/200/250); the chunk cap
+    // is the largest size with any recommendation history on that tier.
+    // [inferred] initial values.
+    private const val LOW_TIER_SAFE_LIMIT_MB = 250
+    private const val RECOMMEND_CHUNK_CAP_LOW_TIER_MB = 32
 
     private fun coefficientOfVariation(samples: List<Double>): Double? {
         if (samples.size < STABILITY_MIN_WINDOWS) return null
