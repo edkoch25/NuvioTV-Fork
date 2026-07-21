@@ -366,6 +366,30 @@ fun AdvancedSettingsContent(
 
     val networkListState = rememberLazyListState()
 
+    // The same treatment for the device-assessment results card. It grows the
+    // same way and overflows the same way - it just never had the effect,
+    // because deviceAssessmentItems contributes item() blocks to THIS
+    // screen's LazyColumn and has no list state of its own to scroll. Keyed
+    // on the row count and on the note count, so a row that resolves to
+    // "Rate-limited" or "Skipped" (no number, so it never counts as
+    // completed) still triggers a re-measure.
+    LaunchedEffect(
+        assessmentState.passRows.size,
+        assessmentState.passRows.count { it.second != null },
+        assessmentState.passNotes.size,
+        assessmentState.running
+    ) {
+        if (assessmentState.passRows.isEmpty()) return@LaunchedEffect
+        withFrameNanos { }
+        withFrameNanos { }
+        val card = networkListState.layoutInfo.visibleItemsInfo
+            .find { it.key == "assessment_passes" } ?: return@LaunchedEffect
+        val overflow = (card.offset + card.size) - networkListState.layoutInfo.viewportEndOffset
+        if (overflow > 0) {
+            networkListState.animateScrollBy(overflow.toFloat() + 16f)
+        }
+    }
+
     // Keep the growing stream-test results card in view: each completed pass adds
     // a row and the card can extend past the bottom of the screen. When that
     // happens, scroll by exactly the overflow so the newest rows stay visible.

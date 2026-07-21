@@ -244,6 +244,18 @@ object StreamSweepEngine {
             val label = rowLabel(connections, chunkMb)
             if (skippedLabels.add(label)) {
                 onState(context.getString(R.string.stream_test_cell_skipped, label, reason))
+                // The a2 note plumbing was added to the budget-gate fallback
+                // INSIDE measure(), which its own comment says is unreachable
+                // in normal operation - while this, the path that actually
+                // fires, still only wrote a status line the next cell
+                // overwrote. Four sweeps (21 Jul) refused the 64 MB rung and
+                // not one of them left anything on screen to prove it. A
+                // refusal now leaves a row like any other cell.
+                onPassAdded(label)
+                onPassResult(
+                    label, null,
+                    context.getString(R.string.stream_test_note_skipped, reason)
+                )
             }
         }
 
