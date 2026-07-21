@@ -2910,7 +2910,9 @@
     <string name="stream_test_cell_retry_wait">%1$s refused \u2014 waiting %2$ds and retrying once</string>
     <string name="stream_test_note_rate_limited">Rate-limited</string>
     <string name="stream_test_note_no_transfer">No transfer</string>
-    <string name="stream_test_note_skipped">Skipped \u2014 %1$s</string>
+    <string name="stream_test_note_skipped">Skipped</string>
+    <string name="stream_test_detail_rate_limited">the source refused this connection count</string>
+    <string name="stream_test_detail_no_transfer">rate-limited into moving almost no data</string>
     <string name="stream_test_note_skipped_generic">over the device budget</string>
 
 

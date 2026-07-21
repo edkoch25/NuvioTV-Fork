@@ -85,7 +85,7 @@ object DeviceAssessmentEngine {
         diagnostics: LastPlaybackDiagnostics,
         onSweepState: (String) -> Unit,
         onSweepPassAdded: (String) -> Unit,
-        onSweepPassResult: (String, Double?, String?) -> Unit
+        onSweepPassResult: (String, Double?, com.nuvio.tv.core.network.StreamSweepEngine.PassNote?) -> Unit
     ): AssessmentResult {
         val now = System.currentTimeMillis()
 

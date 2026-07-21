@@ -59,6 +59,17 @@ object StreamSweepEngine {
     private const val RETRY_PAUSE_MAX_MS = 45_000L
     private const val RETRY_PAUSE_BUDGET_MS = 90_000L
 
+    /**
+     * Why a row has no number. [state] is short enough for the value column
+     * ("Skipped", "Rate-limited"); [detail] is the specific rule or cause and
+     * renders as a subtitle under the label, where the rest of the settings
+     * UI puts secondary text. Keeping them apart is what stops a long reason
+     * wrapping across the right-aligned number column - observed on the
+     * 21 Jul 64 MB skip row, which pushed its own row taller than its
+     * neighbours and collided with the label.
+     */
+    data class PassNote(val state: String, val detail: String? = null)
+
     data class MeasuredPass(val connections: Int, val chunkMb: Int, val mbps: Double)
 
     /**
@@ -145,7 +156,7 @@ object StreamSweepEngine {
          * to a user as "this configuration achieved zero throughput", which
          * is a different and false claim.
          */
-        onPassResult: (String, Double?, String?) -> Unit
+        onPassResult: (String, Double?, PassNote?) -> Unit
     ): SweepOutcome {
         val chunkLadderMb = listOf(8, 16, 32, 64, 128)
         val maxChunkMb = com.nuvio.tv.data.local.PlayerSettings.MAX_PARALLEL_CHUNK_SIZE_KB / 1024
@@ -254,7 +265,7 @@ object StreamSweepEngine {
                 onPassAdded(label)
                 onPassResult(
                     label, null,
-                    context.getString(R.string.stream_test_note_skipped, reason)
+                    PassNote(context.getString(R.string.stream_test_note_skipped), reason)
                 )
             }
         }
@@ -311,8 +322,8 @@ object StreamSweepEngine {
                 failedCells += FailedCell(label, "budget gate")
                 onPassResult(
                     label, null,
-                    context.getString(
-                        R.string.stream_test_note_skipped,
+                    PassNote(
+                        context.getString(R.string.stream_test_note_skipped),
                         rejectReason(connections, chunkMb)
                             ?: context.getString(R.string.stream_test_note_skipped_generic)
                     )
@@ -402,9 +413,15 @@ object StreamSweepEngine {
                 clampedCells += 1
                 failedCells += FailedCell(label, voidReason)
                 val note = if (voidReason == "rate-limited") {
-                    context.getString(R.string.stream_test_note_rate_limited)
+                    PassNote(
+                        context.getString(R.string.stream_test_note_rate_limited),
+                        context.getString(R.string.stream_test_detail_rate_limited)
+                    )
                 } else {
-                    context.getString(R.string.stream_test_note_no_transfer)
+                    PassNote(
+                        context.getString(R.string.stream_test_note_no_transfer),
+                        context.getString(R.string.stream_test_detail_no_transfer)
+                    )
                 }
                 onState(context.getString(R.string.stream_test_cell_rate_limited, label))
                 onPassResult(label, null, note)

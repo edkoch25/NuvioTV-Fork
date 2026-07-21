@@ -3,6 +3,7 @@
 
 package com.nuvio.tv.ui.screens.settings
 
+import com.nuvio.tv.core.network.StreamSweepEngine
 import com.nuvio.tv.ui.theme.NuvioTheme
 
 import android.net.ConnectivityManager
@@ -207,7 +208,9 @@ fun AdvancedSettingsContent(
     // N3d-a2: why a row has no number, keyed by row label. Held beside the
     // results rather than inside them so the label-keyed update above keeps
     // working unchanged.
-    var streamPassNotes by remember { mutableStateOf(mapOf<String, String>()) }
+    var streamPassNotes by remember {
+        mutableStateOf(mapOf<String, StreamSweepEngine.PassNote>())
+    }
     var streamErrorMessage by remember { mutableStateOf<String?>(null) }
     var streamVerdict by remember { mutableStateOf<String?>(null) }
 
@@ -394,8 +397,14 @@ fun AdvancedSettingsContent(
     // a row and the card can extend past the bottom of the screen. When that
     // happens, scroll by exactly the overflow so the newest rows stay visible.
     // If the card is not on screen (the user scrolled elsewhere), do nothing.
+    // streamPassNotes.size is part of the key for the same reason it is on the
+    // assessment effect: a row that resolves to a note never gains a number,
+    // so it never changes streamCompletedPasses, and without this the card
+    // would not re-measure after exactly the rows this workstream added.
     val streamCompletedPasses = streamPassResults.count { it.second != null }
-    LaunchedEffect(streamPassResults.size, streamCompletedPasses, streamVerdict) {
+    LaunchedEffect(
+        streamPassResults.size, streamCompletedPasses, streamPassNotes.size, streamVerdict
+    ) {
         if (streamPassResults.isEmpty()) return@LaunchedEffect
         // Let the newly added row be measured before reading layout info.
         withFrameNanos { }
@@ -933,7 +942,7 @@ private fun NetworkMetricCard(
 private fun StreamTestResultRow(
     label: String,
     speed: Double?,
-    note: String? = null,
+    note: StreamSweepEngine.PassNote? = null,
     isRunning: Boolean
 ) {
     Row(
@@ -941,16 +950,25 @@ private fun StreamTestResultRow(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = NuvioTheme.colors.TextSecondary
-        )
+        Column(modifier = Modifier.weight(1f, fill = false)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = NuvioTheme.colors.TextSecondary
+            )
+            note?.detail?.let { detail ->
+                Text(
+                    text = detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = NuvioTheme.colors.TextTertiary
+                )
+            }
+        }
         Text(
             text = when {
                 isRunning -> stringResource(R.string.stream_test_btn_running)
                 speed != null -> "%.1f Mbps".format(speed)
-                note != null -> note
+                note != null -> note.state
                 else -> "---"
             },
             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),

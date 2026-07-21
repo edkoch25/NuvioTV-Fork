@@ -35,6 +35,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.nuvio.tv.R
 import com.nuvio.tv.core.assessment.AssessmentItem
+import com.nuvio.tv.core.network.StreamSweepEngine
 import com.nuvio.tv.core.assessment.AssessmentResult
 import com.nuvio.tv.core.assessment.AssessmentTier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -83,7 +84,7 @@ internal class DeviceAssessmentState {
     var sweepState by mutableStateOf("")
     var passRows by mutableStateOf(listOf<Pair<String, Double?>>())
     // N3d-a2: why a row has no number, keyed by row label.
-    var passNotes by mutableStateOf(mapOf<String, String>())
+    var passNotes by mutableStateOf(mapOf<String, StreamSweepEngine.PassNote>())
     var result by mutableStateOf<AssessmentResult?>(null)
     var selectedProfile by mutableStateOf<ProfileKind?>(null)
     var applyArmed by mutableStateOf(false)
@@ -614,7 +615,7 @@ private fun AssessmentSectionLabel(text: String) {
 private fun AssessmentPassRow(
     label: String,
     speed: Double?,
-    note: String? = null,
+    note: StreamSweepEngine.PassNote? = null,
     isRunning: Boolean
 ) {
     Row(
@@ -622,16 +623,25 @@ private fun AssessmentPassRow(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = NuvioTheme.colors.TextSecondary
-        )
+        Column(modifier = Modifier.weight(1f, fill = false)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = NuvioTheme.colors.TextSecondary
+            )
+            note?.detail?.let { detail ->
+                Text(
+                    text = detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = NuvioTheme.colors.TextTertiary
+                )
+            }
+        }
         Text(
             text = when {
                 isRunning -> stringResource(R.string.stream_test_btn_running)
                 speed != null -> "%.1f Mbps".format(speed)
-                note != null -> note
+                note != null -> note.state
                 else -> "---"
             },
             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
