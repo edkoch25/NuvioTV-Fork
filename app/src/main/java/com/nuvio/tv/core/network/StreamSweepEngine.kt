@@ -51,6 +51,14 @@ import com.nuvio.tv.ui.screens.settings.MemoryUsageStatus
 @UnstableApi
 object StreamSweepEngine {
 
+    /** N3d-a3 zero floor, as a fraction of the single-connection baseline. */
+    private const val ZERO_FLOOR_OF_BASELINE = 0.05
+
+    /** N3d-b pause ladder and whole-sweep budget, in milliseconds. */
+    private const val RETRY_PAUSE_BASE_MS = 15_000L
+    private const val RETRY_PAUSE_MAX_MS = 45_000L
+    private const val RETRY_PAUSE_BUDGET_MS = 90_000L
+
     data class MeasuredPass(val connections: Int, val chunkMb: Int, val mbps: Double)
 
     /**
@@ -137,7 +145,7 @@ object StreamSweepEngine {
          * to a user as "this configuration achieved zero throughput", which
          * is a different and false claim.
          */
-        onPassResult: (String, Double?) -> Unit
+        onPassResult: (String, Double?, String?) -> Unit
     ): SweepOutcome {
         val chunkLadderMb = listOf(8, 16, 32, 64, 128)
         val maxChunkMb = com.nuvio.tv.data.local.PlayerSettings.MAX_PARALLEL_CHUNK_SIZE_KB / 1024
@@ -216,11 +224,20 @@ object StreamSweepEngine {
         val measured = mutableListOf<MeasuredPass>()
         val passStabilityCovs = mutableListOf<Double>()
         val failedCells = mutableListOf<FailedCell>()
+        // Declared here rather than beside the baseline stage because
+        // measure()'s zero floor (N3d-a3) reads it, and a Kotlin local
+        // function cannot capture a local declared after it.
+        var baselineMbps = 0.0
+        // N3d-b: total time this sweep has spent waiting out rate limits.
+        var pauseSpentMs = 0L
         // N3c: labels already reported as skipped, so re-evaluating the same
         // config in a later stage does not repeat the message.
         val skippedLabels = mutableSetOf<String>()
         // N3b: cells discarded because the source rate-limited them.
         var clampedCells = 0
+        // N3d-b: how many cells have been retried this sweep (drives the
+        // doubling pause).
+        var retriesAttempted = 0
 
         fun noteSkipped(connections: Int, chunkMb: Int) {
             val reason = rejectReason(connections, chunkMb) ?: return
@@ -236,6 +253,28 @@ object StreamSweepEngine {
         // showed - degrades the LATER base-ladder cells too, because the
         // limiter applies to the account, not to the app session.
         fun sourceIsThrottling() = clampedCells >= 2
+
+        // N3d-a3: a cell that transferred essentially nothing did not measure
+        // its configuration - it measured a refusal. Observed 21 Jul on
+        // TorBox: 3c/16, 4c/16 and 8c/16 each ran WITHOUT tripping the clamp
+        // threshold, because 429 backoffs consumed the whole window, and each
+        // reported 0.0 Mbps. Those rows then fed the climb logic exactly as
+        // the void cells N3d-a1 had just stopped feeding it. The floor is
+        // relative to the baseline so it is link-agnostic (about 3.7 Mbps on
+        // that TorBox run, 7.3 on Emby), with an absolute guard against a
+        // pathological baseline. [inferred initial value, field-tunable]
+        fun zeroFloorMbps() = maxOf(1.0, baselineMbps * ZERO_FLOOR_OF_BASELINE)
+
+        // N3d-b: 15 s, doubling per prior wait, capped. Biased LOW on purpose
+        // - too short fails informatively (the retry clamps again and the
+        // cell is voided as it would have been anyway), too long wastes time
+        // silently. The only evidence available: on the 21 Jul TorBox sweep
+        // the source served normally again after a 29 s quiet gap, so a first
+        // guess well under 30 s is the right neighbourhood.
+        // [inferred initial values, field-tunable - the instrumentation below
+        // is what turns them into measured ones]
+        fun nextPauseMs(): Long =
+            (RETRY_PAUSE_BASE_MS shl retriesAttempted).coerceAtMost(RETRY_PAUSE_MAX_MS)
 
         /**
          * Returns null when the cell produced NO measurement. N3d: previously
@@ -258,7 +297,14 @@ object StreamSweepEngine {
             // skipped cell instead of an unbounded one.
             val depth = cellDepth(connections, chunkMb) ?: run {
                 failedCells += FailedCell(label, "budget gate")
-                onPassResult(label, null)
+                onPassResult(
+                    label, null,
+                    context.getString(
+                        R.string.stream_test_note_skipped,
+                        rejectReason(connections, chunkMb)
+                            ?: context.getString(R.string.stream_test_note_skipped_generic)
+                    )
+                )
                 return null
             }
             // Crash-hardening leg 1 (19 Jul 2026 incident): a cell may die —
@@ -267,7 +313,7 @@ object StreamSweepEngine {
             // own failures; this catch is the sweep-level backstop for
             // anything that still escapes. CancellationException stays
             // transparent so aborting the sweep keeps working.
-            val pass = try {
+            suspend fun runCell(): StreamSpeedTester.ParallelPassResult = try {
                 StreamSpeedTester.runParallelChunkTest(
                     streamUrl,
                     headers,
@@ -284,6 +330,50 @@ object StreamSweepEngine {
                     failureReason = t.javaClass.simpleName
                 )
             }
+
+            // N3d-a3: the two ways a cell can finish without measuring its
+            // own configuration. Clamped means it ran on one connection, not
+            // the labelled count; starved means 429 backoffs ate the window.
+            // Both are refusals by the source, and both are equally useless
+            // as comparison points.
+            fun voidReasonFor(p: StreamSpeedTester.ParallelPassResult): String? = when {
+                p.clampTrips > 0 -> "rate-limited"
+                p.mbps < zeroFloorMbps() -> "no usable transfer"
+                else -> null
+            }
+
+            var pass = runCell()
+            var voidReason = voidReasonFor(pass)
+
+            // N3d-b: one retry after a pause. A refusal is often transient -
+            // discarding the cell outright throws away a data point that a
+            // short wait might have recovered. Bounded three ways: one retry
+            // per cell, a doubling pause, and a whole-sweep pause budget so a
+            // thoroughly hostile source cannot stretch the run indefinitely.
+            if (voidReason != null && pauseSpentMs + nextPauseMs() <= RETRY_PAUSE_BUDGET_MS) {
+                val waitMs = nextPauseMs()
+                retriesAttempted += 1
+                pauseSpentMs += waitMs
+                onState(
+                    context.getString(
+                        R.string.stream_test_cell_retry_wait, label, (waitMs / 1000L).toInt()
+                    )
+                )
+                kotlinx.coroutines.delay(waitMs)
+                pass = runCell()
+                val afterReason = voidReasonFor(pass)
+                // Instrumentation is the point, not a nicety: shipping the
+                // retry with its own record is what turns the pause constants
+                // above from invented numbers into measured ones.
+                android.util.Log.i(
+                    "StreamSweepEngine",
+                    "N3d-b retry: cell=${connections}c/${chunkMb}MB waited=${waitMs}ms " +
+                        "before=$voidReason after=${afterReason ?: "recovered"} " +
+                        "budgetUsed=${pauseSpentMs}/${RETRY_PAUSE_BUDGET_MS}ms"
+                )
+                voidReason = afterReason
+            }
+
             pass.failureReason?.let { reason ->
                 failedCells += FailedCell(label, reason)
                 onState(context.getString(R.string.stream_test_cell_failed, label, reason))
@@ -296,16 +386,21 @@ object StreamSweepEngine {
             // the sufficiency target (a fast clamped cell would end the
             // search on false evidence). Reported at 0.0 so the row is
             // visible without pretending to be a result.
-            if (pass.clampTrips > 0) {
+            if (voidReason != null) {
                 clampedCells += 1
-                failedCells += FailedCell(label, "rate-limited")
+                failedCells += FailedCell(label, voidReason)
+                val note = if (voidReason == "rate-limited") {
+                    context.getString(R.string.stream_test_note_rate_limited)
+                } else {
+                    context.getString(R.string.stream_test_note_no_transfer)
+                }
                 onState(context.getString(R.string.stream_test_cell_rate_limited, label))
-                onPassResult(label, null)
+                onPassResult(label, null, note)
                 return null
             }
             val mbps = pass.mbps
             coefficientOfVariation(pass.subWindowMbps)?.let { passStabilityCovs += it }
-            onPassResult(label, mbps)
+            onPassResult(label, mbps, null)
             if (mbps > 0) measured += MeasuredPass(connections, chunkMb, mbps)
             if (targetMbps != null && mbps >= targetMbps * SUFFICIENCY_TOLERANCE && passesSinceSufficient < 0) {
                 passesSinceSufficient = 0
@@ -320,8 +415,6 @@ object StreamSweepEngine {
                 text + context.getString(R.string.stream_test_verdict_pm_suffix)
             } else text
 
-        var baselineMbps = 0.0
-
         try {
             // Stage 1 - baseline.
             val baselineLabel = context.getString(R.string.stream_test_label_baseline)
@@ -331,7 +424,7 @@ object StreamSweepEngine {
                 streamUrl,
                 headers
             )
-            onPassResult(baselineLabel, baseline)
+            onPassResult(baselineLabel, baseline, null)
             baselineMbps = baseline
 
             if (baseline <= 0.0) {
@@ -500,6 +593,12 @@ object StreamSweepEngine {
                     .sortedBy { overheadMb(it.first, it.second) }
                 for ((connections, chunkMb) in crossConfigs) {
                     if (!mayContinue()) break
+                    // N3d-a3: the N3b commit message claimed the escalation
+                    // stop covered this loop. It did not - the guard was only
+                    // in stage 3 and the stage-4 connUp neighbour, which is
+                    // why 3c/8 and 4c/8 still ran and clamped on 21 Jul after
+                    // three cells had already been refused. Added here now.
+                    if (sourceIsThrottling()) break
                     val mbps = measure(connections, chunkMb) ?: continue
                     if (mbps > bestMbps) {
                         bestMbps = mbps

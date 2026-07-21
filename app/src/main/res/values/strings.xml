@@ -2907,6 +2907,11 @@
     <string name="stream_test_cell_failed">%1$s failed (%2$s) \u2014 continuing sweep</string>
     <string name="stream_test_cell_skipped">%1$s skipped \u2014 %2$s</string>
     <string name="stream_test_cell_rate_limited">%1$s discarded \u2014 the source rate-limited it, so it did not run at that connection count</string>
+    <string name="stream_test_cell_retry_wait">%1$s refused \u2014 waiting %2$ds and retrying once</string>
+    <string name="stream_test_note_rate_limited">Rate-limited</string>
+    <string name="stream_test_note_no_transfer">No transfer</string>
+    <string name="stream_test_note_skipped">Skipped \u2014 %1$s</string>
+    <string name="stream_test_note_skipped_generic">over the device budget</string>
 
 
     <!-- Device Settings Assessment (Stage 1, review-only): engine strings -->

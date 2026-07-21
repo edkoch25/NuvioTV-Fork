@@ -82,6 +82,8 @@ internal class DeviceAssessmentState {
     var running by mutableStateOf(false)
     var sweepState by mutableStateOf("")
     var passRows by mutableStateOf(listOf<Pair<String, Double?>>())
+    // N3d-a2: why a row has no number, keyed by row label.
+    var passNotes by mutableStateOf(mapOf<String, String>())
     var result by mutableStateOf<AssessmentResult?>(null)
     var selectedProfile by mutableStateOf<ProfileKind?>(null)
     var applyArmed by mutableStateOf(false)
@@ -105,6 +107,7 @@ internal fun runDeviceAssessment(
     scope.launch {
         state.running = true
         state.passRows = emptyList()
+        state.passNotes = emptyMap()
         state.sweepState = ""
         state.result = null
         state.applyArmed = false
@@ -118,8 +121,9 @@ internal fun runDeviceAssessment(
             onSweepPassAdded = { label ->
                 state.passRows = state.passRows + (label to null)
             },
-            onSweepPassResult = { label, mbps ->
+            onSweepPassResult = { label, mbps, note ->
                 state.passRows = state.passRows.map { if (it.first == label) label to mbps else it }
+                if (note != null) state.passNotes = state.passNotes + (label to note)
             }
         )
         state.result = outcome
@@ -204,7 +208,9 @@ internal fun LazyListScope.deviceAssessmentItems(
                         AssessmentPassRow(
                             label = label,
                             speed = speed,
-                            isRunning = state.running && state.sweepState == label && speed == null
+                            note = state.passNotes[label],
+                            isRunning = state.running && state.sweepState == label &&
+                                speed == null && state.passNotes[label] == null
                         )
                     }
                 }
@@ -608,6 +614,7 @@ private fun AssessmentSectionLabel(text: String) {
 private fun AssessmentPassRow(
     label: String,
     speed: Double?,
+    note: String? = null,
     isRunning: Boolean
 ) {
     Row(
@@ -624,6 +631,7 @@ private fun AssessmentPassRow(
             text = when {
                 isRunning -> stringResource(R.string.stream_test_btn_running)
                 speed != null -> "%.1f Mbps".format(speed)
+                note != null -> note
                 else -> "---"
             },
             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),

@@ -204,6 +204,10 @@ fun AdvancedSettingsContent(
     // so the pass set is not fixed upfront).
     var streamTestState by remember { mutableStateOf("Idle") }
     var streamPassResults by remember { mutableStateOf(listOf<Pair<String, Double?>>()) }
+    // N3d-a2: why a row has no number, keyed by row label. Held beside the
+    // results rather than inside them so the label-keyed update above keeps
+    // working unchanged.
+    var streamPassNotes by remember { mutableStateOf(mapOf<String, String>()) }
     var streamErrorMessage by remember { mutableStateOf<String?>(null) }
     var streamVerdict by remember { mutableStateOf<String?>(null) }
 
@@ -256,6 +260,7 @@ fun AdvancedSettingsContent(
         if (lastStreamUrl.isNullOrBlank()) return
         scope.launch {
             streamPassResults = emptyList()
+            streamPassNotes = emptyMap()
             streamErrorMessage = null
             streamVerdict = null
 
@@ -268,8 +273,9 @@ fun AdvancedSettingsContent(
                 onPassAdded = { label ->
                     streamPassResults = streamPassResults + (label to null)
                 },
-                onPassResult = { label, mbps ->
+                onPassResult = { label, mbps, note ->
                     streamPassResults = streamPassResults.map { if (it.first == label) label to mbps else it }
+                    if (note != null) streamPassNotes = streamPassNotes + (label to note)
                 }
             )
 
@@ -675,7 +681,9 @@ fun AdvancedSettingsContent(
                                 StreamTestResultRow(
                                     label = label,
                                     speed = speed,
-                                    isRunning = streamTestState == label && speed == null
+                                    note = streamPassNotes[label],
+                                    isRunning = streamTestState == label && speed == null &&
+                                        streamPassNotes[label] == null
                                 )
                             }
 
@@ -901,6 +909,7 @@ private fun NetworkMetricCard(
 private fun StreamTestResultRow(
     label: String,
     speed: Double?,
+    note: String? = null,
     isRunning: Boolean
 ) {
     Row(
@@ -917,6 +926,7 @@ private fun StreamTestResultRow(
             text = when {
                 isRunning -> stringResource(R.string.stream_test_btn_running)
                 speed != null -> "%.1f Mbps".format(speed)
+                note != null -> note
                 else -> "---"
             },
             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
