@@ -85,7 +85,7 @@ object DeviceAssessmentEngine {
         diagnostics: LastPlaybackDiagnostics,
         onSweepState: (String) -> Unit,
         onSweepPassAdded: (String) -> Unit,
-        onSweepPassResult: (String, Double) -> Unit
+        onSweepPassResult: (String, Double?) -> Unit
     ): AssessmentResult {
         val now = System.currentTimeMillis()
 

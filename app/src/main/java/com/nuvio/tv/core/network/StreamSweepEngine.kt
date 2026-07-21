@@ -129,7 +129,15 @@ object StreamSweepEngine {
         estimatedBitrate: Long?,
         onState: (String) -> Unit,
         onPassAdded: (String) -> Unit,
-        onPassResult: (String, Double) -> Unit
+        /**
+         * N3d: the Double is nullable because a cell can now finish without
+         * producing a measurement - refused by the budget gate, or discarded
+         * because the source rate-limited it. Null renders as "---" (both
+         * screens already had that branch for pending rows); 0.0 would read
+         * to a user as "this configuration achieved zero throughput", which
+         * is a different and false claim.
+         */
+        onPassResult: (String, Double?) -> Unit
     ): SweepOutcome {
         val chunkLadderMb = listOf(8, 16, 32, 64, 128)
         val maxChunkMb = com.nuvio.tv.data.local.PlayerSettings.MAX_PARALLEL_CHUNK_SIZE_KB / 1024
@@ -229,7 +237,17 @@ object StreamSweepEngine {
         // limiter applies to the account, not to the app session.
         fun sourceIsThrottling() = clampedCells >= 2
 
-        suspend fun measure(connections: Int, chunkMb: Int): Double {
+        /**
+         * Returns null when the cell produced NO measurement. N3d: previously
+         * these paths returned 0.0, which the climb logic read as a
+         * catastrophic throughput regression and the user read as a broken
+         * configuration - neither true. The 21 Jul nt2 run ended its
+         * connection climb on exactly this: one discarded cell scored 0.0 and
+         * tripped the regression break, so the sweep stopped on a
+         * non-measurement rather than on evidence. Every caller now decides
+         * explicitly what a void cell means for its own dimension.
+         */
+        suspend fun measure(connections: Int, chunkMb: Int): Double? {
             val label = rowLabel(connections, chunkMb)
             ranConfigs += connections to chunkMb
             parallelPasses += 1
@@ -240,8 +258,8 @@ object StreamSweepEngine {
             // skipped cell instead of an unbounded one.
             val depth = cellDepth(connections, chunkMb) ?: run {
                 failedCells += FailedCell(label, "budget gate")
-                onPassResult(label, 0.0)
-                return 0.0
+                onPassResult(label, null)
+                return null
             }
             // Crash-hardening leg 1 (19 Jul 2026 incident): a cell may die —
             // OutOfMemoryError included — and the sweep must survive it, keep
@@ -282,8 +300,8 @@ object StreamSweepEngine {
                 clampedCells += 1
                 failedCells += FailedCell(label, "rate-limited")
                 onState(context.getString(R.string.stream_test_cell_rate_limited, label))
-                onPassResult(label, 0.0)
-                return 0.0
+                onPassResult(label, null)
+                return null
             }
             val mbps = pass.mbps
             coefficientOfVariation(pass.subWindowMbps)?.let { passStabilityCovs += it }
@@ -363,7 +381,11 @@ object StreamSweepEngine {
                 // and are deliberately not reported - claiming they were
                 // considered would be false.
                 if (!allowed(2, chunkMb)) { noteSkipped(2, chunkMb); break }
-                val mbps = measure(2, chunkMb)
+                // N3d: a void cell says nothing about THIS chunk size, so
+                // carry on up the ladder without touching prevMbps, grace or
+                // best. Larger chunks mean fewer requests per second, so a
+                // clamp here does not predict one at the next rung.
+                val mbps = measure(2, chunkMb) ?: continue
                 if (mbps > bestMbps) { bestMbps = mbps; bestChunkMb = chunkMb }
                 if (prevMbps > 0 && mbps < prevMbps * continueBar()) {
                     if (belowTarget() && grace && mbps < prevMbps) {
@@ -403,7 +425,15 @@ object StreamSweepEngine {
                     noteSkipped(connections, bestChunkMb); break
                 }
                 if (connections to bestChunkMb in ranConfigs) continue
-                val mbps = measure(connections, bestChunkMb)
+                // N3d, tier 1 of the stop rule: a void cell in the CONNECTION
+                // climb ends the climb outright - one clamp is enough here.
+                // Rate limiting tracks request rate, so a refusal at N
+                // connections all but guarantees one at N+1; climbing further
+                // buys no information and provokes the source. (Tier 2,
+                // sourceIsThrottling(), still governs the cross-config and
+                // neighbour escalations.) This makes deliberate what the nt2
+                // run did by accident via the 0.0 regression break.
+                val mbps = measure(connections, bestChunkMb) ?: break
                 if (mbps > bestMbps) { bestMbps = mbps; bestConnections = connections }
                 if (mbps < prevMbps * continueBar()) {
                     if (belowTarget() && grace && mbps < prevMbps) {
@@ -437,7 +467,7 @@ object StreamSweepEngine {
                     if (!allowed(connections, chunkMb)) {
                         noteSkipped(connections, chunkMb); continue
                     }
-                    val mbps = measure(connections, chunkMb)
+                    val mbps = measure(connections, chunkMb) ?: continue
                     if (mbps >= bestMbps * continueBar() && mbps > bestMbps) {
                         bestMbps = mbps
                         bestConnections = connections
@@ -470,7 +500,7 @@ object StreamSweepEngine {
                     .sortedBy { overheadMb(it.first, it.second) }
                 for ((connections, chunkMb) in crossConfigs) {
                     if (!mayContinue()) break
-                    val mbps = measure(connections, chunkMb)
+                    val mbps = measure(connections, chunkMb) ?: continue
                     if (mbps > bestMbps) {
                         bestMbps = mbps
                         bestConnections = connections
