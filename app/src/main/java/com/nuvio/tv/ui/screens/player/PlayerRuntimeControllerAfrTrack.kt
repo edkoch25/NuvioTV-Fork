@@ -110,6 +110,32 @@ internal fun PlayerRuntimeController.maybeRunTrackFormatAfr(rawFps: Float, forma
                         "size=${format.width}x${format.height}"
                 )
 
+                // The cache had exactly one writer in the whole app, and it sat
+                // inside the MPV-only probing preflight. The ExoPlayer branch
+                // calls the read-only variant, so on the default engine the
+                // cache could never be populated: every playback logged
+                // "AFR cache preflight: miss" and paid the full post-prepare
+                // mode switch and settle. Eight for eight on 21 Jul 2026, which
+                // was the steady state rather than eight cold starts.
+                //
+                // Writing here costs nothing on this play and lets the NEXT
+                // play of the same title take the preflight's hit path, where
+                // the switch happens before prepare and the settle overlaps
+                // loading instead of following it. Dimensions come from the
+                // same format used for the switch below, so a later hit
+                // preflights with the size that actually applied.
+                FrameRateUtils.cacheFrameRate(
+                    currentStreamUrl,
+                    currentHeaders,
+                    FrameRateUtils.FrameRateDetection(
+                        raw = rawFps,
+                        snapped = snapped,
+                        videoWidth = format.width.takeIf { it > 0 },
+                        videoHeight = format.height.takeIf { it > 0 }
+                    ),
+                    currentFilename
+                )
+
                 val result = FrameRateUtils.matchFrameRateAndWait(
                     activity = activity,
                     frameRate = targetFrameRate,

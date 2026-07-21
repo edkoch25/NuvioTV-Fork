@@ -225,16 +225,38 @@ object FrameRateUtils {
         }
     }
 
+    /**
+     * How well a chosen mode actually serves the content's frame rate.
+     * EXACT and DOUBLE are clean cadences; PULLDOWN is 2:3 judder that merely
+     * happens to divide evenly; FALLBACK is the least-bad of a bad set.
+     * Previously this distinction existed only as the order of the elvis chain
+     * and was discarded on return, so nothing above could tell a clean match
+     * from a judder-inducing one.
+     */
+    internal enum class ModeMatchQuality { EXACT, DOUBLE, PULLDOWN, FALLBACK }
+
+    internal data class ModeChoice(val mode: Display.Mode, val quality: ModeMatchQuality)
+
+    /** True for cadences worth giving up a resolution match to obtain. */
+    private fun ModeMatchQuality.isCleanCadence() =
+        this == ModeMatchQuality.EXACT || this == ModeMatchQuality.DOUBLE
+
     private fun chooseBestModeForFrameRate(
         activeMode: Display.Mode,
         modes: List<Display.Mode>,
         frameRate: Float
-    ): Display.Mode {
-        val modeExact = pickBestForTarget(modes, frameRate)
-        val modeDouble = pickBestForTarget(modes, frameRate * 2f)
-        val modePulldown = pickBestForTarget(modes, frameRate * 2.5f)
+    ): ModeChoice {
+        pickBestForTarget(modes, frameRate)?.let {
+            return ModeChoice(it, ModeMatchQuality.EXACT)
+        }
+        pickBestForTarget(modes, frameRate * 2f)?.let {
+            return ModeChoice(it, ModeMatchQuality.DOUBLE)
+        }
+        pickBestForTarget(modes, frameRate * 2.5f)?.let {
+            return ModeChoice(it, ModeMatchQuality.PULLDOWN)
+        }
         val modeFallback = modes.minByOrNull { refreshWeight(it.refreshRate, frameRate) }
-        return modeExact ?: modeDouble ?: modePulldown ?: modeFallback ?: activeMode
+        return ModeChoice(modeFallback ?: activeMode, ModeMatchQuality.FALLBACK)
     }
 
     private fun hasValidVideoSize(videoWidth: Int?, videoHeight: Int?): Boolean {
@@ -325,11 +347,47 @@ object FrameRateUtils {
                 )
             }
 
-            val modeBest = chooseBestModeForFrameRate(
+            var choice = chooseBestModeForFrameRate(
                 activeMode = activeMode,
                 modes = candidateModes,
                 frameRate = frameRate
             )
+
+            // Resolution matching narrows the candidates to the mode family
+            // nearest the video's own size. When that family cannot serve the
+            // content's cadence, honouring it costs judder for a benefit
+            // nobody asked for.
+            //
+            // Observed 21 Jul 2026 on an LG C9 (S905X5M): a 1920x1080 23.976
+            // title selected the 1080p family, whose only rates are
+            // 59.94 / 60 / 50. No exact or double match exists there, so the
+            // 2.5x branch matched 59.94 and the display sat in 2:3 pulldown -
+            // while 3840x2160 @ 23.976 (modeId 9) went unused one resolution
+            // away. Every rung behaved as written; nothing weighed the two
+            // kinds of match against each other.
+            //
+            // The rule: an exact or double frame-rate match beats a resolution
+            // match. A pulldown or fallback match does not. So resolution
+            // matching keeps working wherever it costs nothing - which is
+            // every 4K case - and stands down only where it would cost cadence.
+            if (resolutionMatchingEnabled && !choice.quality.isCleanCadence()) {
+                val wider = chooseBestModeForFrameRate(
+                    activeMode = activeMode,
+                    modes = display.supportedModes.toList(),
+                    frameRate = frameRate
+                )
+                if (wider.quality.isCleanCadence()) {
+                    Log.d(
+                        TAG,
+                        "Resolution-matched modes offer only a ${choice.quality} match for " +
+                            "${frameRate}fps; widening to all display modes for a " +
+                            "${wider.quality} match at ${wider.mode.refreshRate}Hz " +
+                            "(${wider.mode.physicalWidth}x${wider.mode.physicalHeight})"
+                    )
+                    choice = wider
+                }
+            }
+            val modeBest = choice.mode
             recordOriginalMode(display)
             if (modeBest.modeId == activeMode.modeId) {
                 // Not necessarily optimal: very often it is simply the only mode on offer,
