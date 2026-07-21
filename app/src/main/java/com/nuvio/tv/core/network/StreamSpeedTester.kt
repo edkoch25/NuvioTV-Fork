@@ -49,7 +49,16 @@ object StreamSpeedTester {
     data class ParallelPassResult(
         val mbps: Double,
         val subWindowMbps: List<Double>,
-        val failureReason: String? = null
+        val failureReason: String? = null,
+        /**
+         * N3b: how many times this cell's chunk session tripped the 429
+         * rate-limit clamp. Non-zero means the cell did NOT run at its
+         * labelled connection count - the clamp drops it to a single
+         * connection - so its throughput describes a different
+         * configuration than the one under test and must not be measured
+         * against the others.
+         */
+        val clampTrips: Int = 0
     )
 
     // 1. Measures single connection baseline speed (standard OkHttp)
@@ -207,11 +216,23 @@ object StreamSpeedTester {
             samplerJob.join()
             val elapsed = (endMs - tStart).coerceAtLeast(1)
             val networkDelta = totalBytesDownloaded.get() - networkAtMeasureStart
+            // N3b: read the clamp trip count BEFORE closing, and read the
+            // companion counter rather than ChunkSession.rateLimited - the
+            // boolean is CLEARED by the Lever 1 recovery path, so a clamp
+            // that fired and recovered inside this cell would be invisible
+            // to an end-of-cell boolean read. The counter is reset in
+            // obtainSession() whenever a fresh session is created, and the
+            // sweep calls releaseRetainedSession() before every cell, so
+            // this is per-cell. If a warm session were ever attached the
+            // count would carry over and OVER-report: that errs toward
+            // invalidating a cell, which is the safe direction here.
+            val clampTrips = ParallelRangeDataSource.hudClampTrips
             dataSource.close()
 
             return@withContext ParallelPassResult(
                 mbps = (networkDelta * 8.0) / (elapsed * 1000.0),
-                subWindowMbps = subWindowMbps.toList()
+                subWindowMbps = subWindowMbps.toList(),
+                clampTrips = clampTrips
             )
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e

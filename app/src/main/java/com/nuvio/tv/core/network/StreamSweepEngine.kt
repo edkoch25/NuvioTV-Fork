@@ -161,10 +161,29 @@ object StreamSweepEngine {
         fun cellDepth(connections: Int, chunkMb: Int): Int? =
             MemoryBudget.sweepCellPrefetchDepth(connections, chunkMb, safeLimitMb)
 
-        fun allowed(connections: Int, chunkMb: Int) =
-            chunkMb in minChunkMb..maxChunkMb &&
-                overheadMb(connections, chunkMb) <= warningLimitMb &&
-                cellDepth(connections, chunkMb) != null
+        // N3c: the gate now explains itself. A refused cell previously
+        // produced NO output of any kind - no log line, no row, no reason -
+        // which is why two full sweeps (21 Jul 2026) truncated the chunk
+        // ladder at 32 MB on a 250 MB-budget box with nothing on screen, and
+        // why confirming the gate worked at all took inference from an
+        // absence. Clause order is deliberate: the absolute concurrent cap
+        // is tested before the depth floor so the more specific reason wins
+        // (both would otherwise surface as a bare null depth).
+        fun rejectReason(connections: Int, chunkMb: Int): String? = when {
+            chunkMb !in minChunkMb..maxChunkMb ->
+                "chunk outside the supported ${minChunkMb}-${maxChunkMb} MB range"
+            overheadMb(connections, chunkMb) > warningLimitMb ->
+                "estimated ${overheadMb(connections, chunkMb)} MB over the " +
+                    "${warningLimitMb} MB warning limit"
+            connections * chunkMb > MemoryBudget.SWEEP_CELL_MAX_CONCURRENT_MB ->
+                "${connections * chunkMb} MB concurrent over the " +
+                    "${MemoryBudget.SWEEP_CELL_MAX_CONCURRENT_MB} MB cap"
+            cellDepth(connections, chunkMb) == null ->
+                "cannot be bounded within the ${safeLimitMb} MB budget"
+            else -> null
+        }
+
+        fun allowed(connections: Int, chunkMb: Int) = rejectReason(connections, chunkMb) == null
 
         fun mayContinue() =
             parallelPasses < maxParallelPasses && passesSinceSufficient < 2
@@ -189,6 +208,26 @@ object StreamSweepEngine {
         val measured = mutableListOf<MeasuredPass>()
         val passStabilityCovs = mutableListOf<Double>()
         val failedCells = mutableListOf<FailedCell>()
+        // N3c: labels already reported as skipped, so re-evaluating the same
+        // config in a later stage does not repeat the message.
+        val skippedLabels = mutableSetOf<String>()
+        // N3b: cells discarded because the source rate-limited them.
+        var clampedCells = 0
+
+        fun noteSkipped(connections: Int, chunkMb: Int) {
+            val reason = rejectReason(connections, chunkMb) ?: return
+            val label = rowLabel(connections, chunkMb)
+            if (skippedLabels.add(label)) {
+                onState(context.getString(R.string.stream_test_cell_skipped, label, reason))
+            }
+        }
+
+        // N3b: one clamp can be noise; two is the source telling us it will
+        // not serve this many connections. Continuing to climb wastes cells,
+        // provokes further throttling, and - as the 21 Jul TorBox sweep
+        // showed - degrades the LATER base-ladder cells too, because the
+        // limiter applies to the account, not to the app session.
+        fun sourceIsThrottling() = clampedCells >= 2
 
         suspend fun measure(connections: Int, chunkMb: Int): Double {
             val label = rowLabel(connections, chunkMb)
@@ -230,6 +269,21 @@ object StreamSweepEngine {
             pass.failureReason?.let { reason ->
                 failedCells += FailedCell(label, reason)
                 onState(context.getString(R.string.stream_test_cell_failed, label, reason))
+            }
+            // N3b: a clamped cell completed and returned a real number, but
+            // it ran on ONE connection, not the labelled count. It must not
+            // enter `measured` (it would compete for the recommendation
+            // against honestly-labelled cells), must not contribute a
+            // stability CoV (contaminated sub-windows), and must not satisfy
+            // the sufficiency target (a fast clamped cell would end the
+            // search on false evidence). Reported at 0.0 so the row is
+            // visible without pretending to be a result.
+            if (pass.clampTrips > 0) {
+                clampedCells += 1
+                failedCells += FailedCell(label, "rate-limited")
+                onState(context.getString(R.string.stream_test_cell_rate_limited, label))
+                onPassResult(label, 0.0)
+                return 0.0
             }
             val mbps = pass.mbps
             coefficientOfVariation(pass.subWindowMbps)?.let { passStabilityCovs += it }
@@ -302,7 +356,13 @@ object StreamSweepEngine {
             var prevMbps = -1.0
             var grace = true // one pass through a single regression while below target
             for (chunkMb in chunkLadderMb) {
-                if (!mayContinue() || !allowed(2, chunkMb)) break
+                if (!mayContinue()) break
+                // Split from mayContinue() so a budget-exhausted stop is not
+                // mis-reported as a gate refusal. Note: this break ends the
+                // ladder, so rungs ABOVE the refused one are never evaluated
+                // and are deliberately not reported - claiming they were
+                // considered would be false.
+                if (!allowed(2, chunkMb)) { noteSkipped(2, chunkMb); break }
                 val mbps = measure(2, chunkMb)
                 if (mbps > bestMbps) { bestMbps = mbps; bestChunkMb = chunkMb }
                 if (prevMbps > 0 && mbps < prevMbps * continueBar()) {
@@ -337,7 +397,11 @@ object StreamSweepEngine {
             grace = true
             for (connections in connLadder) {
                 if (connections <= 2) continue
-                if (!mayContinue() || !allowed(connections, bestChunkMb)) break
+                if (!mayContinue()) break
+                if (sourceIsThrottling()) break
+                if (!allowed(connections, bestChunkMb)) {
+                    noteSkipped(connections, bestChunkMb); break
+                }
                 if (connections to bestChunkMb in ranConfigs) continue
                 val mbps = measure(connections, bestChunkMb)
                 if (mbps > bestMbps) { bestMbps = mbps; bestConnections = connections }
@@ -359,7 +423,9 @@ object StreamSweepEngine {
                 improved = false
                 val chunkUp = chunkLadderMb.firstOrNull { it > bestChunkMb }
                 val chunkDown = chunkLadderMb.lastOrNull { it < bestChunkMb }
-                val connUp = connLadder.firstOrNull { it > bestConnections }
+                val connUp =
+                    if (sourceIsThrottling()) null
+                    else connLadder.firstOrNull { it > bestConnections }
                 val neighbours = listOfNotNull(
                     chunkUp?.let { bestConnections to it },
                     connUp?.let { it to bestChunkMb },
@@ -367,7 +433,10 @@ object StreamSweepEngine {
                 )
                 for ((connections, chunkMb) in neighbours) {
                     if (!mayContinue()) break
-                    if (connections to chunkMb in ranConfigs || !allowed(connections, chunkMb)) continue
+                    if (connections to chunkMb in ranConfigs) continue
+                    if (!allowed(connections, chunkMb)) {
+                        noteSkipped(connections, chunkMb); continue
+                    }
                     val mbps = measure(connections, chunkMb)
                     if (mbps >= bestMbps * continueBar() && mbps > bestMbps) {
                         bestMbps = mbps
@@ -393,7 +462,11 @@ object StreamSweepEngine {
                     .take(2)
                 val crossConfigs = topChunks
                     .flatMap { chunk -> listOf(3 to chunk, 4 to chunk) }
-                    .filter { it !in ranConfigs && allowed(it.first, it.second) }
+                    .filter { it !in ranConfigs }
+                    .filter { cfg ->
+                        allowed(cfg.first, cfg.second)
+                            .also { if (!it) noteSkipped(cfg.first, cfg.second) }
+                    }
                     .sortedBy { overheadMb(it.first, it.second) }
                 for ((connections, chunkMb) in crossConfigs) {
                     if (!mayContinue()) break
