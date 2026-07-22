@@ -856,17 +856,20 @@ internal fun ModernRowSection(
                                 is ModernPayload.Catalog -> payload.focusKey
                                 is ModernPayload.CollectionFolder -> payload.focusKey
                             }
-                            val isBackdropExpandedLambda = remember(
+                            val isBackdropExpandedState = remember(
                                 effectiveExpandEnabled,
                                 isRowScrollingState,
                                 expandedCatalogFocusKey,
                                 expandedFocusKey
                             ) {
-                                {
+                                derivedStateOf {
                                     effectiveExpandEnabled &&
                                         (!isRowScrollingState.value || isExpansionScrollActive) &&
                                         expandedCatalogFocusKey.value == expandedFocusKey
                                 }
+                            }
+                            val isBackdropExpandedLambda = remember(isBackdropExpandedState) {
+                                { isBackdropExpandedState.value }
                             }
                             ModernCatalogRowItem(
                                 item = item,
