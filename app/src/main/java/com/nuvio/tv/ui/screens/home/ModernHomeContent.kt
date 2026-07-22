@@ -870,7 +870,7 @@ fun ModernHomeContent(
                 val topInsetPx = with(localDensity) { MODERN_ROW_HEADER_FOCUS_INSET.toPx() }
                 @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
                 object : BringIntoViewSpec {
-                    override val scrollAnimationSpec: AnimationSpec<Float> = tween(durationMillis = 250, easing = FastOutSlowInEasing)
+                    override val scrollAnimationSpec: AnimationSpec<Float> = defaultBringIntoViewSpec.scrollAnimationSpec
                     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
                         // Relaxed vertical scroll: only scroll if the leading edge of the row header
                         // is not at the target inset.
