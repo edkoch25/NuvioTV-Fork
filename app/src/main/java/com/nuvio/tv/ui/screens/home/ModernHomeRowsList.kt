@@ -330,6 +330,7 @@ internal fun ModernHomeRowsList(
                 }
                 .dpadVerticalFastScroll(
                     scrollableState = verticalRowListState,
+                    verticalVelocityDpPerSec = 2000f,
                     onFastScrollingChanged = onFastScrollingChanged,
                     shouldHaltForward = {
                         val info = verticalRowListState.layoutInfo
