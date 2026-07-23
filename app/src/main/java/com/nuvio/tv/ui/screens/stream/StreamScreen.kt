@@ -263,6 +263,10 @@ fun StreamScreen(
             viewModel.onEvent(StreamScreenEvent.OnAutoPlayConsumed)
             return@LaunchedEffect
         }
+        // S1g: warm the connection while the player is built. Placed after the
+        // abort check above so a cancelled auto-next chain fires no request.
+        com.nuvio.tv.ui.screens.player.PlayerPlaybackNetworking
+            .prewarmPlaybackConnection(playbackInfo.url, playbackInfo.headers)
         // Torrent streams have url == null but carry an infoHash; navigation
         // builds a torrent:// sentinel URL downstream.
         if (playbackInfo.url != null || (playbackInfo.isTorrent && playbackInfo.infoHash != null)) {
@@ -434,6 +438,9 @@ fun StreamScreen(
                         scope.coroutineLaunch {
                             val playbackInfo = viewModel.resolveStreamForPlayback(stream)
                             if (playbackInfo != null) {
+                                // S1g: warm the connection while the player is built.
+                                com.nuvio.tv.ui.screens.player.PlayerPlaybackNetworking
+                                    .prewarmPlaybackConnection(playbackInfo.url, playbackInfo.headers)
                                 pendingRestoreOnResume = true
                                 routePlayback(playbackInfo)
                                 viewModel.onEvent(StreamScreenEvent.OnAutoPlayConsumed)

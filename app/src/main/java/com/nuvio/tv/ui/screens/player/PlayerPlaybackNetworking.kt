@@ -89,6 +89,64 @@ internal object PlayerPlaybackNetworking {
             .build()
     }
 
+    /**
+     * S1g: warm the playback connection at press.
+     *
+     * Measured 23 Jul 2026 (OPEN_SPLIT, nt14): the probe inside
+     * ParallelRangeDataSource.open() spends ~1,027 ms on TCP+TLS+headers to the
+     * CDN, and it fires ~0.7 s after the stream URL is already known -- the
+     * network sits idle in between while the player is built. This issues a
+     * one-byte ranged GET as soon as the URL resolves. Its body completes, so
+     * OkHttp returns the connection to the shared pool, and the probe reuses it
+     * instead of handshaking again.
+     *
+     * Deliberately fire-and-forget: nothing awaits it, every failure is
+     * swallowed, and a pool miss simply leaves the probe to handshake exactly as
+     * before. It replaces the probe's handshake rather than adding a request, so
+     * it is close to request-neutral against a rate-limiting source.
+     */
+    fun prewarmPlaybackConnection(url: String?, headers: Map<String, String>?) {
+        val target = url?.trim().orEmpty()
+        if (!target.startsWith("http://", ignoreCase = true) &&
+            !target.startsWith("https://", ignoreCase = true)
+        ) {
+            return
+        }
+        val request = try {
+            val builder = okhttp3.Request.Builder().url(target)
+            headers?.forEach { (name, value) -> builder.header(name, value) }
+            // Set last so a caller-supplied Range can never widen the warm-up.
+            builder.header("Range", "bytes=0-0").build()
+        } catch (_: Exception) {
+            return
+        }
+        try {
+            prewarmHttpClient.newCall(request).enqueue(object : okhttp3.Callback {
+                override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
+                    // No-op by design: the probe will handshake as it does today.
+                }
+
+                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                    // Draining the one-byte body is what makes the connection reusable.
+                    response.use { it.body?.bytes() }
+                }
+            })
+        } catch (_: Exception) {
+            // Dispatcher rejection or any other failure: nothing to do.
+        }
+    }
+
+    /**
+     * S1g: shares [NuvioExoPlayerPerformanceHelper.sharedConnectionPool] with the
+     * playback data sources, which is the whole point -- a connection warmed here
+     * must be the one the probe later picks up.
+     */
+    private val prewarmHttpClient: OkHttpClient by lazy {
+        playbackHttpClient.newBuilder()
+            .let { NuvioExoPlayerPerformanceHelper.applyNetworkOptimizations(it) }
+            .build()
+    }
+
     @UnstableApi
     fun createHttpDataSourceFactory(defaultHeaders: Map<String, String> = emptyMap()): DataSource.Factory {
         val builder = playbackHttpClient.newBuilder()
