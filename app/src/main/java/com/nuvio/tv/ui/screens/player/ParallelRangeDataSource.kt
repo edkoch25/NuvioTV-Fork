@@ -651,9 +651,17 @@ internal class ParallelRangeDataSource(
         val probeSource: OkHttpDataSource = upstreamFactory.createDataSource()
         transferListeners.forEach { probeSource.addTransferListener(it) }
 
+        // S1f: attribute the cost of this open. The 23 Jul A/B leaves ~890 ms of
+        // parallel-over-plain at pos=0 unexplained; S1b blamed the bootstrap read
+        // and was falsified (1 MB -> 256 KB bought ~40 ms). Logging only.
+        val diagOpenStartMs = SystemClock.uptimeMillis()
+        var diagProbeOpenMs = -1L
+        var diagBootstrapMs = -1L
+
         val openLength: Long
         try {
             openLength = probeSource.open(dataSpec)
+            diagProbeOpenMs = SystemClock.uptimeMillis() - diagOpenStartMs
             resolvedUri = probeSource.uri // Final URL after redirects (CDN URL)
             onResolvedUri(resolvedUri)
         } catch (e: Exception) {
@@ -697,7 +705,9 @@ internal class ParallelRangeDataSource(
         val firstChunkIndex = position / chunkSize
         if (openLength > 0L) {
             val bootstrapBytes = minOf(minOf(chunkSize, BOOTSTRAP_READ_BYTES), openLength).toInt()
+            val diagReadStartMs = SystemClock.uptimeMillis()
             val chunk = readBootstrapChunk(probeSource, bootstrapBytes)
+            diagBootstrapMs = SystemClock.uptimeMillis() - diagReadStartMs
             bootstrapChunk = chunk
             bootstrapStartPosition = position
             // Avoid startup churn from immediate background fetches during repeated startup opens,
@@ -717,9 +727,24 @@ internal class ParallelRangeDataSource(
                     )
                 )
             }
+            val diagCloseStartMs = SystemClock.uptimeMillis()
             probeSource.close()
+            Log.i(
+                TAG,
+                "OPEN_SPLIT pos=$position probeOpen=${diagProbeOpenMs}ms " +
+                    "bootstrapRead=${diagBootstrapMs}ms bootstrapBytes=${chunk.size} " +
+                    "close=${SystemClock.uptimeMillis() - diagCloseStartMs}ms " +
+                    "total=${SystemClock.uptimeMillis() - diagOpenStartMs}ms"
+            )
         } else {
+            val diagCloseStartMs = SystemClock.uptimeMillis()
             probeSource.close()
+            Log.i(
+                TAG,
+                "OPEN_SPLIT pos=$position probeOpen=${diagProbeOpenMs}ms bootstrapRead=n/a " +
+                    "close=${SystemClock.uptimeMillis() - diagCloseStartMs}ms " +
+                    "total=${SystemClock.uptimeMillis() - diagOpenStartMs}ms"
+            )
         }
 
         return openLength
