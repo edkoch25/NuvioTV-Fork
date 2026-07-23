@@ -51,13 +51,26 @@ internal class ParallelRangeDataSource(
     private val shouldAllowBackgroundPrefetch: () -> Boolean = { true },
     private val onResolvedUri: (Uri?) -> Unit = {},
     private val consumeBootstrapCache: (DataSpec) -> BootstrapCacheEntry? = { null },
-    private val updateBootstrapCache: (BootstrapCacheEntry?) -> Unit = {}
+    private val updateBootstrapCache: (BootstrapCacheEntry?) -> Unit = {},
+    // S1: allow a warm reopen into an un-fetched region to be served by a bounded
+    // single-connection GET instead of a whole aligned chunk. Gated OFF for MP4
+    // session mode, whose scatter-read cursors rely on retained whole chunks to
+    // make repeat visits free -- that path has no measurement yet. Default true
+    // preserves the new behaviour for any caller that does not set it.
+    private val allowContinuationReopen: Boolean = true
 ) : DataSource, androidx.media3.common.ByteBufferDataReader {
 
     companion object {
         private const val TAG = "ParallelRangeDS"
         private const val READ_BUFFER_SIZE = 64 * 1024 // 64KB read buffer for chunk downloads
-        private const val BOOTSTRAP_READ_BYTES = 1L * 1024L * 1024L
+        // S1b (measured 23 Jul 2026): this window is read SYNCHRONOUSLY inside
+        // open() before it returns, on a cold connection still in TCP slow-start.
+        // The Matroska head sniff consumed 11,209 bytes before seeking to the
+        // tail, and the full-open path then discards the window -- the same bytes
+        // arrive again in chunk 0, which is already downloading in the background.
+        // 256 KB keeps ~23x headroom over the observed sniff; over-run is safe by
+        // construction (an exhausted window falls through to the chunk path).
+        private const val BOOTSTRAP_READ_BYTES = 256L * 1024L
 
         private val readBufferLocal = object : ThreadLocal<ByteArray>() {
             override fun initialValue(): ByteArray = ByteArray(READ_BUFFER_SIZE)
@@ -489,6 +502,10 @@ internal class ParallelRangeDataSource(
     private var bootstrapStartPosition: Long = C.TIME_UNSET
     private var continuationSource: OkHttpDataSource? = null
     private var continuationEndPositionExclusive: Long = C.TIME_UNSET
+    // S1: set on a warm reopen whose target chunk is NOT already held, so the
+    // first read serves from a bounded single-connection GET rather than blocking
+    // on a whole aligned chunk. Instance-local; never shared across instances.
+    private var pendingContinuationOpen: Boolean = false
 
     private val transferListeners = mutableListOf<TransferListener>()
 
@@ -564,6 +581,7 @@ internal class ParallelRangeDataSource(
         continuationSource?.close()
         continuationSource = null
         continuationEndPositionExclusive = C.TIME_UNSET
+        pendingContinuationOpen = false
         // A fresh open must not inherit fallback/length state from a previous
         // open on this instance; every path below re-establishes both fields.
         fallbackSource?.close()
@@ -596,6 +614,12 @@ internal class ParallelRangeDataSource(
                 remaining
             }
             bootstrapPrefetchDeferred = true
+            // S1: only when the target chunk is not already held. A reopen INTO a
+            // held chunk (the fill reopen after the tail seek) keeps today's
+            // instant path, which is what preserves its ~600 ms buffered head
+            // start at first frame.
+            pendingContinuationOpen = allowContinuationReopen &&
+                attachedSession.futures[position / chunkSize] == null
             Log.d(
                 TAG,
                 "Attached to warm session for reopen at $position, " +
@@ -728,6 +752,14 @@ internal class ParallelRangeDataSource(
             currentChunkReadOffset = (position - bootstrapStartPosition).toInt()
         }
 
+        // S1: materialise BEFORE the deferred schedule below. Placed after it,
+        // scheduleChunks() would still see a null continuation and schedule the
+        // whole aligned chunk -- paying the amplified fetch while merely hiding
+        // it from the reader.
+        if (pendingContinuationOpen && currentChunk == null && continuationSource == null) {
+            materialisePendingContinuation()
+        }
+
         if (bootstrapPrefetchDeferred && shouldAllowBackgroundPrefetch()) {
             bootstrapPrefetchDeferred = false
             scheduleChunks()
@@ -828,11 +860,53 @@ internal class ParallelRangeDataSource(
         return readSize
     }
 
+    /**
+     * S1 (SS9.1): serve a warm reopen into an un-fetched region from a plain
+     * bounded GET instead of a whole aligned chunk. Measured 23 Jul 2026 on the
+     * Matroska tail seek: the reader's first needed byte sat 7,305,388 bytes into
+     * an 8,388,608-byte chunk, so the chunk path fetched 9,216,903 bytes to
+     * deliver 1,911,515. Bounded to the chunk boundary so the existing handover
+     * in scheduleChunks() takes the file from there; on any failure the flag is
+     * already cleared and the proven chunk path serves the read instead.
+     */
+    private fun materialisePendingContinuation() {
+        pendingContinuationOpen = false
+        if (bytesRemaining <= 0L) return
+        val activeSession = session ?: return
+        val boundary = ((position / chunkSize) + 1L) * chunkSize
+        val end = minOf(boundary, position + bytesRemaining)
+        val length = end - position
+        if (length <= 0L) return
+        val source = upstreamFactory.createDataSource()
+        transferListeners.forEach { source.addTransferListener(it) }
+        try {
+            source.open(
+                DataSpec.Builder()
+                    .setUri(activeSession.resolvedUri ?: activeSession.requestUri)
+                    .setPosition(position)
+                    .setLength(length)
+                    .build()
+            )
+        } catch (e: Exception) {
+            try { source.close() } catch (_: Exception) {}
+            Log.w(TAG, "Continuation open failed at $position; using chunk path: ${e.message}")
+            return
+        }
+        continuationSource = source
+        continuationEndPositionExclusive = end
+        // Keep the eviction cursor with the reader while the continuation runs.
+        activeSession.noteRead(position / chunkSize)
+        Log.d(TAG, "Continuation open at $position, $length bytes to boundary $end")
+    }
+
     private fun scheduleChunks() {
         if (!shouldAllowBackgroundPrefetch()) return
+        // S1: nothing left to serve on this open. The continuation-exhaustion path
+        // can otherwise schedule a chunk past the reader's last byte.
+        if (bytesRemaining == 0L) return
         val currentChunkIdx =
             if (continuationSource != null && continuationEndPositionExclusive != C.TIME_UNSET && position < continuationEndPositionExclusive) {
-                continuationEndPositionExclusive / chunkSize
+                (continuationEndPositionExclusive + chunkSize - 1L) / chunkSize
             } else {
                 position / chunkSize
             }
@@ -1234,6 +1308,7 @@ internal class ParallelRangeDataSource(
             continuationSource?.close()
             continuationSource = null
             continuationEndPositionExclusive = C.TIME_UNSET
+            pendingContinuationOpen = false
 
             // nt7: downloads survive this close — detach references only.
             resetLocalReadState()
@@ -1283,6 +1358,14 @@ internal class ParallelRangeDataSource(
             currentChunk = bootstrap
             currentChunkIndex = chunkIndex
             currentChunkReadOffset = (position - bootstrapStartPosition).toInt()
+        }
+
+        // S1: materialise BEFORE the deferred schedule below. Placed after it,
+        // scheduleChunks() would still see a null continuation and schedule the
+        // whole aligned chunk -- paying the amplified fetch while merely hiding
+        // it from the reader.
+        if (pendingContinuationOpen && currentChunk == null && continuationSource == null) {
+            materialisePendingContinuation()
         }
 
         if (bootstrapPrefetchDeferred && shouldAllowBackgroundPrefetch()) {
@@ -1386,7 +1469,8 @@ internal class ParallelRangeDataSource(
         private val useNativeMemory: Boolean = false,
         private val prefetchDepthChunks: Int = parallelConnections + 1,
         private val shouldAllowBackgroundPrefetch: () -> Boolean = { true },
-        private val onResolvedUri: (Uri?) -> Unit = {}
+        private val onResolvedUri: (Uri?) -> Unit = {},
+        private val allowContinuationReopen: Boolean = true
     ) : DataSource.Factory {
         @Volatile
         private var startupBootstrapCache: BootstrapCacheEntry? = null
@@ -1400,6 +1484,7 @@ internal class ParallelRangeDataSource(
                 prefetchDepthChunks = prefetchDepthChunks,
                 shouldAllowBackgroundPrefetch = shouldAllowBackgroundPrefetch,
                 onResolvedUri = onResolvedUri,
+                allowContinuationReopen = allowContinuationReopen,
                 consumeBootstrapCache = { dataSpec ->
                     val cached = startupBootstrapCache ?: return@ParallelRangeDataSource null
                     val isFresh = SystemClock.uptimeMillis() - cached.createdAtUptimeMs <= 15_000L

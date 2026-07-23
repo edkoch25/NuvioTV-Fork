@@ -192,6 +192,10 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
                         mp4SessionMode
                     ),
                     shouldAllowBackgroundPrefetch = { true },
+                    // S1: MP4 session mode keeps whole-chunk retention -- its
+                    // scatter-read cursors revisit regions, and a retained chunk
+                    // makes every repeat visit free. Unmeasured there; gate it off.
+                    allowContinuationReopen = !mp4SessionMode,
                     onResolvedUri = { resolved -> currentVodCacheResolvedUrl = resolved?.toString() }
                 )
             }
