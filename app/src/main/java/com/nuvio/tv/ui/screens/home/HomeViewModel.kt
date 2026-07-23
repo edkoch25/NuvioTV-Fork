@@ -263,8 +263,11 @@ class HomeViewModel @Inject constructor(
     val trailerPreviewAudioUrls: Map<String, String>
         get() = trailerPreviewAudioUrlsState
 
+    private val vmInstanceId: String = System.identityHashCode(this).toString(16)
+
     init {
         StartupLatencyTrace.mark("home_vm_init")
+        android.util.Log.i("HOMEVM_LIFECYCLE", "INIT id=" + vmInstanceId)
         // Accumulates individual watched status changes and flushes them as a single
         // update after 150ms of inactivity, preventing N separate recompositions.
         viewModelScope.launch {
@@ -858,6 +861,7 @@ class HomeViewModel @Inject constructor(
     }
 
     override fun onCleared() {
+        android.util.Log.i("HOMEVM_LIFECYCLE", "CLEARED id=" + vmInstanceId)
         startupAuthNoticeJob?.cancel()
         posterStatusReconcileJob?.cancel()
         movieWatchedBatchJob?.cancel()

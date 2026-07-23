@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
@@ -99,6 +100,9 @@ import androidx.core.os.ConfigurationCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.metrics.performance.JankStats
 import androidx.metrics.performance.PerformanceMetricsState
 import androidx.navigation.NavHostController
@@ -1234,9 +1238,25 @@ private fun LegacySidebarScaffold(
                     }
                 }
         ) {
+            // Profile switching sets hasSelectedProfileThisSession = false, which removes
+            // this whole subtree from composition. NavBackStackEntry ViewModelStores live in
+            // NavControllerViewModel, scoped by default to the Activity - so nothing pops and
+            // nothing clears. Measured 23 Jul 2026: HomeViewModel.onCleared() never fired
+            // across 5 switches (0 CLEARED / 5 INIT) and catalogue loads grew as 1 + 2N,
+            // because stale ViewModels kept collecting activeProfileId and installedAddons.
+            // Owning the store here makes teardown deterministic.
+            val navViewModelStoreOwner = remember {
+                object : ViewModelStoreOwner {
+                    override val viewModelStore: ViewModelStore = ViewModelStore()
+                }
+            }
+            DisposableEffect(navViewModelStoreOwner) {
+                onDispose { navViewModelStoreOwner.viewModelStore.clear() }
+            }
             CompositionLocalProvider(
                 LocalSidebarExpanded provides (drawerState.currentValue == DrawerValue.Open),
-                LocalContentFocusRequester provides contentFocusRequester
+                LocalContentFocusRequester provides contentFocusRequester,
+                LocalViewModelStoreOwner provides navViewModelStoreOwner
             ) {
                 NuvioNavHost(
                     navController = navController,
@@ -1627,9 +1647,25 @@ private fun ModernSidebarScaffold(
                     }
                 }
         ) {
+            // Profile switching sets hasSelectedProfileThisSession = false, which removes
+            // this whole subtree from composition. NavBackStackEntry ViewModelStores live in
+            // NavControllerViewModel, scoped by default to the Activity - so nothing pops and
+            // nothing clears. Measured 23 Jul 2026: HomeViewModel.onCleared() never fired
+            // across 5 switches (0 CLEARED / 5 INIT) and catalogue loads grew as 1 + 2N,
+            // because stale ViewModels kept collecting activeProfileId and installedAddons.
+            // Owning the store here makes teardown deterministic.
+            val navViewModelStoreOwner = remember {
+                object : ViewModelStoreOwner {
+                    override val viewModelStore: ViewModelStore = ViewModelStore()
+                }
+            }
+            DisposableEffect(navViewModelStoreOwner) {
+                onDispose { navViewModelStoreOwner.viewModelStore.clear() }
+            }
             CompositionLocalProvider(
                 LocalSidebarExpanded provides isSidebarExpanded,
-                LocalContentFocusRequester provides contentFocusRequester
+                LocalContentFocusRequester provides contentFocusRequester,
+                LocalViewModelStoreOwner provides navViewModelStoreOwner
             ) {
                 NuvioNavHost(
                     navController = navController,
