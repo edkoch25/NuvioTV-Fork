@@ -1,5 +1,6 @@
 package com.nuvio.tv.core.player
 
+import android.os.SystemClock
 import com.nuvio.tv.core.debrid.DirectDebridStreamFilter
 import com.nuvio.tv.domain.model.DebridStreamPreferences
 import com.nuvio.tv.domain.model.Stream
@@ -45,11 +46,23 @@ object StreamQualityRank {
     ): List<Stream> {
         if (streams.size <= 1) return streams
         val effective = preferences ?: DEFAULT_PREFERENCES
+        // R1-i instrument (24 Jul 2026). APPLY_SPLIT's select= brackets the whole
+        // selectAutoPlayStream call, not factsFor: the "3.14 ms per stream" figure
+        // in circulation is 976/311 arithmetic rather than a measurement, and its
+        // denominator is allStreams rather than the post-isPlayable pool that
+        // actually reaches here. Three cost centres live inside this function --
+        // fact extraction, the exclusion filter, and a nine-level sort whose every
+        // key lookup is a deep structural hash of a Stream -- and only the first is
+        // addressed by making streamFacts cheaper. Measure the split before
+        // optimising. Logging only; no behavioural change.
+        val rankT0 = SystemClock.elapsedRealtime()
         val factsByStream = streams.associateWith { DirectDebridStreamFilter.factsFor(it, effective) }
+        val rankFactsMs = SystemClock.elapsedRealtime() - rankT0
         val pool = streams.filter {
             DirectDebridStreamFilter.passesExclusionFilters(factsByStream.getValue(it), effective)
         }.ifEmpty { streams }
-        return pool.sortedWith(
+        val rankFilterMs = SystemClock.elapsedRealtime() - rankT0 - rankFactsMs
+        val ranked = pool.sortedWith(
             compareBy<Stream> { factsByStream.getValue(it).resolutionRank }
                 .thenBy { factsByStream.getValue(it).qualityRank }
                 .thenBy { factsByStream.getValue(it).groupRank }
@@ -60,6 +73,14 @@ object StreamQualityRank {
                 .thenByDescending { factsByStream.getValue(it).size ?: -1L }
                 .thenByDescending { containerScore(it) }
         )
+        val rankSortMs = SystemClock.elapsedRealtime() - rankT0 - rankFactsMs - rankFilterMs
+        android.util.Log.i(
+            "StreamQualityRank",
+            "R1_SPLIT in=${streams.size} distinct=${factsByStream.size} pool=${pool.size} " +
+                "facts=${rankFactsMs}ms filter=${rankFilterMs}ms sort=${rankSortMs}ms " +
+                "total=${SystemClock.elapsedRealtime() - rankT0}ms"
+        )
+        return ranked
     }
 
     internal fun containerScore(stream: Stream): Int {
