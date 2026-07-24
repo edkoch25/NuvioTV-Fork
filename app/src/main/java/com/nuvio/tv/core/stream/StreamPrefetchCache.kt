@@ -3,6 +3,7 @@ package com.nuvio.tv.core.stream
 import android.os.SystemClock
 import android.util.Log
 import com.nuvio.tv.core.network.NetworkResult
+import com.nuvio.tv.core.player.PrefetchedSelection
 import com.nuvio.tv.domain.model.AddonStreams
 import com.nuvio.tv.domain.repository.StreamRepository
 import kotlinx.coroutines.CancellationException
@@ -60,7 +61,12 @@ object StreamPrefetchCache {
     /** Outlives any ViewModel: the details screen may be gone before this finishes. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    private class Entry(val streams: List<AddonStreams>, val atMs: Long)
+    private class Entry(
+        val streams: List<AddonStreams>,
+        val atMs: Long,
+        /** R2: winner ranked at prefetch time, null when no ranker was supplied. */
+        val selection: PrefetchedSelection?
+    )
 
     private val lock = Any()
     private val completed = LinkedHashMap<String, Entry>(4, 0.75f, true)
@@ -82,8 +88,12 @@ object StreamPrefetchCache {
     }
 
     /** Caller must hold [lock]. */
-    private fun putLocked(key: String, streams: List<AddonStreams>) {
-        completed[key] = Entry(streams, SystemClock.elapsedRealtime())
+    private fun putLocked(
+        key: String,
+        streams: List<AddonStreams>,
+        selection: PrefetchedSelection?
+    ) {
+        completed[key] = Entry(streams, SystemClock.elapsedRealtime(), selection)
         while (completed.size > MAX_ENTRIES) {
             val eldest = completed.keys.firstOrNull() ?: break
             completed.remove(eldest)
@@ -99,7 +109,15 @@ object StreamPrefetchCache {
         type: String,
         videoId: String,
         season: Int?,
-        episode: Int?
+        episode: Int?,
+        /**
+         * R2: optional ranker, invoked on the prefetch's own IO coroutine
+         * once the scrape completes. Null reproduces pre-R2 behaviour
+         * exactly, which is how the S4a details-page path stays untouched.
+         * The cache stays ignorant of settings storage: it invokes an opaque
+         * supplier and stores an opaque result.
+         */
+        rank: (suspend (List<AddonStreams>) -> PrefetchedSelection?)? = null
     ) {
         if (type.isBlank() || videoId.isBlank()) return
         val key = keyOf(type, videoId, season, episode)
@@ -111,8 +129,30 @@ object StreamPrefetchCache {
             inFlightKey = key
             inFlightJob = scope.async {
                 val result = collectFinal(repository, type, videoId, season, episode)
+                val rankT0 = SystemClock.elapsedRealtime()
+                val selection = if (rank != null && result.isNotEmpty()) {
+                    try {
+                        rank(result)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.w(TAG, "PREFETCH rank failed: ${e.message}")
+                        null
+                    }
+                } else {
+                    null
+                }
+                if (rank != null && result.isNotEmpty()) {
+                    val winnerLabel = if (selection != null) "yes" else "none"
+                    Log.i(
+                        TAG,
+                        "PREFETCH rank groups=${result.size} " +
+                            "winner=$winnerLabel " +
+                            "ms=${SystemClock.elapsedRealtime() - rankT0}"
+                    )
+                }
                 synchronized(lock) {
-                    if (result.isNotEmpty()) putLocked(key, result)
+                    if (result.isNotEmpty()) putLocked(key, result, selection)
                     if (inFlightKey == key) {
                         inFlightKey = null
                         inFlightJob = null
@@ -144,6 +184,30 @@ object StreamPrefetchCache {
         }
         Log.i(TAG, "PREFETCH done groups=${last.size}")
         return last
+    }
+
+    /**
+     * R2: the winner ranked during the prefetch, or null.
+     *
+     * Read at presentation time rather than at [streamsFor] time, so a prefetch
+     * that completes during the join is still usable. A join that falls through
+     * to the live flow returns null here and the caller ranks live.
+     */
+    fun selectionFor(
+        type: String,
+        videoId: String,
+        season: Int?,
+        episode: Int?
+    ): PrefetchedSelection? {
+        val key = keyOf(type, videoId, season, episode)
+        synchronized(lock) {
+            val entry = completed[key] ?: return null
+            if (SystemClock.elapsedRealtime() - entry.atMs > TTL_MS) {
+                completed.remove(key)
+                return null
+            }
+            return entry.selection
+        }
     }
 
     /**

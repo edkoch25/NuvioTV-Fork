@@ -18,6 +18,9 @@ import com.nuvio.tv.core.torrent.TorrentSettings
 import com.nuvio.tv.core.torrent.TorrentService
 import com.nuvio.tv.core.torrent.TorrentState
 import com.nuvio.tv.core.player.AutoPlaySelection
+import com.nuvio.tv.core.player.PrefetchedSelectionGate
+import com.nuvio.tv.core.player.SelectionOutcome
+import com.nuvio.tv.core.player.SelectionSnapshot
 import com.nuvio.tv.core.player.StreamAutoPlayPolicy
 import com.nuvio.tv.core.player.StreamAutoPlaySelector
 import com.nuvio.tv.core.streams.StreamBadgePresentation
@@ -545,14 +548,56 @@ class StreamScreenViewModel @Inject constructor(
                 // chance to return higher-quality streams before the selector
                 // picks from whatever is available.
                 val shouldAutoSelect = !autoPlayHandledForSession && !resolvedAutoPlayTarget && isAllLoaded
+                // R2: the rank normally happened here, on Main.immediate, and
+                // measured 398/341/379/367 ms across four runs (24 Jul 2026),
+                // 94% of it inside DirectDebridStreamFilter.factsFor. The
+                // prefetch now does it 2.6-7.6 s early. The gate below discards
+                // the cached winner unless every setting that decided it still
+                // holds, so a divergent pick is structurally excluded rather
+                // than detected. src=live with a reason is the honest fallback
+                // and must not be read as a win.
                 val selectedAutoPlayStream = if (!shouldAutoSelect) {
                     null
                 } else {
-                    AutoPlaySelection.select(
+                    val gateT0 = SystemClock.elapsedRealtime()
+                    val outcome = PrefetchedSelectionGate.resolve(
+                        prefetched = com.nuvio.tv.core.stream.StreamPrefetchCache.selectionFor(
+                            type = contentType,
+                            videoId = videoId,
+                            season = season,
+                            episode = episode
+                        ),
+                        snapshot = SelectionSnapshot(
+                            inputs = autoPlayInputs,
+                            installedAddonOrder = installedAddonOrder,
+                            preferences = latestDebridStreamPreferences
+                        ),
                         streams = allStreams,
-                        inputs = autoPlayInputs,
-                        debridStreamPreferences = latestDebridStreamPreferences
+                        identityOf = { it.badgeMergeKey() }
                     )
+                    when (outcome) {
+                        is SelectionOutcome.Hit -> {
+                            android.util.Log.i(
+                                TAG,
+                                "R2_SELECT src=prefetch " +
+                                    "ms=${SystemClock.elapsedRealtime() - gateT0}"
+                            )
+                            outcome.stream
+                        }
+                        is SelectionOutcome.Live -> {
+                            val live = AutoPlaySelection.select(
+                                streams = allStreams,
+                                inputs = autoPlayInputs,
+                                debridStreamPreferences = latestDebridStreamPreferences
+                            )
+                            android.util.Log.i(
+                                TAG,
+                                "R2_SELECT src=live reason=${outcome.reason} " +
+                                    "ms=${SystemClock.elapsedRealtime() - gateT0}"
+                            )
+                            live
+                        }
+                    }
                 }
                 // APPLY_SPLIT: the 615-874 ms residual (24 Jul 2026) sits between the
                 // stream list arriving and the sources_ready mark below. Everything

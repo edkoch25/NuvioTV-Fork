@@ -8,15 +8,22 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nuvio.tv.LocaleCache
+import com.nuvio.tv.core.player.AutoPlaySelection
+import com.nuvio.tv.core.player.PrefetchedSelection
+import com.nuvio.tv.core.player.SelectionSnapshot
 import com.nuvio.tv.core.player.StreamAutoPlayPolicy
+import com.nuvio.tv.core.player.StreamAutoPlaySelector
 import com.nuvio.tv.core.recommendations.TvRecommendationManager
 import com.nuvio.tv.core.tmdb.TmdbMetadataService
 import com.nuvio.tv.core.tmdb.TmdbService
 import com.nuvio.tv.data.local.AuthSessionNoticeDataStore
+import com.nuvio.tv.data.local.BingeGroupCacheDataStore
+import com.nuvio.tv.data.local.DebridSettingsDataStore
 import com.nuvio.tv.data.local.CollectionsDataStore
 import com.nuvio.tv.data.local.LayoutPreferenceDataStore
 import com.nuvio.tv.data.local.PlayerSettingsDataStore
 import com.nuvio.tv.data.local.StartupAuthNotice
+import com.nuvio.tv.data.local.StreamAutoPlayMode
 import com.nuvio.tv.data.local.MDBListSettingsDataStore
 import com.nuvio.tv.data.local.TmdbSettingsDataStore
 import com.nuvio.tv.data.local.TraktSettingsDataStore
@@ -31,6 +38,7 @@ import com.nuvio.tv.domain.model.ContinueWatchingSortMode
 import com.nuvio.tv.domain.model.LibraryEntryInput
 import com.nuvio.tv.domain.model.Meta
 import com.nuvio.tv.domain.model.MetaPreview
+import com.nuvio.tv.domain.model.enabledAddons
 import com.nuvio.tv.data.repository.MDBListRepository
 import com.nuvio.tv.domain.model.MDBListSettings
 import com.nuvio.tv.domain.model.TmdbSettings
@@ -85,7 +93,9 @@ class HomeViewModel @Inject constructor(
     internal val cwEnrichmentCache: ContinueWatchingEnrichmentCache,
     internal val profileManager: com.nuvio.tv.core.profile.ProfileManager,
     internal val tvRecommendationManager: TvRecommendationManager,
-    internal val streamRepository: StreamRepository
+    internal val streamRepository: StreamRepository,
+    internal val bingeGroupCacheDataStore: BingeGroupCacheDataStore,
+    internal val debridSettingsDataStore: DebridSettingsDataStore
 ) : ViewModel() {
     companion object {
         internal const val TAG = "HomeViewModel"
@@ -131,11 +141,80 @@ class HomeViewModel @Inject constructor(
     // when the target changes, so a settling list scrapes once, not N times.
     private val CW_STREAM_PREFETCH_DEBOUNCE_MS = 500L
 
+    /**
+     * R2: reproduce the stream screen's auto-play pick during the prefetch.
+     *
+     * Runs on StreamPrefetchCache's IO coroutine 2.6-7.6 s before the press, so
+     * the ~374 ms rank -- and the settings reads feeding it -- leave the
+     * critical path entirely rather than being made cheaper.
+     *
+     * Every input is read HERE and snapshotted, and the stream screen compares
+     * its own snapshot before consuming the winner. If any of them moved in
+     * between, the cached winner is discarded and the rank is redone live.
+     *
+     * The ordering step is not optional: StreamQualityRank.rank is a stable
+     * sort, so incoming order decides ties. Ranking the raw scrape output would
+     * break ties differently from the presented list.
+     */
+    private suspend fun rankPrefetchedStreams(
+        groups: List<com.nuvio.tv.domain.model.AddonStreams>,
+        contentId: String?
+    ): PrefetchedSelection? {
+        val settings = playerSettingsDataStore.playerSettings.first()
+        if (settings.streamAutoPlayMode == StreamAutoPlayMode.MANUAL) return null
+
+        val installedAddonOrder = addonRepository.getInstalledAddons()
+            .first()
+            .enabledAddons()
+            .map { it.displayName }
+
+        val preferredBingeGroup = if (
+            settings.streamAutoPlayPreferBingeGroupForNextEpisode &&
+            settings.streamAutoPlayReuseBingeGroup
+        ) {
+            contentId?.let { bingeGroupCacheDataStore.get(it) }
+        } else {
+            null
+        }
+
+        val preferences = debridSettingsDataStore.settings.first().streamPreferences
+
+        val inputs = AutoPlaySelection.Inputs(
+            mode = settings.streamAutoPlayMode,
+            regexPattern = settings.streamAutoPlayRegex,
+            source = settings.streamAutoPlaySource,
+            installedAddonNames = installedAddonOrder.toSet(),
+            selectedAddons = settings.streamAutoPlaySelectedAddons,
+            selectedPlugins = settings.streamAutoPlaySelectedPlugins,
+            preferredBingeGroup = preferredBingeGroup
+        )
+
+        val ordered = StreamAutoPlaySelector.orderAddonStreams(groups, installedAddonOrder)
+        val allStreams = ordered.flatMap { it.streams }
+        val winner = AutoPlaySelection.select(
+            streams = allStreams,
+            inputs = inputs,
+            debridStreamPreferences = preferences
+        ) ?: return null
+
+        return PrefetchedSelection(
+            snapshot = SelectionSnapshot(
+                inputs = inputs,
+                installedAddonOrder = installedAddonOrder,
+                preferences = preferences
+            ),
+            winner = winner
+        )
+    }
+
+
     private data class CwPrefetchTarget(
         val type: String,
         val videoId: String,
         val season: Int?,
-        val episode: Int?
+        val episode: Int?,
+        /** R2: needed to read the binge-group cache the stream screen reads. */
+        val contentId: String?
     )
 
     private fun cwPrefetchTargetOf(item: ContinueWatchingItem?): CwPrefetchTarget? = when (item) {
@@ -143,13 +222,15 @@ class HomeViewModel @Inject constructor(
             item.progress.contentType,
             item.progress.videoId,
             item.progress.season,
-            item.progress.episode
+            item.progress.episode,
+            item.progress.contentId
         )
         is ContinueWatchingItem.NextUp -> CwPrefetchTarget(
             item.info.contentType,
             item.info.videoId,
             item.info.season,
-            item.info.episode
+            item.info.episode,
+            item.info.contentId
         )
         null -> null
     }
@@ -166,7 +247,8 @@ class HomeViewModel @Inject constructor(
                     type = target.type,
                     videoId = target.videoId,
                     season = target.season,
-                    episode = target.episode
+                    episode = target.episode,
+                    rank = { groups -> rankPrefetchedStreams(groups, target.contentId) }
                 )
             }
     }
