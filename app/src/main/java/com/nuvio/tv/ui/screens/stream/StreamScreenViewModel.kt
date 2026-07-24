@@ -3,6 +3,7 @@ package com.nuvio.tv.ui.screens.stream
 import com.nuvio.tv.core.util.TtffTrace
 import android.content.Context
 import android.util.Log
+import android.os.SystemClock
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -355,7 +356,14 @@ class StreamScreenViewModel @Inject constructor(
         streamLoadScope = newScope
         streamLoadJob = newScope.launch {
             streamLoadCompleted = false
+            // LOAD_SPLIT: on a StreamPrefetchCache hit the addon scrape is already
+            // done, yet sources_ready still measured 1,049 ms (24 Jul 2026). These
+            // marks attribute that residual: three sequential DataStore reads run
+            // before the scrape is even built, and applySuccess does ordering,
+            // badge-merge and chip-merge work on Main afterwards. Logging only.
+            val loadSplitT0 = SystemClock.elapsedRealtime()
             val playerSettings = playerSettingsDataStore.playerSettings.first()
+            android.util.Log.i(TAG, "LOAD_SPLIT playerSettings=${SystemClock.elapsedRealtime() - loadSplitT0}ms")
             if (manualSelection) {
                 directAutoPlayModeInitializedForSession = true
                 directAutoPlayFlowEnabledForSession = false
@@ -371,7 +379,9 @@ class StreamScreenViewModel @Inject constructor(
                     playerSettings.streamAutoPlayPreferBingeGroupForNextEpisode &&
                     playerSettings.streamAutoPlayReuseBingeGroup
                 ) {
+                    val bingeSplitT0 = SystemClock.elapsedRealtime()
                     val hasBingeGroup = contentId?.let { bingeGroupCacheDataStore.get(it) } != null
+                    android.util.Log.i(TAG, "LOAD_SPLIT bingeGroup=${SystemClock.elapsedRealtime() - bingeSplitT0}ms")
                     if (hasBingeGroup) {
                         directAutoPlayFlowEnabledForSession = true
                     }
@@ -464,7 +474,13 @@ class StreamScreenViewModel @Inject constructor(
                 )
             }
 
+            val addonsSplitT0 = SystemClock.elapsedRealtime()
             val installedAddons = addonRepository.getInstalledAddons().first().enabledAddons()
+            android.util.Log.i(
+                TAG,
+                "LOAD_SPLIT installedAddons=${SystemClock.elapsedRealtime() - addonsSplitT0}ms " +
+                    "preScrapeTotal=${SystemClock.elapsedRealtime() - loadSplitT0}ms"
+            )
             val installedAddonOrder = installedAddons.map { it.displayName }
             val directDebridSourceNames = emptyList<String>()
             val directDebridAvailable = false
@@ -474,6 +490,7 @@ class StreamScreenViewModel @Inject constructor(
             } else null
 
             fun applySuccess(addonStreamGroups: List<AddonStreams>, isAllLoaded: Boolean) {
+                val applyT0 = SystemClock.elapsedRealtime()
                 val orderedAddonStreams = StreamAutoPlaySelector.orderAddonStreams(
                     addonStreamGroups,
                     installedAddonOrder
