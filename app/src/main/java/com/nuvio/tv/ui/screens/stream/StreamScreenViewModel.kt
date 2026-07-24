@@ -664,7 +664,13 @@ class StreamScreenViewModel @Inject constructor(
             }
 
             val streamLoadInner = launch {
-                streamRepository.getStreamsFromAllAddons(
+                // S4a: a completed details-page prefetch is emitted here as one
+                // Success followed by completion -- exactly the shape of a very
+                // fast scrape -- so the collect below and the post-collect
+                // isAllLoaded=true pass behave identically. A miss returns the
+                // live repository flow unchanged.
+                com.nuvio.tv.core.stream.StreamPrefetchCache.streamsFor(
+                    repository = streamRepository,
                     type = contentType,
                     videoId = videoId,
                     season = season,

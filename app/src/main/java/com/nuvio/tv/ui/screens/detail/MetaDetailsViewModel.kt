@@ -68,11 +68,14 @@ import java.util.Locale
 import javax.inject.Inject
 
 private const val TAG = "MetaDetailsViewModel"
+private const val STREAM_PREFETCH_DEBOUNCE_MS = 300L
 
 @HiltViewModel
 class MetaDetailsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val metaRepository: MetaRepository,
+    // S4a: used only to pre-scrape the play target while this page is open.
+    private val streamRepository: com.nuvio.tv.domain.repository.StreamRepository,
     private val tmdbSettingsDataStore: TmdbSettingsDataStore,
     private val tmdbService: TmdbService,
     private val tmdbMetadataService: TmdbMetadataService,
@@ -99,6 +102,67 @@ class MetaDetailsViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(MetaDetailsUiState())
     val uiState: StateFlow<MetaDetailsUiState> = _uiState.asStateFlow()
+
+    // S4a: the details page resolves its play target (NextToWatch -> the
+    // "Next S1 E2" / "Resume ..." button) well before the press, but the addon
+    // scrape cannot start until StreamScreenViewModel exists, which is after it.
+    // Measured 24 Jul 2026 (Xiaomi, auto-play Best quality): that scrape is
+    // 1,949-2,896 ms and is paid on every play. Kick it off here instead.
+    //
+    // Debounced so an accidental open that is immediately backed out of does not
+    // scrape. Every millisecond of debounce is a millisecond of head start given
+    // up, so it is deliberately short. StreamPrefetchCache keeps at most one
+    // prefetch in flight and drops the result if nothing consumes it.
+    private data class StreamPrefetchTarget(
+        val type: String,
+        val videoId: String,
+        val season: Int?,
+        val episode: Int?
+    )
+
+    private var lastStreamPrefetchKey: String? = null
+    private var streamPrefetchJob: Job? = null
+
+    private fun onStreamPrefetchTarget(type: String, videoId: String, season: Int?, episode: Int?) {
+        if (type.isBlank() || videoId.isBlank()) return
+        val key = com.nuvio.tv.core.stream.StreamPrefetchCache.keyOf(type, videoId, season, episode)
+        if (key == lastStreamPrefetchKey) return
+        lastStreamPrefetchKey = key
+        streamPrefetchJob?.cancel()
+        streamPrefetchJob = viewModelScope.launch {
+            delay(STREAM_PREFETCH_DEBOUNCE_MS)
+            com.nuvio.tv.core.stream.StreamPrefetchCache.prefetch(
+                repository = streamRepository,
+                type = type,
+                videoId = videoId,
+                season = season,
+                episode = episode
+            )
+        }
+    }
+
+    private val streamPrefetchObserver: Job = viewModelScope.launch {
+        _uiState
+            .map { state ->
+                val meta = state.meta
+                val ntw = state.nextToWatch
+                val nextId = ntw?.nextVideoId
+                when {
+                    meta == null -> null
+                    // Series: the hero button plays this exact video id.
+                    nextId != null -> StreamPrefetchTarget(meta.apiType, nextId, ntw?.nextSeason, ntw?.nextEpisode)
+                    // Movie: the hero button plays the meta id itself.
+                    state.seasons.isEmpty() -> StreamPrefetchTarget(meta.apiType, meta.id, null, null)
+                    else -> null
+                }
+            }
+            .distinctUntilChanged()
+            .collectLatest { target ->
+                if (target != null) {
+                    onStreamPrefetchTarget(target.type, target.videoId, target.season, target.episode)
+                }
+            }
+    }
 
     private val localizedContext: Context
         get() {
