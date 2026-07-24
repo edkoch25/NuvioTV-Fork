@@ -38,6 +38,7 @@ import com.nuvio.tv.domain.repository.AddonRepository
 import com.nuvio.tv.domain.repository.CatalogRepository
 import com.nuvio.tv.domain.repository.LibraryRepository
 import com.nuvio.tv.domain.repository.MetaRepository
+import com.nuvio.tv.domain.repository.StreamRepository
 import com.nuvio.tv.domain.repository.WatchProgressRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -83,7 +84,8 @@ class HomeViewModel @Inject constructor(
     internal val watchedSeriesStateHolder: com.nuvio.tv.data.local.WatchedSeriesStateHolder,
     internal val cwEnrichmentCache: ContinueWatchingEnrichmentCache,
     internal val profileManager: com.nuvio.tv.core.profile.ProfileManager,
-    internal val tvRecommendationManager: TvRecommendationManager
+    internal val tvRecommendationManager: TvRecommendationManager,
+    internal val streamRepository: StreamRepository
 ) : ViewModel() {
     companion object {
         internal const val TAG = "HomeViewModel"
@@ -109,6 +111,65 @@ class HomeViewModel @Inject constructor(
     /** True once the CW pipeline has completed its first emission (items or empty). */
     internal val _initialCwResolved = MutableStateFlow(false)
     val initialCwResolved: StateFlow<Boolean> = _initialCwResolved.asStateFlow()
+
+    // S4a-3: Continue Watching navigates straight to Screen.Stream
+    // (NuvioNavHost.kt:205 -> createContinueWatchingRoute), bypassing the
+    // details page entirely, so MetaDetailsViewModel never exists and S4a's
+    // prefetch cannot fire on this path -- structurally, not intermittently.
+    //
+    // Measured 24 Jul 2026 (Xiaomi, nt21, auto-play Best quality): a
+    // details-page play reached a full stream list in 346 ms, while three
+    // consecutive Continue Watching plays of the SAME title took 1,254-2,351
+    // ms of live scrape. Those were the later, upstream-warm runs, so the
+    // confound runs against the conclusion rather than for it.
+    //
+    // The key is derived from the same ContinueWatchingItem the click routes
+    // with, so unlike S4b there is no prediction side that can diverge from
+    // what actually plays. Top item only: for a binge that is the next
+    // episode. Debounced because the CW list settles in stages while
+    // enrichment and Trakt sync land; collectLatest cancels a pending delay
+    // when the target changes, so a settling list scrapes once, not N times.
+    private val CW_STREAM_PREFETCH_DEBOUNCE_MS = 500L
+
+    private data class CwPrefetchTarget(
+        val type: String,
+        val videoId: String,
+        val season: Int?,
+        val episode: Int?
+    )
+
+    private fun cwPrefetchTargetOf(item: ContinueWatchingItem?): CwPrefetchTarget? = when (item) {
+        is ContinueWatchingItem.InProgress -> CwPrefetchTarget(
+            item.progress.contentType,
+            item.progress.videoId,
+            item.progress.season,
+            item.progress.episode
+        )
+        is ContinueWatchingItem.NextUp -> CwPrefetchTarget(
+            item.info.contentType,
+            item.info.videoId,
+            item.info.season,
+            item.info.episode
+        )
+        null -> null
+    }
+
+    private val cwPrefetchObserver: Job = viewModelScope.launch {
+        _uiState
+            .map { state -> cwPrefetchTargetOf(state.continueWatchingItems.firstOrNull()) }
+            .distinctUntilChanged()
+            .collectLatest { target ->
+                if (target == null) return@collectLatest
+                delay(CW_STREAM_PREFETCH_DEBOUNCE_MS)
+                com.nuvio.tv.core.stream.StreamPrefetchCache.prefetch(
+                    repository = streamRepository,
+                    type = target.type,
+                    videoId = target.videoId,
+                    season = target.season,
+                    episode = target.episode
+                )
+            }
+    }
     val effectiveAutoplayEnabled = playerSettingsDataStore.playerSettings
         .map(StreamAutoPlayPolicy::isEffectivelyEnabled)
         .distinctUntilChanged()
