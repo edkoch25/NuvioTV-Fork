@@ -58,6 +58,13 @@ internal fun PlayerRuntimeController.maybeRunTrackFormatAfr(rawFps: Float, forma
     if (trackAfrAttemptedForCurrentStream) return
     if (afrModeAppliedPreStart) return
     if (rawFps <= 0f) return
+    // Mirror of the FrameRateUtils floor, applied before the cache write below so a
+    // bogus rate from a broken source is never persisted for the next play.
+    if (rawFps < 20f) {
+        Log.w(PlayerRuntimeController.TAG, "Track AFR: ignoring implausible frame rate ${rawFps}fps")
+        trackAfrAttemptedForCurrentStream = true
+        return
+    }
     if (_uiState.value.frameRateMatchingMode == FrameRateMatchingMode.OFF) return
     if (_uiState.value.afrProbeRunning) return
     // Too late: playback is already running. A mid-playback mode switch is the

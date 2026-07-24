@@ -38,6 +38,8 @@ object FrameRateUtils {
     private const val MKV_EXTENSION = ".mkv"
     private const val SWITCH_POLL_INTERVAL_MS = 60L
     private const val SWITCH_REQUIRED_STABLE_POLLS = 2
+    /** Below this the reported rate is not real content; never switch the panel for it. */
+    private const val MIN_AFR_SWITCH_FPS = 20f
 
     data class DisplayModeSwitchResult(
         val appliedMode: Display.Mode
@@ -100,8 +102,14 @@ object FrameRateUtils {
 
     internal fun buildCacheKey(url: String, headers: Map<String, String>, filename: String?): String {
         val sanitized = sanitizeHeaders(headers)
+        // The resolved CDN host rotates per debrid resolve (nexus-170/196/197/198
+        // all observed for one title on 24 Jul 2026), so including it here made the
+        // entry miss whenever a fresh resolve landed on a different edge -- the
+        // cache only hit when the link cache happened to return the identical URL.
+        // The filename identifies the content; the host is transport. Reader and
+        // writer both come through here, so the two sides cannot disagree.
         val baseKey = if (!filename.isNullOrBlank()) {
-            "file://${parseUriHost(url)}/$filename"
+            "file://$filename"
         } else {
             url.substringBefore('?')
         }
@@ -300,6 +308,16 @@ object FrameRateUtils {
     ): DisplayModeSwitchResult? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null
         if (frameRate <= 0f) return null
+        // Sanity floor. A broken source can report an absurd rate -- 24 Jul 2026 a
+        // StremThru entry served a 30 s 1280x720 error stub at frameRate=1.0 and the
+        // panel was driven 59.94Hz -> 50.0Hz for it, costing a switch, a settle and
+        // an exit blank for content that was never the episode. snapToStandardRate
+        // recognises nothing below 23.90 fps, so anything under this floor cannot be
+        // matched meaningfully anyway; leave the display alone.
+        if (frameRate < MIN_AFR_SWITCH_FPS) {
+            Log.w(TAG, "Refusing display-mode switch for implausible frame rate ${frameRate}fps")
+            return null
+        }
 
         val switchPlan = withContext(Dispatchers.Main) {
             val window = activity.window ?: return@withContext null
