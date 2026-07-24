@@ -495,6 +495,7 @@ class StreamScreenViewModel @Inject constructor(
                     addonStreamGroups,
                     installedAddonOrder
                 )
+                val applyOrderMs = SystemClock.elapsedRealtime() - applyT0
 
                 // Preserve badges already computed by prior badge jobs so they
                 // don't vanish when repository emits fresh (badge-less) streams.
@@ -520,6 +521,7 @@ class StreamScreenViewModel @Inject constructor(
                 }
 
                 val allStreams = mergedAddonStreams.flatMap { it.streams }
+                val applyBadgeMs = SystemClock.elapsedRealtime() - applyT0 - applyOrderMs
                 val availableAddons = mergedAddonStreams.map { it.addonName }
                 // Auto-select only after all addons have responded or the
                 // configured timeout has elapsed. This gives slower addons a
@@ -542,6 +544,22 @@ class StreamScreenViewModel @Inject constructor(
                         debridStreamPreferences = latestDebridStreamPreferences
                     )
                 }
+                // APPLY_SPLIT: the 615-874 ms residual (24 Jul 2026) sits between the
+                // stream list arriving and the sources_ready mark below. Everything
+                // timed here runs on Dispatchers.Main.immediate via viewModelScope,
+                // and applySuccess runs twice -- once at isAllLoaded=false and again
+                // on flow completion -- so order and badge work is paid twice while
+                // the ranking is paid once. selectAutoPlayStream fans out to
+                // StreamQualityRank.rank, which derives facts from every stream name.
+                // Logging only.
+                val applySelectMs = SystemClock.elapsedRealtime() - applyT0 - applyOrderMs - applyBadgeMs
+                android.util.Log.i(
+                    TAG,
+                    "APPLY_SPLIT allLoaded=$isAllLoaded groups=${mergedAddonStreams.size} " +
+                        "streams=${allStreams.size} order=${applyOrderMs}ms badge=${applyBadgeMs}ms " +
+                        "select=${applySelectMs}ms ranked=$shouldAutoSelect " +
+                        "total=${SystemClock.elapsedRealtime() - applyT0}ms"
+                )
                 if (shouldAutoSelect && !ttffSourcesReadyMarked) {
                     ttffSourcesReadyMarked = true
                     TtffTrace.mark("sources_ready")
