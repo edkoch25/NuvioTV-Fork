@@ -3,7 +3,6 @@ package com.nuvio.tv.core.trakt
 import android.content.Context
 import com.nuvio.tv.R
 import com.nuvio.tv.core.network.NetworkResult
-import com.nuvio.tv.core.sync.TraktCredentialSyncService
 import com.nuvio.tv.data.local.AuthSessionNoticeDataStore
 import com.nuvio.tv.data.local.TraktAuthDataStore
 import com.nuvio.tv.data.local.TraktAuthState
