@@ -17,6 +17,7 @@ import com.nuvio.tv.core.network.NetworkResult
 import com.nuvio.tv.core.torrent.TorrentSettings
 import com.nuvio.tv.core.torrent.TorrentService
 import com.nuvio.tv.core.torrent.TorrentState
+import com.nuvio.tv.core.player.AutoPlaySelection
 import com.nuvio.tv.core.player.StreamAutoPlayPolicy
 import com.nuvio.tv.core.player.StreamAutoPlaySelector
 import com.nuvio.tv.core.streams.StreamBadgePresentation
@@ -489,6 +490,22 @@ class StreamScreenViewModel @Inject constructor(
                 contentId?.let { bingeGroupCacheDataStore.get(it) }
             } else null
 
+            // Extracted so both selection call sites below, and future callers
+            // that must predict the same winner (ranking during the prefetch,
+            // S4b pre-resolve), share one argument assembly. Every field here is
+            // already a snapshot: playerSettings from one .first(),
+            // installedAddonOrder from one getInstalledAddons().first(),
+            // persistedBingeGroup from one cache read.
+            val autoPlayInputs = AutoPlaySelection.Inputs(
+                mode = playerSettings.streamAutoPlayMode,
+                regexPattern = playerSettings.streamAutoPlayRegex,
+                source = playerSettings.streamAutoPlaySource,
+                installedAddonNames = installedAddonOrder.toSet(),
+                selectedAddons = playerSettings.streamAutoPlaySelectedAddons,
+                selectedPlugins = playerSettings.streamAutoPlaySelectedPlugins,
+                preferredBingeGroup = persistedBingeGroup
+            )
+
             fun applySuccess(addonStreamGroups: List<AddonStreams>, isAllLoaded: Boolean) {
                 val applyT0 = SystemClock.elapsedRealtime()
                 val orderedAddonStreams = StreamAutoPlaySelector.orderAddonStreams(
@@ -531,16 +548,9 @@ class StreamScreenViewModel @Inject constructor(
                 val selectedAutoPlayStream = if (!shouldAutoSelect) {
                     null
                 } else {
-                    StreamAutoPlaySelector.selectAutoPlayStream(
+                    AutoPlaySelection.select(
                         streams = allStreams,
-                        mode = playerSettings.streamAutoPlayMode,
-                        regexPattern = playerSettings.streamAutoPlayRegex,
-                        source = playerSettings.streamAutoPlaySource,
-                        installedAddonNames = installedAddonOrder.toSet(),
-                        selectedAddons = playerSettings.streamAutoPlaySelectedAddons,
-                        selectedPlugins = playerSettings.streamAutoPlaySelectedPlugins,
-                        preferredBingeGroup = persistedBingeGroup,
-                        preferBingeGroupInSelection = persistedBingeGroup != null,
+                        inputs = autoPlayInputs,
                         debridStreamPreferences = latestDebridStreamPreferences
                     )
                 }
@@ -768,18 +778,11 @@ class StreamScreenViewModel @Inject constructor(
                                     merged, installedAddonOrder
                                 )
                                 val allStreams = orderedStreams.flatMap { it.streams }
-                                val earlyMatch = StreamAutoPlaySelector.selectAutoPlayStream(
+                                val earlyMatch = AutoPlaySelection.select(
                                     streams = allStreams,
-                                    mode = playerSettings.streamAutoPlayMode,
-                                    regexPattern = playerSettings.streamAutoPlayRegex,
-                                    source = playerSettings.streamAutoPlaySource,
-                                    installedAddonNames = installedAddonOrder.toSet(),
-                                    selectedAddons = playerSettings.streamAutoPlaySelectedAddons,
-                                    selectedPlugins = playerSettings.streamAutoPlaySelectedPlugins,
-                                    preferredBingeGroup = persistedBingeGroup,
-                                    preferBingeGroupInSelection = true,
-                                    bingeGroupOnly = true,
-                                    debridStreamPreferences = latestDebridStreamPreferences
+                                    inputs = autoPlayInputs,
+                                    debridStreamPreferences = latestDebridStreamPreferences,
+                                    bingeGroupOnly = true
                                 )
                                 if (earlyMatch != null) {
                                     resolvedAutoPlayTarget = true

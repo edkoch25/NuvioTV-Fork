@@ -14,6 +14,103 @@ import org.junit.Test
 
 class StreamAutoPlaySelectorTest {
 
+    private val baseInputs = AutoPlaySelection.Inputs(
+        mode = StreamAutoPlayMode.FIRST_STREAM,
+        regexPattern = "",
+        source = StreamAutoPlaySource.ALL_SOURCES,
+        installedAddonNames = setOf("AddonA", "AddonB"),
+        selectedAddons = emptySet(),
+        selectedPlugins = emptySet(),
+        preferredBingeGroup = null
+    )
+
+    @Test
+    fun `AutoPlaySelection matches the argument set the stream screen used to pass`() {
+        val first = stream(addonName = "AddonA", url = "https://example.com/a.mkv", name = "1080p")
+        val second = stream(addonName = "AddonB", url = "https://example.com/b.mkv", name = "720p")
+        val streams = listOf(first, second)
+
+        val viaSelector = StreamAutoPlaySelector.selectAutoPlayStream(
+            streams = streams,
+            mode = baseInputs.mode,
+            regexPattern = baseInputs.regexPattern,
+            source = baseInputs.source,
+            installedAddonNames = baseInputs.installedAddonNames,
+            selectedAddons = baseInputs.selectedAddons,
+            selectedPlugins = baseInputs.selectedPlugins,
+            preferredBingeGroup = baseInputs.preferredBingeGroup,
+            preferBingeGroupInSelection = baseInputs.preferredBingeGroup != null,
+            debridStreamPreferences = null
+        )
+        val viaExtraction = AutoPlaySelection.select(
+            streams = streams,
+            inputs = baseInputs,
+            debridStreamPreferences = null
+        )
+
+        assertEquals(viaSelector, viaExtraction)
+        assertEquals(first, viaExtraction)
+    }
+
+    @Test
+    fun `AutoPlaySelection derives binge preference from the inputs`() {
+        val other = stream(
+            addonName = "AddonA",
+            url = "https://example.com/other.mkv",
+            bingeGroup = "other-group"
+        )
+        val preferred = stream(
+            addonName = "AddonB",
+            url = "https://example.com/preferred.mkv",
+            bingeGroup = "same-group"
+        )
+
+        // preferredBingeGroup set -> preferBingeGroupInSelection is derived true,
+        // and a binge match outranks the mode even in MANUAL.
+        val withGroup = AutoPlaySelection.select(
+            streams = listOf(other, preferred),
+            inputs = baseInputs.copy(
+                mode = StreamAutoPlayMode.MANUAL,
+                preferredBingeGroup = "same-group"
+            ),
+            debridStreamPreferences = null
+        )
+        assertEquals(preferred, withGroup)
+
+        // preferredBingeGroup null -> derived false, MANUAL yields the picker.
+        val withoutGroup = AutoPlaySelection.select(
+            streams = listOf(other, preferred),
+            inputs = baseInputs.copy(mode = StreamAutoPlayMode.MANUAL),
+            debridStreamPreferences = null
+        )
+        assertNull(withoutGroup)
+    }
+
+    @Test
+    fun `AutoPlaySelection bingeGroupOnly does not fall back to the mode`() {
+        val only = stream(
+            addonName = "AddonA",
+            url = "https://example.com/only.mkv",
+            bingeGroup = "other-group"
+        )
+
+        val eager = AutoPlaySelection.select(
+            streams = listOf(only),
+            inputs = baseInputs.copy(preferredBingeGroup = "missing-group"),
+            debridStreamPreferences = null,
+            bingeGroupOnly = true
+        )
+        assertNull(eager)
+
+        // Same inputs without the flag fall back to FIRST_STREAM.
+        val fallback = AutoPlaySelection.select(
+            streams = listOf(only),
+            inputs = baseInputs.copy(preferredBingeGroup = "missing-group"),
+            debridStreamPreferences = null
+        )
+        assertEquals(only, fallback)
+    }
+
     @Test
     fun `orderAddonStreams follows installed addon order and leaves plugins last`() {
         val plugin = addonStreams("Plugin")
