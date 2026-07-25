@@ -184,15 +184,32 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
             .diskCache {
                 DiskCache.Builder()
                     .directory(cacheDir.resolve("image_cache").toOkioPath())
-                    // nt21 (task 2.3/2.5): 500 MB still cycles — a post-wipe audit showed
-                    // ~179 MB refilled in under a day against a ~208k-title shared Emby
-                    // library, so steady-state eviction was certain. The cap is an LRU
-                    // ceiling, not a reservation: it only occupies what is actually
-                    // fetched. 8 GB targets fetched-content-never-evicts within the
-                    // approved on-box headroom (~23 GB free at audit time). Watch item:
+                    // D13. nt21 raised this cap because 500 MB was cycling (a post-wipe
+                    // audit refilled ~179 MB in under a day against a ~208k-title shared
+                    // Emby library). Raising it was right; using an ABSOLUTE value was
+                    // not: maxSizeBytes and maxSizePercent are mutually exclusive in
+                    // Coil's DiskCache.Builder -- setting one zeroes the other -- so the
+                    // 8 GiB constant silently disabled the library's own free-space
+                    // proportional sizing and replaced it with a device-blind number.
+                    //
+                    // Percent plus clamp restores it. On a 22 GiB-free box this computes
+                    // to the 2 GiB ceiling; 1 GiB at 10 GiB free; the floor binds below
+                    // ~2.5 GiB free. Two properties worth knowing: Coil reads FREE space,
+                    // not total, so the cap recomputes at every app start and drifts down
+                    // as the disk fills; and the floor is unconditional, applied by
+                    // coerceIn even when the space is not there. 256 MB was chosen over
+                    // 512 for that reason -- it sits below nt21's measured 500 MB cycling
+                    // threshold deliberately, trading re-downloads against consuming a
+                    // quarter of a nearly-full disk.
+                    //
+                    // The 2 GiB ceiling is inferred, not measured: with one test device
+                    // there is no steady-state working-set reference. Build 1's
+                    // CACHE_SIZES readout is what converts it. Watch item unchanged:
                     // disk-cache journal replay at high entry counts is a possible
                     // cold-start contributor (task 2.13).
-                    .maxSizeBytes(8L * 1024 * 1024 * 1024)
+                    .maxSizePercent(0.10)
+                    .minimumMaxSizeBytes(256L * 1024 * 1024)
+                    .maximumMaxSizeBytes(2L * 1024 * 1024 * 1024)
                     .build()
             }
             .crossfade(false)
