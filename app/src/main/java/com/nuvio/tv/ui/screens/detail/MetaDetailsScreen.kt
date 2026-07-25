@@ -461,6 +461,7 @@ fun MetaDetailsScreen(
                         episode = returnFocusEpisode
                     ),
                     lastFocusedEpisodeIdBySeason = viewModel.lastFocusedEpisodeIdBySeason,
+                    onEpisodeFocusedForPrefetch = viewModel::onEpisodeFocusedForPrefetch,
                     heroRestoreToken = heroRestoreToken,
                     seasons = uiState.seasons,
                     selectedSeason = uiState.selectedSeason,
@@ -819,6 +820,7 @@ private fun MetaDetailsContent(
     meta: Meta,
     detailReturnEpisodeFocusRequest: DetailReturnEpisodeFocusRequest? = null,
     lastFocusedEpisodeIdBySeason: MutableMap<Int, String>,
+    onEpisodeFocusedForPrefetch: (Video) -> Unit = {},
     heroRestoreToken: Int = 0,
     seasons: List<Int>,
     selectedSeason: Int,
@@ -1718,8 +1720,9 @@ private fun MetaDetailsContent(
                             onRestoreFocusHandled = {
                                 clearPendingRestore()
                             },
-                            onEpisodeFocused = { episodeId ->
-                                lastFocusedEpisodeIdBySeason[selectedSeason] = episodeId
+                            onEpisodeFocused = { focusedEpisode ->
+                                lastFocusedEpisodeIdBySeason[selectedSeason] = focusedEpisode.id
+                                onEpisodeFocusedForPrefetch(focusedEpisode)
                             },
                             scrollToEpisodeId = if (lastFocusedEpisodeIdBySeason[selectedSeason] != null) {
                                 null

@@ -274,7 +274,7 @@ fun EpisodesRow(
     restoreEpisodeId: String? = null,
     restoreFocusToken: Int = 0,
     onRestoreFocusHandled: () -> Unit = {},
-    onEpisodeFocused: (episodeId: String) -> Unit = {},
+    onEpisodeFocused: (episode: Video) -> Unit = {},
     scrollToEpisodeId: String? = null,
     onScrollToEpisodeHandled: () -> Unit = {}
 ) {
@@ -351,7 +351,7 @@ fun EpisodesRow(
             val episodeOnClick = remember(episode.id) { { onEpisodeClick(episode) } }
             val episodeOnLongPress = remember(episode.id) { { optionsEpisode = episode } }
             val episodeOnFocused = remember(episode.id) { {
-                onEpisodeFocused(episode.id)
+                onEpisodeFocused(episode)
             } }
             val isRestoreTarget = episode.id == restoreEpisodeId
             val episodeOnFocusRestored = remember(isRestoreTarget, onRestoreFocusHandled) {

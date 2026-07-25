@@ -54,6 +54,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import android.content.Context
@@ -69,6 +70,14 @@ import javax.inject.Inject
 
 private const val TAG = "MetaDetailsViewModel"
 private const val STREAM_PREFETCH_DEBOUNCE_MS = 300L
+
+// S4a-2: episode focus moves on every D-pad press while scrolling a season,
+// which is far faster than opening a details page, so this is deliberately
+// longer than STREAM_PREFETCH_DEBOUNCE_MS. collectLatest cancels a pending
+// delay when focus moves again, so scrolling past an episode starts no work
+// at all and only a deliberate pause triggers a scrape. [inferred] -- chosen
+// as 2x the hero debounce, retunable in one line if it fires too eagerly.
+private const val EPISODE_FOCUS_PREFETCH_DEBOUNCE_MS = 600L
 
 @HiltViewModel
 class MetaDetailsViewModel @Inject constructor(
@@ -159,6 +168,60 @@ class MetaDetailsViewModel @Inject constructor(
                 }
             )
         }
+    }
+
+
+    /**
+     * S4a-2: the episode list is the last uncovered play path.
+     *
+     * S4a prefetches the hero button's target -- a movie, or a series' resume/
+     * next episode -- and S4a-3 the top Continue Watching entry. Picking any
+     * OTHER episode from the list has always started from cold: full scrape,
+     * full rank, full debrid resolve, all after the press.
+     *
+     * The recorded blocker ("fires in a sub-composable with neither the
+     * ViewModel nor onEvent in scope") was half right. MetaDetailsContent
+     * genuinely does not receive the ViewModel -- but lastFocusedEpisodeIdBySeason
+     * is a ViewModel-owned map already being written from that callback, so the
+     * data flow existed and only the hook was missing. One threaded callback,
+     * not a new MetaDetailsEvent.
+     *
+     * Focus is not intent, so this is debounced harder than the hero path. The
+     * cost of over-firing is bounded by StreamPrefetchCache being single-flight
+     * -- a new target cancels the previous scrape -- and by the pre-resolve
+     * running only after that scrape completes, so a scroll-through resolves
+     * nothing.
+     */
+    fun onEpisodeFocusedForPrefetch(episode: Video) {
+        val meta = _uiState.value.meta ?: return
+        if (episode.id.isBlank()) return
+        episodeFocusPrefetchRequests.tryEmit(
+            StreamPrefetchTarget(
+                type = meta.apiType,
+                videoId = episode.id,
+                season = episode.season,
+                episode = episode.episode,
+                contentId = meta.id
+            )
+        )
+    }
+
+    private val episodeFocusPrefetchRequests =
+        MutableSharedFlow<StreamPrefetchTarget>(extraBufferCapacity = 16)
+
+    private val episodeFocusPrefetchObserver: Job = viewModelScope.launch {
+        episodeFocusPrefetchRequests
+            .distinctUntilChanged()
+            .collectLatest { target ->
+                delay(EPISODE_FOCUS_PREFETCH_DEBOUNCE_MS)
+                onStreamPrefetchTarget(
+                    target.type,
+                    target.videoId,
+                    target.season,
+                    target.episode,
+                    target.contentId
+                )
+            }
     }
 
     private val streamPrefetchObserver: Job = viewModelScope.launch {
