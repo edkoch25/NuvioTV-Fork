@@ -13,7 +13,6 @@ import coil3.gif.AnimatedImageDecoder
 import coil3.svg.SvgDecoder
 import coil3.request.crossfade
 import coil3.request.allowHardware
-import coil3.request.allowRgb565
 import coil3.bitmapFactoryMaxParallelism
 
 import okio.Path.Companion.toOkioPath
