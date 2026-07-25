@@ -122,8 +122,8 @@ android {
         applicationId = "com.nuvio.tv.test"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1135
-        versionName = "0.7.19-beta-nt27"
+        versionCode = 1136
+        versionName = "0.7.19-beta-nt28"
 
         buildConfigField("String", "PARENTAL_GUIDE_API_URL", "\"${localProperties.getProperty("PARENTAL_GUIDE_API_URL", "")}\"")
         buildConfigField("String", "INTRODB_API_URL", "\"${localProperties.getProperty("INTRODB_API_URL", "")}\"")
