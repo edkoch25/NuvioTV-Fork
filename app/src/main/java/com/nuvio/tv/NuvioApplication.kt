@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.StrictMode
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
+import coil3.imageLoader
 import coil3.disk.DiskCache
 import coil3.memory.MemoryCache
 import coil3.gif.GifDecoder
@@ -28,6 +29,7 @@ import okhttp3.OkHttpClient
 import java.util.concurrent.ConcurrentHashMap
 import com.nuvio.tv.data.local.PlayerSettingsDataStore
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -39,6 +41,14 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var playerSettingsDataStore: PlayerSettingsDataStore
 
     companion object {
+        private const val CACHE_TAG = "NuvioCache"
+        private const val IMAGE_CACHE_DIR = "image_cache"
+        private const val HTTP_CACHE_DIR = "http_cache"
+        private const val HTTP_CACHE_VALIDATED_DIR = "http_cache_validated"
+
+        /** Long enough that the walk cannot contend with cold start. */
+        private const val CACHE_READOUT_DELAY_MS = 15_000L
+
         /**
          * Shared cookie jar for CloudStream extension HTTP requests.
          * Accessible so the player's OkHttpClient can share cookies
@@ -82,6 +92,58 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
             if (playerSettingsDataStore.playerSettings.first().matPassthroughEnabled) {
                 com.nuvio.tv.diagnostics.Gate0Probe.runOnce(this@NuvioApplication)
             }
+        }
+
+        // Build 1 instrument: the only way to answer whether OkHttp's 50 MB
+        // http_cache holds anything, and the only way to see Coil's COMPUTED
+        // disk cap (a percent-based cap is otherwise invisible). Deliberately
+        // delayed and on IO: walking thousands of cache entries must not land
+        // on the cold-start path this instrument exists to help optimise.
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            delay(CACHE_READOUT_DELAY_MS)
+            logCacheSizes()
+        }
+    }
+
+    private fun dirBytes(name: String): Long {
+        val d = java.io.File(cacheDir, name)
+        if (!d.isDirectory) return -1L
+        return try {
+            d.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        } catch (_: Exception) {
+            -2L
+        }
+    }
+
+    private fun logCacheSizes() {
+        try {
+            val mib = 1024L * 1024L
+            val am = getSystemService(android.app.ActivityManager::class.java)
+            val loader = imageLoader
+            val disk = loader.diskCache
+            val mem = loader.memoryCache
+            // Locals, not nested literals inside a string template: an escaped
+            // quote inside a template is a syntax error, and hoisting removes
+            // the whole class of hazard.
+            val imageMiB = dirBytes(IMAGE_CACHE_DIR) / mib
+            val httpMiB = dirBytes(HTTP_CACHE_DIR) / mib
+            val httpValidatedMiB = dirBytes(HTTP_CACHE_VALIDATED_DIR) / mib
+            val diskSizeMiB = (disk?.size ?: -1L) / mib
+            val diskMaxMiB = (disk?.maxSize ?: -1L) / mib
+            val memSizeMiB = (mem?.size ?: -1L) / mib
+            val memMaxMiB = (mem?.maxSize ?: -1L) / mib
+            val freeMiB = cacheDir.usableSpace / mib
+            android.util.Log.i(
+                CACHE_TAG,
+                "CACHE_SIZES image=${imageMiB}MiB http=${httpMiB}MiB " +
+                    "httpValidated=${httpValidatedMiB}MiB " +
+                    "coilDisk=${diskSizeMiB}MiB coilDiskMax=${diskMaxMiB}MiB " +
+                    "coilMem=${memSizeMiB}MiB coilMemMax=${memMaxMiB}MiB " +
+                    "lowRam=${am?.isLowRamDevice} memClass=${am?.memoryClass}MiB " +
+                    "largeMemClass=${am?.largeMemoryClass}MiB freeMiB=$freeMiB"
+            )
+        } catch (e: Exception) {
+            android.util.Log.w(CACHE_TAG, "CACHE_SIZES failed: ${e.message}")
         }
     }
 

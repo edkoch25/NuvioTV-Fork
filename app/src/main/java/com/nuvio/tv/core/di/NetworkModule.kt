@@ -114,6 +114,27 @@ object NetworkModule {
                     .build()
                 chain.proceed(request)
             }
+            // Build 1 instrument: an APPLICATION interceptor sees cache hits;
+            // a network interceptor never does. This is what answers whether
+            // the 50 MB http_cache is used at all, and whether addons declare
+            // anything cacheable. One line per API call, not per media chunk.
+            .addInterceptor { chain ->
+                val response = chain.proceed(chain.request())
+                val served = when {
+                    response.cacheResponse != null && response.networkResponse != null -> "validated"
+                    response.cacheResponse != null -> "cache"
+                    else -> "network"
+                }
+                val cc = response.header("Cache-Control") ?: "none"
+                val age = response.header("Age") ?: "none"
+                val reqHost = chain.request().url.host
+                android.util.Log.i(
+                    "NuvioCache",
+                    "HTTP_CACHE served=$served code=${response.code} " +
+                        "cc=$cc age=$age host=$reqHost"
+                )
+                response
+            }
             // Prevent OkHttp from caching error responses (4xx/5xx).
             .addNetworkInterceptor { chain ->
                 val response = chain.proceed(chain.request())
