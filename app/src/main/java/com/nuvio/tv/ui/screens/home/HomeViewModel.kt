@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nuvio.tv.LocaleCache
+import com.nuvio.tv.core.debrid.DirectDebridResolver
 import com.nuvio.tv.core.player.AutoPlaySelection
 import com.nuvio.tv.core.player.PrefetchedSelection
 import com.nuvio.tv.core.player.SelectionSnapshot
@@ -95,7 +96,8 @@ class HomeViewModel @Inject constructor(
     internal val tvRecommendationManager: TvRecommendationManager,
     internal val streamRepository: StreamRepository,
     internal val bingeGroupCacheDataStore: BingeGroupCacheDataStore,
-    internal val debridSettingsDataStore: DebridSettingsDataStore
+    internal val debridSettingsDataStore: DebridSettingsDataStore,
+    internal val directDebridResolver: DirectDebridResolver
 ) : ViewModel() {
     companion object {
         internal const val TAG = "HomeViewModel"
@@ -156,6 +158,69 @@ class HomeViewModel @Inject constructor(
      * sort, so incoming order decides ties. Ranking the raw scrape output would
      * break ties differently from the presented list.
      */
+    /**
+     * S4b-lite: resolve the auto-play winner during the prefetch, so the press
+     * does not pay for it.
+     *
+     * Measured 25 Jul 2026 (Xiaomi S905X5M, 4K DV, TorBox): resolve_start ->
+     * resolve_done was 928-1,220 ms warm and 4,893 ms on the cold first play of
+     * a session, every play, on the critical path.
+     *
+     * Nothing is cached here by this function. DirectDebridResolver is a
+     * @Singleton holding its own in-memory resolvedCache (15 min TTL, keyed by
+     * infoHash/magnet/filename + fileIdx + season/episode) plus in-flight
+     * dedup, so the press-time resolve of the same winner returns from that
+     * cache -- and a press landing mid-resolve JOINS rather than starting a
+     * second one. The play path is therefore completely unchanged: it still
+     * scrapes, still ranks, still calls resolve(). resolve() is simply fast.
+     *
+     * Deliberately NOT written to StreamLinkCacheDataStore. That would short
+     * circuit the whole load at StreamScreenViewModel:425 and navigate without
+     * waiting for the scrape -- worth roughly another 390 ms, but it changes
+     * which code path a play takes, needs getStreamForPlayback's field mapping
+     * duplicated, and only pays out when streamReuseLastLinkEnabled is on,
+     * which is NOT the default. Separate decision, separate build.
+     *
+     * ⚠ Account cost, and it is the reason this is opt-in-by-design rather than
+     * unconditional: resolve() runs createTorrent(addOnlyIfCached=true), which
+     * adds an entry to the user's debrid account. add_only_if_cached means an
+     * uncached torrent is refused (409 -> NotCached) and nothing is added, so
+     * this can never start a real download. On TorBox a cached add falls under
+     * the 300/minute limit rather than the 60/hour uncached one, does not touch
+     * the AirLock "permanent storage" allowance, and expires after 30 days of
+     * inactivity. The waste case is a home screen opened and never played:
+     * one list entry and two API calls.
+     *
+     * Guards are all inside resolve() already -- shouldResolveToPlayableStream
+     * returns false for a stream that carries a direct URL (Emby via the NAS
+     * bridge, and any pre-resolved source), for an unsupported provider, and
+     * for a provider that is not the active resolver. Those return Stale
+     * without an API call. MANUAL auto-play produces no winner, so nothing
+     * reaches here at all.
+     */
+    private suspend fun preResolveWinner(
+        winner: com.nuvio.tv.domain.model.Stream,
+        target: CwPrefetchTarget
+    ) {
+        val resolveT0 = SystemClock.elapsedRealtime()
+        val result = try {
+            directDebridResolver.resolve(winner, target.season, target.episode)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.w("StreamPrefetch", "PREFETCH resolve failed: ${e.message}")
+            return
+        }
+        // Logged under the StreamPrefetch tag rather than HomeViewModel's: this
+        // is a prefetch-phase event, it belongs beside PREFETCH rank in a
+        // capture, and it keeps the existing harness tag filter unchanged.
+        android.util.Log.i(
+            "StreamPrefetch",
+            "PREFETCH resolve result=${result::class.simpleName} " +
+                "ms=${SystemClock.elapsedRealtime() - resolveT0}"
+        )
+    }
+
     private suspend fun rankPrefetchedStreams(
         groups: List<com.nuvio.tv.domain.model.AddonStreams>,
         contentId: String?
@@ -248,7 +313,11 @@ class HomeViewModel @Inject constructor(
                     videoId = target.videoId,
                     season = target.season,
                     episode = target.episode,
-                    rank = { groups -> rankPrefetchedStreams(groups, target.contentId) }
+                    rank = { groups ->
+                        val selection = rankPrefetchedStreams(groups, target.contentId)
+                        if (selection != null) preResolveWinner(selection.winner, target)
+                        selection
+                    }
                 )
             }
     }
