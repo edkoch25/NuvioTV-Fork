@@ -25,7 +25,8 @@ class NuvioExoPlayerPerformanceHelperTest {
         every { helperSpy.getDevicePhysicalRamBytes(any()) } returns 0L
 
         assertEquals("Unknown", helperSpy.getFriendlyRamLabel(context))
-        assertEquals(325, helperSpy.getSafeNativeMemoryLimitMb(context))
+        assertEquals(250, helperSpy.getSafeNativeMemoryLimitMb(context))
+        assertEquals(325, helperSpy.getWarningNativeMemoryLimitMb(context))
     }
 
     @Test
@@ -38,6 +39,7 @@ class NuvioExoPlayerPerformanceHelperTest {
 
         assertEquals("1 GB", helperSpy.getFriendlyRamLabel(context))
         assertEquals(150, helperSpy.getSafeNativeMemoryLimitMb(context))
+        assertEquals(180, helperSpy.getWarningNativeMemoryLimitMb(context))
     }
 
     @Test
@@ -50,6 +52,7 @@ class NuvioExoPlayerPerformanceHelperTest {
 
         assertEquals("1.5 GB", helperSpy.getFriendlyRamLabel(context))
         assertEquals(200, helperSpy.getSafeNativeMemoryLimitMb(context))
+        assertEquals(250, helperSpy.getWarningNativeMemoryLimitMb(context))
     }
 
     @Test
@@ -61,7 +64,8 @@ class NuvioExoPlayerPerformanceHelperTest {
         every { helperSpy.getDevicePhysicalRamBytes(any()) } returns (1.7 * gb).toLong()
 
         assertEquals("2 GB", helperSpy.getFriendlyRamLabel(context))
-        assertEquals(325, helperSpy.getSafeNativeMemoryLimitMb(context))
+        assertEquals(250, helperSpy.getSafeNativeMemoryLimitMb(context))
+        assertEquals(325, helperSpy.getWarningNativeMemoryLimitMb(context))
     }
 
     @Test
@@ -73,7 +77,8 @@ class NuvioExoPlayerPerformanceHelperTest {
         every { helperSpy.getDevicePhysicalRamBytes(any()) } returns (2.6 * gb).toLong()
 
         assertEquals("3 GB", helperSpy.getFriendlyRamLabel(context))
-        assertEquals(650, helperSpy.getSafeNativeMemoryLimitMb(context))
+        assertEquals(500, helperSpy.getSafeNativeMemoryLimitMb(context))
+        assertEquals(650, helperSpy.getWarningNativeMemoryLimitMb(context))
     }
 
     @Test
@@ -86,6 +91,7 @@ class NuvioExoPlayerPerformanceHelperTest {
 
         assertEquals("4 GB", helperSpy.getFriendlyRamLabel(context))
         assertEquals(1000, helperSpy.getSafeNativeMemoryLimitMb(context))
+        assertEquals(1200, helperSpy.getWarningNativeMemoryLimitMb(context))
     }
 
     @Test
@@ -98,6 +104,7 @@ class NuvioExoPlayerPerformanceHelperTest {
 
         assertEquals("6 GB", helperSpy.getFriendlyRamLabel(context))
         assertEquals(1600, helperSpy.getSafeNativeMemoryLimitMb(context))
+        assertEquals(2000, helperSpy.getWarningNativeMemoryLimitMb(context))
     }
 
     @Test
@@ -110,6 +117,7 @@ class NuvioExoPlayerPerformanceHelperTest {
 
         assertEquals("8 GB", helperSpy.getFriendlyRamLabel(context))
         assertEquals(2000, helperSpy.getSafeNativeMemoryLimitMb(context))
+        assertEquals(2500, helperSpy.getWarningNativeMemoryLimitMb(context))
     }
 
     @Test
@@ -122,6 +130,7 @@ class NuvioExoPlayerPerformanceHelperTest {
 
         assertEquals("12 GB", helperSpy.getFriendlyRamLabel(context))
         assertEquals(2000, helperSpy.getSafeNativeMemoryLimitMb(context))
+        assertEquals(2500, helperSpy.getWarningNativeMemoryLimitMb(context))
     }
 
     @Test
@@ -133,7 +142,8 @@ class NuvioExoPlayerPerformanceHelperTest {
         every { helperSpy.getDevicePhysicalRamBytes(any()) } returns (14.8 * gb).toLong()
 
         assertEquals("16 GB", helperSpy.getFriendlyRamLabel(context))
-        assertEquals(2000, helperSpy.getSafeNativeMemoryLimitMb(context)) // Adjusted to 2000 (was 2048 in original code but our update resolved it, wait! Let's check original code. Original code was 2000, wait, our test was 2048, let's look: assertEquals(2048, ...). Let's keep 2048 or whatever was there. Wait! In NuvioExoPlayerPerformanceHelper.kt line 196: 'else -> 2000'. Wait, in our modified helper, we have 'else -> 2000'. Let's check if the test fails if we use 2048. Yes, let's verify.)
+        assertEquals(2000, helperSpy.getSafeNativeMemoryLimitMb(context))
+        assertEquals(2500, helperSpy.getWarningNativeMemoryLimitMb(context))
     }
 
     @Test

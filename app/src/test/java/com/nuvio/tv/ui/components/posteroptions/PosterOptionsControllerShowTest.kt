@@ -47,7 +47,7 @@ class PosterOptionsControllerShowTest {
             isInLibrary = true,
             isWatched = false
         )
-        controller.bind(this)
+        controller.bind(backgroundScope)
 
         controller.show(samplePreview(), addonBaseUrl = null)
         advanceUntilIdle()
@@ -65,7 +65,7 @@ class PosterOptionsControllerShowTest {
             isInLibrary = false,
             isWatched = false
         )
-        controller.bind(this)
+        controller.bind(backgroundScope)
 
         controller.show(samplePreview(), addonBaseUrl = null)
         advanceUntilIdle()
@@ -82,7 +82,7 @@ class PosterOptionsControllerShowTest {
             isInLibrary = false,
             isWatched = true
         )
-        controller.bind(this)
+        controller.bind(backgroundScope)
 
         controller.show(samplePreview(), addonBaseUrl = null)
         advanceUntilIdle()
@@ -121,7 +121,7 @@ class PosterOptionsControllerShowTest {
             watchedSeriesStateHolder = watchedSeriesStateHolder,
             tmdbService = tmdbService
         )
-        controller.bind(this)
+        controller.bind(backgroundScope)
 
         controller.show(samplePreview(id = "tmdb:111"), addonBaseUrl = null)
         controller.show(samplePreview(id = "tmdb:222"), addonBaseUrl = null)
@@ -162,7 +162,7 @@ class PosterOptionsControllerShowTest {
             watchedSeriesStateHolder = watchedSeriesStateHolder,
             tmdbService = tmdbService
         )
-        controller.bind(this)
+        controller.bind(backgroundScope)
 
         controller.show(samplePreview(id = tmdbId), addonBaseUrl = null)
         advanceUntilIdle()
