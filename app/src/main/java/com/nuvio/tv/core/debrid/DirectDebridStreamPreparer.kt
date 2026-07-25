@@ -1,7 +1,7 @@
 package com.nuvio.tv.core.debrid
 
 import android.util.Log
-import com.nuvio.tv.core.player.StreamAutoPlaySelector
+import com.nuvio.tv.core.player.AutoPlaySelection
 import com.nuvio.tv.data.local.DebridSettingsDataStore
 import com.nuvio.tv.data.local.PlayerSettings
 import com.nuvio.tv.data.local.StreamAutoPlayMode
@@ -90,14 +90,20 @@ class DirectDebridStreamPreparer @Inject constructor(
         if (candidates.isEmpty()) return emptyList()
 
         val prioritized = mutableListOf<Stream>()
-        val autoPlaySelection = StreamAutoPlaySelector.selectAutoPlayStream(
+        // preferredBingeGroup was left at its default (null) here, so the
+        // derived preferBingeGroupInSelection is false -- identical to the
+        // default this call relied on.
+        val autoPlaySelection = AutoPlaySelection.select(
             streams = streams,
-            mode = playerSettings.streamAutoPlayMode,
-            regexPattern = playerSettings.streamAutoPlayRegex,
-            source = playerSettings.streamAutoPlaySource,
-            installedAddonNames = installedAddonNames,
-            selectedAddons = playerSettings.streamAutoPlaySelectedAddons,
-            selectedPlugins = playerSettings.streamAutoPlaySelectedPlugins,
+            inputs = AutoPlaySelection.Inputs(
+                mode = playerSettings.streamAutoPlayMode,
+                regexPattern = playerSettings.streamAutoPlayRegex,
+                source = playerSettings.streamAutoPlaySource,
+                installedAddonNames = installedAddonNames,
+                selectedAddons = playerSettings.streamAutoPlaySelectedAddons,
+                selectedPlugins = playerSettings.streamAutoPlaySelectedPlugins,
+                preferredBingeGroup = null
+            ),
             debridStreamPreferences = debridStreamPreferences
         )
         if (autoPlaySelection?.let { it.isDirectDebrid() || it.isCachedLocalDebridTorrent() } == true) {

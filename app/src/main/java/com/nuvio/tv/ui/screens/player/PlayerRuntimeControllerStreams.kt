@@ -6,6 +6,7 @@ import android.util.Log
 import androidx.media3.common.util.UnstableApi
 import com.nuvio.tv.core.debrid.DirectDebridPlayableResult
 import com.nuvio.tv.core.network.NetworkResult
+import com.nuvio.tv.core.player.AutoPlaySelection
 import com.nuvio.tv.core.player.StreamAutoPlaySelector
 import com.nuvio.tv.data.local.PlayerSettings
 import com.nuvio.tv.data.local.StreamAutoPlayMode
@@ -1626,22 +1627,30 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
             fun trySelectStream(data: List<AddonStreams>): Stream? {
                 val orderedStreams = StreamAutoPlaySelector.orderAddonStreams(data, installedAddonOrder)
                 val allStreams = orderedStreams.flatMap { it.streams }
-                return StreamAutoPlaySelector.selectAutoPlayStream(
+                // preferBingeGroupInSelection was passed explicitly here as the
+                // SETTING, while AutoPlaySelection derives it from
+                // preferredBingeGroup != null. Those disagree in exactly one
+                // case -- setting on, no binge group known -- and that
+                // disagreement is inert: selectAutoPlayStream gates the binge
+                // branch on targetBingeGroup.isNotEmpty(), false either way.
+                // Asserted in StreamAutoPlaySelectorTest.
+                return AutoPlaySelection.select(
                     streams = allStreams,
-                    mode = effectiveMode,
-                    regexPattern = effectiveRegex,
-                    source = effectiveSource,
-                    installedAddonNames = installedAddonOrder.toSet(),
-                    selectedAddons = effectiveSelectedAddons,
-                    selectedPlugins = effectiveSelectedPlugins,
-                    preferredBingeGroup = if (playerSettings.streamAutoPlayPreferBingeGroupForNextEpisode) {
-                        currentStreamBingeGroup
-                    } else {
-                        null
-                    },
-                    preferBingeGroupInSelection = playerSettings.streamAutoPlayPreferBingeGroupForNextEpisode,
-                    bingeGroupOnly = bingeGroupOnlyManualMode,
-                    debridStreamPreferences = debridStreamPreferences
+                    inputs = AutoPlaySelection.Inputs(
+                        mode = effectiveMode,
+                        regexPattern = effectiveRegex,
+                        source = effectiveSource,
+                        installedAddonNames = installedAddonOrder.toSet(),
+                        selectedAddons = effectiveSelectedAddons,
+                        selectedPlugins = effectiveSelectedPlugins,
+                        preferredBingeGroup = if (playerSettings.streamAutoPlayPreferBingeGroupForNextEpisode) {
+                            currentStreamBingeGroup
+                        } else {
+                            null
+                        }
+                    ),
+                    debridStreamPreferences = debridStreamPreferences,
+                    bingeGroupOnly = bingeGroupOnlyManualMode
                 )
             }
 
@@ -1649,18 +1658,22 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                 if (currentStreamBingeGroup == null || !playerSettings.streamAutoPlayPreferBingeGroupForNextEpisode) return null
                 val orderedStreams = StreamAutoPlaySelector.orderAddonStreams(data, installedAddonOrder)
                 val allStreams = orderedStreams.flatMap { it.streams }
-                return StreamAutoPlaySelector.selectAutoPlayStream(
+                // The guard above returns early when currentStreamBingeGroup is
+                // null, so the derived preferBingeGroupInSelection is true here
+                // exactly as the explicit argument was.
+                return AutoPlaySelection.select(
                     streams = allStreams,
-                    mode = effectiveMode,
-                    regexPattern = effectiveRegex,
-                    source = effectiveSource,
-                    installedAddonNames = installedAddonOrder.toSet(),
-                    selectedAddons = effectiveSelectedAddons,
-                    selectedPlugins = effectiveSelectedPlugins,
-                    preferredBingeGroup = currentStreamBingeGroup,
-                    preferBingeGroupInSelection = true,
-                    bingeGroupOnly = true,
-                    debridStreamPreferences = debridStreamPreferences
+                    inputs = AutoPlaySelection.Inputs(
+                        mode = effectiveMode,
+                        regexPattern = effectiveRegex,
+                        source = effectiveSource,
+                        installedAddonNames = installedAddonOrder.toSet(),
+                        selectedAddons = effectiveSelectedAddons,
+                        selectedPlugins = effectiveSelectedPlugins,
+                        preferredBingeGroup = currentStreamBingeGroup
+                    ),
+                    debridStreamPreferences = debridStreamPreferences,
+                    bingeGroupOnly = true
                 )
             }
 

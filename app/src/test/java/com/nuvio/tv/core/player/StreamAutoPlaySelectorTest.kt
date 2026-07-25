@@ -415,6 +415,38 @@ class StreamAutoPlaySelectorTest {
         assertEquals(fourKLossy, selected)
     }
 
+    @Test
+    fun `a null binge group makes preferBingeGroupInSelection inert`() {
+        // playNextEpisode passed preferBingeGroupInSelection as the SETTING,
+        // while AutoPlaySelection derives it from preferredBingeGroup != null.
+        // Those disagree in exactly one case: the setting on with no binge
+        // group known. This proves the disagreement cannot change the pick --
+        // selectAutoPlayStream gates the binge branch on
+        // targetBingeGroup.isNotEmpty(), which is false either way.
+        //
+        // It is the one non-obvious step in bringing playNextEpisode onto the
+        // shared call site, so it lives here rather than in a commit message.
+        val first = stream(addonName = "AddonA", url = "https://example.com/a.mkv", name = "1080p")
+        val second = stream(addonName = "AddonB", url = "https://example.com/b.mkv", name = "720p")
+        val streams = listOf(first, second)
+
+        fun select(prefer: Boolean): Stream? = StreamAutoPlaySelector.selectAutoPlayStream(
+            streams = streams,
+            mode = baseInputs.mode,
+            regexPattern = baseInputs.regexPattern,
+            source = baseInputs.source,
+            installedAddonNames = baseInputs.installedAddonNames,
+            selectedAddons = baseInputs.selectedAddons,
+            selectedPlugins = baseInputs.selectedPlugins,
+            preferredBingeGroup = null,
+            preferBingeGroupInSelection = prefer,
+            debridStreamPreferences = null
+        )
+
+        assertEquals(select(true), select(false))
+        assertEquals(first, select(true))
+    }
+
     private fun stream(
         addonName: String,
         url: String? = null,
