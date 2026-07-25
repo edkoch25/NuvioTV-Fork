@@ -2,8 +2,8 @@ package com.nuvio.tv.data.repository
 
 import android.content.Context
 import android.util.Log
+import com.nuvio.tv.core.network.ADDON_REQUEST_TIMEOUT_MS
 import com.nuvio.tv.core.network.NetworkResult
-import com.nuvio.tv.core.network.safeAddonApiCall
 import com.nuvio.tv.data.mapper.toDomain
 import com.nuvio.tv.data.remote.api.AddonApi
 import com.nuvio.tv.domain.model.Addon
@@ -22,6 +22,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.CacheControl
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -35,6 +37,8 @@ class MetaRepositoryImpl @Inject constructor(
 ) : MetaRepository {
     companion object {
         private const val TAG = "MetaRepository"
+        /** Default TTL when addon response has no Cache-Control header (24 hours). */
+        private const val DEFAULT_TTL_MS = 24L * 60 * 60 * 1000
     }
 
     /** Internal result type for the deferred meta lookup to distinguish
@@ -58,18 +62,33 @@ class MetaRepositoryImpl @Inject constructor(
         val detail: String
     )
 
+    /** Wrapper for cached meta with an expiration timestamp. */
+    private data class CachedMeta(
+        val meta: Meta,
+        val expiresAtMs: Long
+    ) {
+        fun isExpired(): Boolean = System.currentTimeMillis() >= expiresAtMs
+    }
+
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    // In-memory cache: "addonBaseUrl|type:id" -> Meta. Keyed per addon so two
-    // addons serving meta for the same content id never overwrite each other.
-    // Bounded LRU + TTL (main review F15): a series Meta is heavy (full episode
-    // list, cast, links) and these previously grew without bound for the whole
-    // session, competing with the player's buffer for RAM on low tiers. The TTL
-    // also lets a series pick up newly-aired episodes within a session.
-    private val metaCache = BoundedMetaCache<String, Meta>()
+    // In-memory cache: "addonBaseUrl|type:id" -> CachedMeta. Keyed per addon so
+    // two addons serving meta for the same content id never overwrite each other.
+    // Two TTL layers compose here (0.7.20 merge):
+    //  - upstream 0.7.20: each entry carries the addon-declared Cache-Control
+    //    max-age (CachedMeta.isExpired), so fast-changing meta refreshes without
+    //    an app restart;
+    //  - fork (main review F15): the cache itself is a bounded, access-ordered
+    //    LRU whose 45-min internal TTL caps any longer declaration -- a series
+    //    Meta is heavy (full episode list, cast, links) and these previously
+    //    grew without bound for the whole session, competing with the player's
+    //    buffer for RAM on low tiers. The cap also lets a series pick up
+    //    newly-aired episodes within a session.
+    // Net per-entry lifetime: min(declared max-age or the 24 h default, 45 min).
+    private val metaCache = BoundedMetaCache<String, CachedMeta>()
     // Separate cache for full meta fetched from addons (bypasses catalog-level cache)
-    private val addonMetaCache = BoundedMetaCache<String, Meta>()
-    private val primaryAddonMetaCache = BoundedMetaCache<String, Meta>()
+    private val addonMetaCache = BoundedMetaCache<String, CachedMeta>()
+    private val primaryAddonMetaCache = BoundedMetaCache<String, CachedMeta>()
     // Negative cache (main review F18): a genuine miss previously re-ran the full
     // candidate loop on every detail-screen visit / enrichment for that title.
     private val metaMissCache = BoundedMetaCache<String, Long>(
@@ -108,6 +127,11 @@ class MetaRepositoryImpl @Inject constructor(
         }
 
         @Synchronized
+        fun remove(key: K) {
+            map.remove(key)
+        }
+
+        @Synchronized
         fun clear() {
             map.clear()
         }
@@ -125,8 +149,11 @@ class MetaRepositoryImpl @Inject constructor(
     ): Flow<NetworkResult<Meta>> = flow {
         val cacheKey = addonMetaCacheKey(addonBaseUrl, type, id)
         metaCache[cacheKey]?.let { cached ->
-            emit(NetworkResult.Success(cached))
-            return@flow
+            if (!cached.isExpired()) {
+                emit(NetworkResult.Success(cached.meta))
+                return@flow
+            }
+            metaCache.remove(cacheKey)
         }
 
         emit(NetworkResult.Loading)
@@ -135,15 +162,25 @@ class MetaRepositoryImpl @Inject constructor(
         val deferred = inFlightMeta.getOrPut(cacheKey) {
             repositoryScope.async {
                 try {
-                    when (val result = safeAddonApiCall(context) { api.getMeta(url) }) {
-                        is NetworkResult.Success -> {
-                            val metaDto = result.data.meta ?: return@async null
-                            val meta = metaDto.toDomain(context.getString(R.string.episodes_episode))
-                            metaCache[cacheKey] = meta
-                            meta
-                        }
-                        else -> null
+                    // Fork: keep the 20 s addon deadline (SafeApiCall.kt) that a raw
+                    // call would drop -- without it a dead addon holds this
+                    // coroutine for the shared client's full 60 s read timeout.
+                    val response = withTimeoutOrNull(ADDON_REQUEST_TIMEOUT_MS) { api.getMeta(url) }
+                        ?: throw java.io.IOException(context.getString(R.string.network_error_addon_timeout))
+                    if (response.isSuccessful) {
+                        val metaDto = response.body()?.meta ?: return@async null
+                        val meta = metaDto.toDomain(context.getString(R.string.episodes_episode))
+                        val ttlMs = parseMaxAgeMs(response.headers()["Cache-Control"])
+                        metaCache[cacheKey] = CachedMeta(meta, System.currentTimeMillis() + ttlMs)
+                        meta
+                    } else {
+                        null
                     }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w(TAG, "getMeta failed for $url: ${e.message}")
+                    null
                 } finally {
                     inFlightMeta.remove(cacheKey)
                 }
@@ -165,8 +202,11 @@ class MetaRepositoryImpl @Inject constructor(
     ): Flow<NetworkResult<Meta>> = flow {
         val cacheKey = "$type:$id"
         addonMetaCache[cacheKey]?.let { cached ->
-            emit(NetworkResult.Success(cached))
-            return@flow
+            if (!cached.isExpired()) {
+                emit(NetworkResult.Success(cached.meta))
+                return@flow
+            }
+            addonMetaCache.remove(cacheKey)
         }
         // Fresh negative result: skip re-running the whole candidate loop (F18).
         if (metaMissCache[cacheKey] != null) {
@@ -240,24 +280,41 @@ class MetaRepositoryImpl @Inject constructor(
             for (addon in fallbackAddons) {
                 attemptedAddonNames += addon.displayName
                 val url = buildMetaUrl(addon.baseUrl, requestedType, id)
-                when (val result = safeAddonApiCall(context) { api.getMeta(url) }) {
-                    is NetworkResult.Success -> {
-                        val metaDto = result.data.meta
+                try {
+                    // Fork: keep the 20 s addon deadline (SafeApiCall.kt); a
+                    // timeout surfaces through the catch below like any other
+                    // request failure.
+                    val response = withTimeoutOrNull(ADDON_REQUEST_TIMEOUT_MS) { api.getMeta(url) }
+                        ?: throw java.io.IOException(context.getString(R.string.network_error_addon_timeout))
+                    if (response.isSuccessful) {
+                        val metaDto = response.body()?.meta
                         if (metaDto != null) {
                             val episodeLabel = context.getString(R.string.episodes_episode)
                             val meta = metaDto.toDomain(episodeLabel)
-                            addonMetaCache[cacheKey] = meta
-                            metaCache[addonMetaCacheKey(addon.baseUrl, requestedType, id)] = meta
+                            val ttlMs = parseMaxAgeMs(response.headers()["Cache-Control"])
+                            val cached = CachedMeta(meta, System.currentTimeMillis() + ttlMs)
+                            addonMetaCache[cacheKey] = cached
+                            metaCache[addonMetaCacheKey(addon.baseUrl, requestedType, id)] = cached
                             emit(NetworkResult.Success(meta))
                             return@flow
                         } else {
                             attemptedFailures += buildMissingMetaFailure(addon)
                         }
+                    } else {
+                        attemptedFailures += MetaAttemptFailure(
+                            addonName = addon.displayName,
+                            kind = if (response.code() == 404) MetaFailureKind.MISSING else MetaFailureKind.REQUEST_FAILED,
+                            detail = response.message() ?: "HTTP ${response.code()}"
+                        )
                     }
-                    is NetworkResult.Error -> {
-                        attemptedFailures += buildAddonFailure(addon, result)
-                    }
-                    NetworkResult.Loading -> { /* Try next addon */ }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    attemptedFailures += MetaAttemptFailure(
+                        addonName = addon.displayName,
+                        kind = MetaFailureKind.REQUEST_FAILED,
+                        detail = e.message ?: context.getString(R.string.network_error_unknown)
+                    )
                 }
             }
 
@@ -299,22 +356,28 @@ class MetaRepositoryImpl @Inject constructor(
 
                         val url = buildMetaUrl(addon.baseUrl, candidateType, id)
                         Log.d(TAG, "Trying meta addonId=${addon.id} addonName=${addon.name} type=$candidateType id=$id url=$url")
-                        when (val result = safeAddonApiCall(context) { api.getMeta(url) }) {
-                            is NetworkResult.Success -> {
-                                val metaDto = result.data.meta
+                        try {
+                            // Fork: keep the 20 s addon deadline (SafeApiCall.kt).
+                            val response = withTimeoutOrNull(ADDON_REQUEST_TIMEOUT_MS) { api.getMeta(url) }
+                                ?: throw java.io.IOException(context.getString(R.string.network_error_addon_timeout))
+                            if (response.isSuccessful) {
+                                val metaDto = response.body()?.meta
                                 if (metaDto != null) {
                                     val meta = metaDto.toDomain(context.getString(R.string.episodes_episode))
-                                    addonMetaCache[cacheKey] = meta
-                                    metaCache[addonMetaCacheKey(addon.baseUrl, candidateType, id)] = meta
-                                    Log.d(TAG, "Meta fetch success addonId=${addon.id} type=$candidateType id=$id")
+                                    val ttlMs = parseMaxAgeMs(response.headers()["Cache-Control"])
+                                    val cached = CachedMeta(meta, System.currentTimeMillis() + ttlMs)
+                                    addonMetaCache[cacheKey] = cached
+                                    metaCache[addonMetaCacheKey(addon.baseUrl, candidateType, id)] = cached
+                                    Log.d(TAG, "Meta fetch success addonId=${addon.id} type=$candidateType id=$id ttl=${ttlMs}ms")
                                     return@async MetaLookupResult.Found(meta)
                                 }
                                 Log.d(TAG, "Meta response was null addonId=${addon.id} type=$candidateType id=$id")
                             }
-                            is NetworkResult.Error -> {
-                                /* try next */
-                            }
-                            NetworkResult.Loading -> { /* try next */ }
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            Log.d(TAG, "Meta fetch failed addonId=${addon.id} type=$candidateType id=$id: ${e.message}")
+                            /* try next */
                         }
                     }
                     metaMissCache[cacheKey] = System.currentTimeMillis()
@@ -353,8 +416,11 @@ class MetaRepositoryImpl @Inject constructor(
     ): Flow<NetworkResult<Meta>> = flow {
         val cacheKey = "$type:$id"
         primaryAddonMetaCache[cacheKey]?.let { cached ->
-            emit(NetworkResult.Success(cached))
-            return@flow
+            if (!cached.isExpired()) {
+                emit(NetworkResult.Success(cached.meta))
+                return@flow
+            }
+            primaryAddonMetaCache.remove(cacheKey)
         }
 
         emit(NetworkResult.Loading)
@@ -383,16 +449,27 @@ class MetaRepositoryImpl @Inject constructor(
         val deferred = inFlightPrimaryMeta.getOrPut(cacheKey) {
             repositoryScope.async {
                 try {
-                    when (val result = safeAddonApiCall(context) { api.getMeta(url) }) {
-                        is NetworkResult.Success -> {
-                            val metaDto = result.data.meta ?: return@async null
-                            val meta = metaDto.toDomain(context.getString(R.string.episodes_episode))
-                            primaryAddonMetaCache[cacheKey] = meta
-                            metaCache[addonMetaCacheKey(addon.baseUrl, candidateType, id)] = meta
-                            meta
-                        }
-                        else -> null
+                    // Fork: keep the 20 s addon deadline (SafeApiCall.kt) that a raw
+                    // call would drop -- without it a dead addon holds this
+                    // coroutine for the shared client's full 60 s read timeout.
+                    val response = withTimeoutOrNull(ADDON_REQUEST_TIMEOUT_MS) { api.getMeta(url) }
+                        ?: throw java.io.IOException(context.getString(R.string.network_error_addon_timeout))
+                    if (response.isSuccessful) {
+                        val metaDto = response.body()?.meta ?: return@async null
+                        val meta = metaDto.toDomain(context.getString(R.string.episodes_episode))
+                        val ttlMs = parseMaxAgeMs(response.headers()["Cache-Control"])
+                        val cached = CachedMeta(meta, System.currentTimeMillis() + ttlMs)
+                        primaryAddonMetaCache[cacheKey] = cached
+                        metaCache[addonMetaCacheKey(addon.baseUrl, candidateType, id)] = cached
+                        meta
+                    } else {
+                        null
                     }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w(TAG, "Primary meta fetch failed for $url: ${e.message}")
+                    null
                 } finally {
                     inFlightPrimaryMeta.remove(cacheKey)
                 }
@@ -526,33 +603,6 @@ class MetaRepositoryImpl @Inject constructor(
         )
     }
 
-    private fun buildAddonFailure(addon: Addon, error: NetworkResult.Error): MetaAttemptFailure {
-        if (error.code == 404 || error.message.equals("Not Found", ignoreCase = true)) {
-            return buildMissingMetaFailure(addon)
-        }
-        val normalizedReason = when {
-            error.message.contains("Unable to resolve host", ignoreCase = true) ->
-                context.getString(com.nuvio.tv.R.string.meta_error_detail_addon_unreachable)
-            error.message.contains("Failed to connect", ignoreCase = true) ->
-                context.getString(com.nuvio.tv.R.string.meta_error_detail_addon_connection_failed)
-            error.message.contains("timeout", ignoreCase = true) ->
-                context.getString(com.nuvio.tv.R.string.meta_error_detail_addon_timeout)
-            error.message.contains("CLEARTEXT communication", ignoreCase = true) ->
-                context.getString(com.nuvio.tv.R.string.meta_error_detail_addon_cleartext_blocked)
-            error.message.isBlank() ->
-                context.getString(com.nuvio.tv.R.string.meta_error_detail_addon_request_failed)
-            else -> error.message.replaceFirstChar { char ->
-                if (char.isLowerCase()) char.titlecase() else char.toString()
-            }
-        }
-        val httpSuffix = error.code?.let { " (HTTP $it)" } ?: ""
-        return MetaAttemptFailure(
-            addonName = addon.displayName,
-            kind = MetaFailureKind.REQUEST_FAILED,
-            detail = "$normalizedReason$httpSuffix"
-        )
-    }
-
     private fun buildAggregateFailureMessage(
         type: String,
         id: String,
@@ -582,6 +632,19 @@ class MetaRepositoryImpl @Inject constructor(
         }
     }
     
+    /**
+     * Parses the max-age directive from a Cache-Control header value.
+     * Returns the TTL in milliseconds, or [DEFAULT_TTL_MS] if the header is
+     * missing, malformed, or specifies no-store/no-cache.
+     */
+    private fun parseMaxAgeMs(cacheControl: String?): Long {
+        if (cacheControl == null) return DEFAULT_TTL_MS
+        val parsed = CacheControl.parse(okhttp3.Headers.headersOf("Cache-Control", cacheControl))
+        if (parsed.noStore || parsed.noCache) return 0L
+        val maxAgeSec = parsed.maxAgeSeconds
+        return if (maxAgeSec >= 0) maxAgeSec * 1000L else DEFAULT_TTL_MS
+    }
+
     override fun clearCache() {
         metaCache.clear()
         addonMetaCache.clear()

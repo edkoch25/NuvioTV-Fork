@@ -332,6 +332,10 @@ internal fun PlayerRuntimeController.initializePlayer(
                     // AFR review F1: never let the probe hold playback hostage -
                     // the in-probe timeouts are advisory against blocked native
                     // calls, so back them with an absolute deadline here.
+                    // (0.7.20 merge: kept over upstream's 12 s total timeout --
+                    // upstream's own probe chain is 10 s OkHttp + 10 s NextLib +
+                    // 5 s extractor, so a 12 s cap can truncate its own fallback;
+                    // 15 s matches upstream's asserted worst-case probe budget.)
                     withTimeoutOrNull(AFR_PREFLIGHT_ABSOLUTE_DEADLINE_MS) { afrJob.await() }
                         ?: run {
                             Log.w(PlayerRuntimeController.TAG, "AFR preflight exceeded absolute deadline; starting playback without it")
@@ -1282,6 +1286,9 @@ internal fun PlayerRuntimeController.initializePlayer(
                             tryShowParentalGuide()
                             emitScrobbleStart()
                         } else {
+                            if (!isInBackground) {
+                                userPausedManually = true
+                            }
                             if (userPausedManually) schedulePauseOverlay() else cancelPauseOverlay()
                             if (playbackState == Player.STATE_ENDED || playbackState == Player.STATE_IDLE) {
                                 stopProgressUpdates()
@@ -2448,14 +2455,30 @@ private class CueNormalizingTextOutput(
     ) {
         if (from >= toExclusive) return
     
-        // 1. Split [from, toExclusive) into chunks: digit-runs stay together, everything else is its own chunk
+        fun isNumberSeparator(c: Char) = c == ',' || c == ':' || c == '.' || c == '-'
+    
+        // 1. Split [from, toExclusive) into chunks: number-runs (digits + embedded , : .) stay together
         val chunks = ArrayList<IntRange>()
         var i = from
         while (i < toExclusive) {
             if (line[i].isDigit()) {
                 val start = i
-                while (i < toExclusive && line[i].isDigit()) i++
-                chunks.add(start until i)          // whole number as one chunk
+                i++
+                while (i < toExclusive) {
+                    if (line[i].isDigit()) {
+                        i++
+                    } else if (
+                        isNumberSeparator(line[i]) &&
+                        i + 1 < toExclusive &&
+                        line[i + 1].isDigit()
+                    ) {
+                        // separator sandwiched between digits, e.g. 16,300 / 10:50 / 1.23
+                        i++ // consume separator, loop will consume following digits
+                    } else {
+                        break
+                    }
+                }
+                chunks.add(start until i)          // whole number (with separators) as one chunk
             } else {
                 chunks.add(i until i + 1)           // single char chunk
                 i++
@@ -2466,7 +2489,7 @@ private class CueNormalizingTextOutput(
         for (idx in chunks.indices.reversed()) {
             val range = chunks[idx]
             if (range.last - range.first + 1 > 1) {
-                // digit run -> keep as-is, don't reverse the digits themselves
+                // number run -> keep as-is, don't reverse the digits/separators themselves
                 out.append(line.subSequence(range.first, range.last + 1))
             } else {
                 val c = line[range.first]
@@ -2477,7 +2500,6 @@ private class CueNormalizingTextOutput(
     }
     
     // Take CharSequence instead of String -> preserve spans.
-    // There is a specific issue affecting Hebrew text, for example: "- 4 בדצמבר 1981 -" (Series "Dark", S1E2, 18:11).
     private fun fixRtlPunctuationForLtr(line: CharSequence): CharSequence {
         if (line.isEmpty()) return line
         val hasCr = line[line.length - 1] == '\r'
@@ -2485,10 +2507,10 @@ private class CueNormalizingTextOutput(
         if (end0 == 0) return line
 
         var start = 0
-        while (start < end0 && isRtlPunctuation(line[start])) start++
+        while (start < end0 && isRtlPunctuation(line[start], isEnd = false)) start++
 
         var end = end0
-        while (end > start && isRtlPunctuation(line[end - 1])) end--
+        while (end > start && isRtlPunctuation(line[end - 1], isEnd = true)) end--
 
         if (start == 0 && end == end0) return line
 
@@ -2548,7 +2570,8 @@ private class CueNormalizingTextOutput(
         return result
     }
 
-    private fun isRtlPunctuation(ch: Char): Boolean {
+    private fun isRtlPunctuation(ch: Char, isEnd: Boolean): Boolean {
+        if (isEnd && ch.isDigit()) return false
         return ch in RTL_PUNCTUATION || ch.isWhitespace()
     }
 
