@@ -94,6 +94,7 @@ class MetaDetailsViewModel @Inject constructor(
     private val playerSettingsDataStore: PlayerSettingsDataStore,
     private val watchedSeriesStateHolder: com.nuvio.tv.data.local.WatchedSeriesStateHolder,
     val posterOptions: com.nuvio.tv.ui.components.posteroptions.PosterOptionsController,
+    private val prefetchSelectionSupplier: com.nuvio.tv.core.stream.PrefetchSelectionSupplier,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
     private val itemId: String = savedStateHandle["itemId"] ?: ""
@@ -117,13 +118,21 @@ class MetaDetailsViewModel @Inject constructor(
         val type: String,
         val videoId: String,
         val season: Int?,
-        val episode: Int?
+        val episode: Int?,
+        /** The meta id, for the binge-group cache the stream screen reads. */
+        val contentId: String?
     )
 
     private var lastStreamPrefetchKey: String? = null
     private var streamPrefetchJob: Job? = null
 
-    private fun onStreamPrefetchTarget(type: String, videoId: String, season: Int?, episode: Int?) {
+    private fun onStreamPrefetchTarget(
+        type: String,
+        videoId: String,
+        season: Int?,
+        episode: Int?,
+        contentId: String?
+    ) {
         if (type.isBlank() || videoId.isBlank()) return
         val key = com.nuvio.tv.core.stream.StreamPrefetchCache.keyOf(type, videoId, season, episode)
         if (key == lastStreamPrefetchKey) return
@@ -131,12 +140,23 @@ class MetaDetailsViewModel @Inject constructor(
         streamPrefetchJob?.cancel()
         streamPrefetchJob = viewModelScope.launch {
             delay(STREAM_PREFETCH_DEBOUNCE_MS)
+            // S4a covers BOTH shapes: a movie's own id, and a series' hero
+            // target (resume/next episode). Both now rank and pre-resolve
+            // through the same supplier the Continue Watching path uses.
             com.nuvio.tv.core.stream.StreamPrefetchCache.prefetch(
                 repository = streamRepository,
                 type = type,
                 videoId = videoId,
                 season = season,
-                episode = episode
+                episode = episode,
+                rank = { groups ->
+                    prefetchSelectionSupplier.rankAndPreResolve(
+                        groups = groups,
+                        contentId = contentId,
+                        season = season,
+                        episode = episode
+                    )
+                }
             )
         }
     }
@@ -150,16 +170,22 @@ class MetaDetailsViewModel @Inject constructor(
                 when {
                     meta == null -> null
                     // Series: the hero button plays this exact video id.
-                    nextId != null -> StreamPrefetchTarget(meta.apiType, nextId, ntw?.nextSeason, ntw?.nextEpisode)
+                    nextId != null -> StreamPrefetchTarget(meta.apiType, nextId, ntw?.nextSeason, ntw?.nextEpisode, meta.id)
                     // Movie: the hero button plays the meta id itself.
-                    state.seasons.isEmpty() -> StreamPrefetchTarget(meta.apiType, meta.id, null, null)
+                    state.seasons.isEmpty() -> StreamPrefetchTarget(meta.apiType, meta.id, null, null, meta.id)
                     else -> null
                 }
             }
             .distinctUntilChanged()
             .collectLatest { target ->
                 if (target != null) {
-                    onStreamPrefetchTarget(target.type, target.videoId, target.season, target.episode)
+                    onStreamPrefetchTarget(
+                        target.type,
+                        target.videoId,
+                        target.season,
+                        target.episode,
+                        target.contentId
+                    )
                 }
             }
     }
