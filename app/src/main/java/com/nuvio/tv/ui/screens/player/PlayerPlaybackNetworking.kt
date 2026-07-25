@@ -71,6 +71,13 @@ internal object PlayerPlaybackNetworking {
         OkHttpClient.Builder()
             .dispatcher(dispatcher)
             .dns(IPv4FirstDns())
+            // N6 V2: attached HERE because OkHttpClient.Builder(client) copies
+            // eventListenerFactory, so every newBuilder() derivative inherits
+            // it -- the prewarm client, createHttpDataSourceFactory's client
+            // and PlayerMediaSourceFactory's chunk-session client -- and
+            // applyNetworkOptimizations sets no listener, so nothing
+            // overwrites it. One attachment covers all three startup opens.
+            .eventListenerFactory(PlaybackConnectionEvents)
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .writeTimeout(15, TimeUnit.SECONDS)
@@ -145,6 +152,25 @@ internal object PlayerPlaybackNetworking {
         playbackHttpClient.newBuilder()
             .let { NuvioExoPlayerPerformanceHelper.applyNetworkOptimizations(it) }
             .build()
+            .also { logPoolIdentity("prewarm", it) }
+    }
+
+    /**
+     * S1g's pool-sharing claim is only true if the prewarm client and the
+     * client the probe uses hold the SAME ConnectionPool instance.
+     * applyNetworkOptimizations overwrites the inherited pool with
+     * NuvioExoPlayerPerformanceHelper.sharedConnectionPool, and that field is
+     * reassigned when the pool size changes (2 connections gives 4, the
+     * default is 8) -- so two lazily-built clients can capture different
+     * instances depending on construction order. These two integers decide it.
+     */
+    private fun logPoolIdentity(label: String, client: OkHttpClient) {
+        val poolId = System.identityHashCode(client.connectionPool)
+        val protos = client.protocols.joinToString(",")
+        android.util.Log.i(
+            "NuvioNet",
+            "POOL_ID client=$label pool=$poolId protocols=$protos"
+        )
     }
 
     @UnstableApi
@@ -175,6 +201,7 @@ internal object PlayerPlaybackNetworking {
         val client = builder
             .let { NuvioExoPlayerPerformanceHelper.applyNetworkOptimizations(it) }
             .build()
+            .also { logPoolIdentity("datasource", it) }
         return OkHttpDataSource.Factory(client).apply {
             setDefaultRequestProperties(defaultHeaders)
             if (defaultHeaders.none { it.key.equals("User-Agent", ignoreCase = true) }) {
