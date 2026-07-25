@@ -360,7 +360,7 @@ class FrameRateUtilsAfrTest {
     }
 
     @Test
-    fun `cache with filename keys by host and filename not full url`() {
+    fun `cache with filename keys by filename not full url`() {
         val det = detection(23.976f)
         val filename = "Movie.2024.1080p.mkv"
         FrameRateUtils.cacheFrameRate(
@@ -379,7 +379,14 @@ class FrameRateUtilsAfrTest {
     }
 
     @Test
-    fun `cache with same filename on different host is a miss`() {
+    fun `cache with same filename on a different host is a hit`() {
+        // nt19: the resolved debrid edge host rotates per resolve (nexus-170 /
+        // 196 / 197 / 198 all observed for one title), so the filename branch of
+        // buildCacheKey deliberately excludes it -- the filename identifies the
+        // content, the host is transport. Same content on a different edge must
+        // therefore reuse the entry. Inverted from the pre-nt19 assertion rather
+        // than deleted: this is one of only two executable checks the cache-key
+        // fix has.
         val det = detection(24f)
         val filename = "SameName.mkv"
         FrameRateUtils.cacheFrameRate(
@@ -388,13 +395,13 @@ class FrameRateUtilsAfrTest {
             det,
             filename
         )
-        assertNull(
-            FrameRateUtils.getCachedFrameRate(
-                "https://host-b.example.com/a",
-                emptyMap(),
-                filename
-            )
+        val hit = FrameRateUtils.getCachedFrameRate(
+            "https://host-b.example.com/a",
+            emptyMap(),
+            filename
         )
+        assertNotNull(hit)
+        assertEquals(det.raw, hit!!.raw, 0.0001f)
     }
 
     @Test
@@ -461,13 +468,14 @@ class FrameRateUtilsAfrTest {
     }
 
     @Test
-    fun `buildCacheKey with filename uses file host scheme`() {
+    fun `buildCacheKey with filename excludes the rotating host`() {
+        // nt19: host removed from the filename branch, FrameRateUtils.kt:111-115.
         val key = FrameRateUtils.buildCacheKey(
             "https://download.real-debrid.com/d/TOKEN/file",
             emptyMap(),
             "Film.mkv"
         )
-        assertEquals("file://download.real-debrid.com/Film.mkv", key)
+        assertEquals("file://Film.mkv", key)
     }
 
     @Test

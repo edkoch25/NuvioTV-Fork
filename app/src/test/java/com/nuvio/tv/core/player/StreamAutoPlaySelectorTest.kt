@@ -275,7 +275,7 @@ class StreamAutoPlaySelectorTest {
     }
 
     @Test
-    fun `manual mode remains manual even with matching bingeGroup`() {
+    fun `manual mode is overridden by a matching bingeGroup`() {
         val matched = stream(
             addonName = "AddonA",
             url = "https://example.com/match.m3u8",
@@ -294,7 +294,11 @@ class StreamAutoPlaySelectorTest {
             preferBingeGroupInSelection = true
         )
 
-        assertNull(selected)
+        // Deliberate, not a defect: the binge branch outranks the mode, see
+        // StreamAutoPlaySelector.kt:85-92. Asserted from the other side in
+        // `AutoPlaySelection derives binge preference from the inputs`, which is
+        // why this one is an alignment rather than restored coverage.
+        assertEquals(matched, selected)
     }
 
     @Test
