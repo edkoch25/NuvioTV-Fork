@@ -110,6 +110,8 @@ object StreamPrefetchCache {
         videoId: String,
         season: Int?,
         episode: Int?,
+        /** Which producer started this prefetch, for log attribution. */
+        source: String,
         /**
          * R2: optional ranker, invoked on the prefetch's own IO coroutine
          * once the scrape completes. Null reproduces pre-R2 behaviour
@@ -146,9 +148,13 @@ object StreamPrefetchCache {
                     val winnerLabel = if (selection != null) "yes" else "none"
                     Log.i(
                         TAG,
+                        // total_ms brackets the SUPPLIED ranker, which for the
+                        // S4a/S4a-2/S4a-3 callers is rankAndPreResolve -- so it
+                        // covers rank AND pre-resolve. The rank-only and resolve
+                        // components are logged separately by the supplier.
                         "PREFETCH rank groups=${result.size} " +
                             "winner=$winnerLabel " +
-                            "ms=${SystemClock.elapsedRealtime() - rankT0}"
+                            "total_ms=${SystemClock.elapsedRealtime() - rankT0}"
                     )
                 }
                 synchronized(lock) {
@@ -161,7 +167,7 @@ object StreamPrefetchCache {
                 result
             }
         }
-        Log.i(TAG, "PREFETCH start key=$key")
+        Log.i(TAG, "PREFETCH start source=$source key=$key")
     }
 
     private suspend fun collectFinal(

@@ -140,7 +140,8 @@ class MetaDetailsViewModel @Inject constructor(
         videoId: String,
         season: Int?,
         episode: Int?,
-        contentId: String?
+        contentId: String?,
+        source: String
     ) {
         if (type.isBlank() || videoId.isBlank()) return
         val key = com.nuvio.tv.core.stream.StreamPrefetchCache.keyOf(type, videoId, season, episode)
@@ -158,6 +159,7 @@ class MetaDetailsViewModel @Inject constructor(
                 videoId = videoId,
                 season = season,
                 episode = episode,
+                source = source,
                 rank = { groups ->
                     prefetchSelectionSupplier.rankAndPreResolve(
                         groups = groups,
@@ -219,7 +221,8 @@ class MetaDetailsViewModel @Inject constructor(
                     target.videoId,
                     target.season,
                     target.episode,
-                    target.contentId
+                    target.contentId,
+                    "episode_focus"
                 )
             }
     }
@@ -247,7 +250,8 @@ class MetaDetailsViewModel @Inject constructor(
                         target.videoId,
                         target.season,
                         target.episode,
-                        target.contentId
+                        target.contentId,
+                        "details_hero"
                     )
                 }
             }

@@ -173,6 +173,7 @@ class HomeViewModel @Inject constructor(
                     videoId = target.videoId,
                     season = target.season,
                     episode = target.episode,
+                    source = "cw",
                     rank = { groups ->
                         prefetchSelectionSupplier.rankAndPreResolve(
                             groups = groups,

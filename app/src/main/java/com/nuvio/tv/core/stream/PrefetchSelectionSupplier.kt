@@ -1,6 +1,7 @@
 package com.nuvio.tv.core.stream
 
 import android.os.SystemClock
+import com.nuvio.tv.core.debrid.DirectDebridResolveResult
 import com.nuvio.tv.core.debrid.DirectDebridResolver
 import com.nuvio.tv.core.player.AutoPlaySelection
 import com.nuvio.tv.core.player.PrefetchedSelection
@@ -67,7 +68,17 @@ class PrefetchSelectionSupplier @Inject constructor(
         season: Int?,
         episode: Int?
     ): PrefetchedSelection? {
-        val selection = rank(groups, contentId) ?: return null
+        val rankT0 = SystemClock.elapsedRealtime()
+        val selection = rank(groups, contentId)
+        // §2.7(a): the cache's total_ms covers this call AND preResolve.
+        // Logged here so the rank component needs no subtraction.
+        val winnerLabel = if (selection == null) "none" else "yes"
+        android.util.Log.i(
+            TAG,
+            "PREFETCH rank_only winner=$winnerLabel " +
+                "ms=${SystemClock.elapsedRealtime() - rankT0}"
+        )
+        if (selection == null) return null
         preResolve(selection.winner, season, episode)
         return selection
     }
@@ -171,14 +182,21 @@ class PrefetchSelectionSupplier @Inject constructor(
             android.util.Log.w(TAG, "PREFETCH resolve failed: ${e.message}")
             return
         }
-        // ⚠ result::class.simpleName is R8-minified in release builds -- observed
-        // as "result=f0" on 25 Jul 2026. The NAME is not usable as a signal; the
-        // ms= value is. Press-time cost is measured by TTFF_STAGE's
-        // resolve_start -> resolve_done instead. Worth replacing with a `when`
-        // over the sealed type on the next build that touches this file.
+        // result::class.simpleName was R8-minified in release builds (observed as
+        // "result=f0" for Success and "result=e0" for Stale, 25 Jul 2026). An
+        // explicit `when` over the sealed type is stable under minification.
+        // Press-time cost is still measured by TTFF_STAGE's
+        // resolve_start -> resolve_done; this ms= is the prefetch-time cost.
+        val resultLabel = when (result) {
+            is DirectDebridResolveResult.Success -> "Success"
+            DirectDebridResolveResult.MissingApiKey -> "MissingApiKey"
+            DirectDebridResolveResult.NotCached -> "NotCached"
+            DirectDebridResolveResult.Stale -> "Stale"
+            DirectDebridResolveResult.Error -> "Error"
+        }
         android.util.Log.i(
             TAG,
-            "PREFETCH resolve result=${result::class.simpleName} " +
+            "PREFETCH resolve result=$resultLabel " +
                 "ms=${SystemClock.elapsedRealtime() - resolveT0}"
         )
     }
