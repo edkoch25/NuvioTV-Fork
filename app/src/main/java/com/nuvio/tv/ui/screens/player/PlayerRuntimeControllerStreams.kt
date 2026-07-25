@@ -1758,7 +1758,15 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
             }
             if (streamToPlay != null) {
                 val sourceName = (streamToPlay.name?.takeIf { it.isNotBlank() } ?: streamToPlay.addonName).trim()
-                for (remaining in 3 downTo 1) {
+                // The countdown exists so the decision can be cancelled. On a
+                // deliberate press the decision was just made, so three seconds
+                // of it is dead time after the link has already resolved.
+                // Shortened rather than removed: the same state update carries
+                // the chosen source name, which is the only in-flight signal
+                // that the selection is wrong, and it also suppresses the
+                // next-episode button while it runs. Auto-play is untouched.
+                val countdownFrom = if (userInitiated) 1 else 3
+                for (remaining in countdownFrom downTo 1) {
                     _uiState.update { current ->
                         val episodeForMode = current.nextEpisode ?: nextInfo
                         current.copy(
