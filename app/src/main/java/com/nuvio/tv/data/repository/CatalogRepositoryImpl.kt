@@ -114,6 +114,15 @@ class CatalogRepositoryImpl @Inject constructor(
                     TAG,
                     "Catalog fetch success addonId=$addonId type=$type catalogId=$catalogId items=${items.size}"
                 )
+                // Build 1: the addon's own declared TTL, against the local one.
+                // declared=null means the addon sent no cacheMaxAge, in which
+                // case the 90 s local TTL is the only policy in play.
+                Log.i(
+                    TAG,
+                    "CATALOG_TTL declared=${result.data.cacheMaxAge} " +
+                        "localMs=$CATALOG_CACHE_TTL_MS " +
+                        "addonName=$addonName catalogId=$catalogId"
+                )
 
                 val catalogRow = CatalogRow(
                     addonId = addonId,
