@@ -66,6 +66,8 @@ class PlayerRuntimeController(
     internal val watchProgressRepository: WatchProgressRepository,
     internal val metaRepository: MetaRepository,
     internal val streamRepository: StreamRepository,
+    // S5 part 3: the binge lookahead needs a ranker to pre-resolve with.
+    internal val prefetchSelectionSupplier: com.nuvio.tv.core.stream.PrefetchSelectionSupplier,
     internal val addonRepository: AddonRepository,
     internal val pluginManager: PluginManager,
     internal val subtitleRepository: com.nuvio.tv.domain.repository.SubtitleRepository,

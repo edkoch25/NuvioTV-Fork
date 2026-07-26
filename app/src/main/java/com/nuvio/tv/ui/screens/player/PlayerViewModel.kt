@@ -78,6 +78,7 @@ class PlayerViewModel @Inject constructor(
     private val playbackIssueReportRepository: com.nuvio.tv.data.repository.PlaybackIssueReportRepository,
     private val externalPlaybackTracker: com.nuvio.tv.core.player.ExternalPlaybackTracker,
     private val subtitleFileCache: com.nuvio.tv.core.player.SubtitleFileCache,
+    private val prefetchSelectionSupplier: com.nuvio.tv.core.stream.PrefetchSelectionSupplier,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -92,6 +93,7 @@ class PlayerViewModel @Inject constructor(
         watchProgressRepository = watchProgressRepository,
         metaRepository = metaRepository,
         streamRepository = streamRepository,
+        prefetchSelectionSupplier = prefetchSelectionSupplier,
         addonRepository = addonRepository,
         pluginManager = pluginManager,
         subtitleRepository = subtitleRepository,

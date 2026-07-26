@@ -194,10 +194,19 @@ class PrefetchSelectionSupplier @Inject constructor(
             DirectDebridResolveResult.Stale -> "Stale"
             DirectDebridResolveResult.Error -> "Error"
         }
+        // S5 part 3 instrument: which CDN node this resolve handed back. The
+        // nt3 capture showed consecutive episodes landing on different nodes
+        // (nexus-196 then nexus-170), which is what made the pooled
+        // connections worthless on the transition. Three samples cannot tell
+        // per-resolve load balancing from per-file affinity; this line
+        // settles it.
+        val resolvedHost = (result as? DirectDebridResolveResult.Success)?.url
+            ?.let { runCatching { java.net.URI(it).host }.getOrNull() }
+            ?: "-"
         android.util.Log.i(
             TAG,
             "PREFETCH resolve result=$resultLabel " +
-                "ms=${SystemClock.elapsedRealtime() - resolveT0}"
+                "ms=${SystemClock.elapsedRealtime() - resolveT0} host=$resolvedHost"
         )
 
         // Patch B (26 Jul capture): warm the playback connection HERE, not at

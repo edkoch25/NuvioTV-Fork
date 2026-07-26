@@ -315,10 +315,23 @@ internal fun PlayerRuntimeController.resetPostPlayOverlayState(clearEpisode: Boo
  * fresh for about four minutes past the episode end, which also covers
  * dwelling on the post-play card. Cost is two scrape cycles per episode.
  *
- * No ranker is supplied: PrefetchSelectionSupplier is not injected into the
- * player runtime, so the pre-resolve of the winner stays with the details and
- * continue-watching paths for now. The scrape plus the auto-select timeout is
- * the bulk of the transition cost regardless.
+ * S5 part 3: a ranker IS now supplied, so the lookahead also ranks and
+ * pre-resolves the winner. Two things follow from that, and the second is why
+ * it was promoted ahead of everything left in the segment:
+ *
+ *  - the ~873 ms debrid resolve leaves the press path entirely;
+ *  - the resolve is what REVEALS THE CDN HOST, and Patch B's prewarm hangs off
+ *    it. The 26 Jul nt3 capture caught the next episode resolving to
+ *    nexus-170 while every pooled connection was to nexus-196, so the probe
+ *    paid a full cold connect including fresh DNS (1,480 ms to headers).
+ *    OkHttp pools per host: warming the wrong node is worth nothing. Resolving
+ *    early is the only way to learn the right one.
+ *
+ * Runway note: connections idle out of the pool after three minutes, so the
+ * six-minute fire warms a node that will have gone cold by the press. The TTL
+ * re-fire about a minute before the end is the one that lands, and it
+ * re-resolves against the resolver's own 15-minute link cache, so the second
+ * pass is cheap.
  */
 internal fun PlayerRuntimeController.maybePrefetchNextEpisodeForBinge(
     positionMs: Long,
@@ -340,7 +353,15 @@ internal fun PlayerRuntimeController.maybePrefetchNextEpisodeForBinge(
         videoId = nextVideo.id,
         season = nextVideo.season,
         episode = nextVideo.episode,
-        source = "binge_lookahead"
+        source = "binge_lookahead",
+        rank = { groups ->
+            prefetchSelectionSupplier.rankAndPreResolve(
+                groups = groups,
+                contentId = contentId,
+                season = nextVideo.season,
+                episode = nextVideo.episode
+            )
+        }
     )
 }
 
