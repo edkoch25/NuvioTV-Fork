@@ -1758,27 +1758,41 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
             }
             if (streamToPlay != null) {
                 val sourceName = (streamToPlay.name?.takeIf { it.isNotBlank() } ?: streamToPlay.addonName).trim()
-                // The countdown exists so the decision can be cancelled. On a
-                // deliberate press the decision was just made, so three seconds
-                // of it is dead time after the link has already resolved.
-                // Shortened rather than removed: the same state update carries
-                // the chosen source name, which is the only in-flight signal
-                // that the selection is wrong, and it also suppresses the
-                // next-episode button while it runs. Auto-play is untouched.
-                val countdownFrom = if (userInitiated) 1 else 3
-                for (remaining in countdownFrom downTo 1) {
-                    _uiState.update { current ->
-                        val episodeForMode = current.nextEpisode ?: nextInfo
-                        current.copy(
-                            postPlayMode = PostPlayMode.AutoPlay(
-                                nextEpisode = episodeForMode,
-                                searching = false,
-                                sourceName = sourceName,
-                                countdownSec = remaining,
-                            ),
-                        )
+                // The countdown exists so the decision can be cancelled.
+                //
+                // S5/B3: countdown removed on a deliberate press (26 Jul 2026).
+                // nt2 shipped it shortened to 1 s so the chosen source name
+                // stayed visible; the capture confirmed the card renders the
+                // name correctly, and Paul's call is that the second of latency
+                // is not worth the name. The loop body was pure dead time --
+                // resolveDirectDebridStreamIfNeeded() has already returned above,
+                // so the delay(1000) overlapped no work whatsoever (measured:
+                // resolving_debrid_done 16:03:21.383 -> preparing_metadata
+                // 16:03:22.447, a 1,064 ms gap).
+                //
+                // Auto-play is deliberately untouched at three seconds: an
+                // unattended transition still needs a cancellable window.
+                //
+                // Button-suppression note: countdownSec != null is what greys
+                // out SkipNext while the card is up. searching = true already
+                // covers the whole resolve above, and with the countdown gone
+                // the resolve runs straight into switchToEpisodeStream, so the
+                // unguarded window is ~0 ms.
+                if (!userInitiated) {
+                    for (remaining in 3 downTo 1) {
+                        _uiState.update { current ->
+                            val episodeForMode = current.nextEpisode ?: nextInfo
+                            current.copy(
+                                postPlayMode = PostPlayMode.AutoPlay(
+                                    nextEpisode = episodeForMode,
+                                    searching = false,
+                                    sourceName = sourceName,
+                                    countdownSec = remaining,
+                                ),
+                            )
+                        }
+                        delay(1000)
                     }
-                    delay(1000)
                 }
                 _uiState.update {
                     it.copy(
