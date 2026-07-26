@@ -19,6 +19,26 @@ import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 
 internal object PlayerPlaybackNetworking {
+
+    // Warm de-duplication. Since Patch B the warm fires twice per play: once
+    // from PrefetchSelectionSupplier when the prefetch resolves, and again
+    // from StreamScreen at the press. Each fires a PAIR, so a prefetched play
+    // sent four bytes=0-262143 requests where two were useful (nt4 capture,
+    // ids 1-2 then 3-4, all to the same URL).
+    //
+    // The press-time call is not redundant in general -- it is the only warm
+    // on a path that never prefetched, and after the pool's three-minute idle
+    // timeout the connections the prefetch warmed are gone. So this suppresses
+    // only a repeat of the SAME url inside a window comfortably shorter than
+    // that idle timeout. Benign race: a duplicate warm under contention costs
+    // one pooled round trip.
+    @Volatile
+    private var lastWarmUrl: String? = null
+
+    @Volatile
+    private var lastWarmAtMs: Long = 0L
+
+    private const val WARM_DEDUP_WINDOW_MS = 60_000L
     private val trustAllManager = object : X509TrustManager {
         override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
 
@@ -128,6 +148,15 @@ internal object PlayerPlaybackNetworking {
         ) {
             return
         }
+        val nowMs = android.os.SystemClock.elapsedRealtime()
+        val warmSuppressed = target == lastWarmUrl &&
+            (nowMs - lastWarmAtMs) in 0 until WARM_DEDUP_WINDOW_MS
+        if (warmSuppressed) {
+            android.util.Log.i("NuvioNet", "PREWARM skipped: same url warmed ${nowMs - lastWarmAtMs}ms ago")
+            return
+        }
+        lastWarmUrl = target
+        lastWarmAtMs = nowMs
         val request = try {
             val builder = okhttp3.Request.Builder().url(target)
             headers?.forEach { (name, value) -> builder.header(name, value) }
