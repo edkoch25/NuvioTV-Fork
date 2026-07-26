@@ -557,6 +557,10 @@ class PlayerRuntimeController(
     internal var scrobbleStartRequestGeneration: Long = 0L
     internal var playbackPreparationJob: Job? = null
     internal var traktMappingJob: Job? = null
+    // nt7 (task 2): saved-progress read launched at
+    // preparePlaybackBeforeStart, joined in initializePlayer before
+    // either engine reads the resume position.
+    internal var savedProgressDeferred: kotlinx.coroutines.Deferred<Unit>? = null
     internal var hasSentCompletionScrobbleForCurrentItem: Boolean = false
 
     internal var requestedUseLibassByUser: Boolean = false

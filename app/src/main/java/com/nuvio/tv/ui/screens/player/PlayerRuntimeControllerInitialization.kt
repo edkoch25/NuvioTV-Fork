@@ -349,6 +349,10 @@ internal fun PlayerRuntimeController.initializePlayer(
                         phase = "mpv_buffering",
                         message = context.getString(R.string.player_loading_buffering)
                     )
+                    // nt7 (task 2): the MPV path reads the resume position
+                    // inside initializeMpvPlayer (a plain fun), so the join
+                    // happens here, in this coroutine, before entry.
+                    awaitSavedProgressLoad()
                     initializeMpvPlayer(url = url, headers = headers, allowEngineFailover = allowEngineFailover)
                     fetchAddonSubtitles()
                 } finally {
@@ -1018,6 +1022,10 @@ internal fun PlayerRuntimeController.initializePlayer(
                 applySubtitlePreferences(preferred, secondary)
                 applyStartupSubtitlePreparation(startupSubtitlePreparation)
                 val startupSubtitleConfigurations = buildStartupSubtitleConfigurations(startupSubtitlePreparation)
+                // nt7 (task 2): join the saved-progress read before the
+                // resume position is resolved. Runway to here is the whole
+                // player build; SAVED_PROGRESS_AWAIT prices the residual.
+                awaitSavedProgressLoad()
                 val initialResumePosition = resolvePendingInitialResumePosition()
                 playbackAnalyticsDiagnostics.setStartupStartPosition(initialResumePosition)
                 playbackAnalyticsDiagnostics.recordRawEventLine(

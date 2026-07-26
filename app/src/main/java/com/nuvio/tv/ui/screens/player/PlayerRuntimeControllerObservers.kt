@@ -568,6 +568,40 @@ internal suspend fun PlayerRuntimeController.loadSavedProgressSuspend(season: In
     }
 }
 
+/**
+ * nt7 (task 2): join the saved-progress read launched at
+ * preparePlaybackBeforeStart. Called on both engine branches of
+ * initializePlayer immediately before the resume position is read. The
+ * runway to that point is the whole player build, so the residual block
+ * here should be ~0 and is logged per play so the win stays measurable.
+ *
+ * A failed read is swallowed: losing the resume position must not kill
+ * playback. (Previously an exception here killed the whole prep
+ * coroutine and playback never started -- a strictly worse outcome.)
+ * Cancellation of the AWAITING coroutine is rethrown so cancellation
+ * stays cooperative; only cancellation of the deferred itself (a newer
+ * press superseding this one) is swallowed.
+ */
+internal suspend fun PlayerRuntimeController.awaitSavedProgressLoad() {
+    val deferred = savedProgressDeferred ?: return
+    val awaitT0 = android.os.SystemClock.elapsedRealtime()
+    try {
+        deferred.await()
+    } catch (ce: kotlinx.coroutines.CancellationException) {
+        if (!deferred.isCancelled) throw ce
+    } catch (e: Exception) {
+        Log.d(
+            PlayerRuntimeController.TAG,
+            "awaitSavedProgressLoad: read failed, starting without resume: ${e.message}"
+        )
+    }
+    savedProgressDeferred = null
+    android.util.Log.i(
+        "TTFF_STAGE",
+        "SAVED_PROGRESS_AWAIT ms=${android.os.SystemClock.elapsedRealtime() - awaitT0}"
+    )
+}
+
 internal fun PlayerRuntimeController.fetchSkipIntervals(id: String?, season: Int?, episode: Int?) {
     if (!skipIntroEnabled) return
     if (id.isNullOrBlank()) return
