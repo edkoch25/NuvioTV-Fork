@@ -37,13 +37,19 @@ object NuvioExoPlayerPerformanceHelper {
             applyEngineConfig(newValue)
         }
 
-    @Volatile
-    var sharedConnectionPool: okhttp3.ConnectionPool = okhttp3.ConnectionPool(
+    // S1g root fix (26 Jul capture, POOL_ID prewarm=44918017 vs
+    // datasource=158407223): this was a @Volatile var REPLACED whenever the
+    // computed pool size changed, so lazily-built derived clients captured
+    // different pool instances depending on construction order -- the prewarm
+    // warmed a pool the probe never read. A ConnectionPool's size is a
+    // MAX-IDLE cap, not a concurrency limit, so one fixed-size singleton is
+    // strictly safe at any connection count; making it a val enforces the
+    // sharing invariant at the type level.
+    val sharedConnectionPool: okhttp3.ConnectionPool = okhttp3.ConnectionPool(
         DEFAULT_NUVIO_CONNECTION_POOL_SIZE,
         3,
         java.util.concurrent.TimeUnit.MINUTES
     )
-        private set
 
     // ─── Constants ────────────────────────────────────────────────────────────
     const val DEFAULT_NUVIO_ALLOCATOR_SEGMENT_SIZE = 64 * 1024        // 64 KB
@@ -105,20 +111,17 @@ object NuvioExoPlayerPerformanceHelper {
             safeLimitMb
         }
 
-        val oldPoolSize = connectionPoolSize
         val customNetwork = settings.parallelNetworkEnabled
         connectionPoolSize = if (customNetwork && settings.useParallelConnections) {
             settings.parallelConnectionCount * 2
         } else {
             DEFAULT_NUVIO_CONNECTION_POOL_SIZE
         }
-        if (connectionPoolSize != oldPoolSize) {
-            sharedConnectionPool = okhttp3.ConnectionPool(
-                connectionPoolSize,
-                3,
-                java.util.concurrent.TimeUnit.MINUTES
-            )
-        }
+        // S1g root fix: the pool is never replaced. The old swap here (resize
+        // on the first updateSettings, i.e. every player init) is what made
+        // pool capture ordering-dependent; the derived count above is kept
+        // only as visible state. Idle connections above the working set cost
+        // nothing -- the singleton's fixed cap covers every supported setting.
     }
 
     private const val SEEK_BACKWARD_TOLERANCE_MS = 2_000L

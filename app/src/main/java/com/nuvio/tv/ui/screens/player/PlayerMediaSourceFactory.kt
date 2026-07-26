@@ -101,7 +101,10 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
     var vodCacheSizeMb: Int = PlayerSettings.DEFAULT_VOD_CACHE_SIZE_MB
 
     // OkHttp client used only by the opt-in parallel-connections path.
-    private val playbackHttpClient by lazy {
+    // Renamed from `playbackHttpClient` (NEW-14): the old name silently
+    // shadowed PlayerPlaybackNetworking.playbackHttpClient inside this file
+    // and cost two retractions in one session.
+    private val chunkSessionHttpClient by lazy {
         PlayerPlaybackNetworking.playbackHttpClient.newBuilder()
             .cookieJar(NuvioApplication.extensionCookieJar)
             .let { NuvioExoPlayerPerformanceHelper.applyNetworkOptimizations(it) }
@@ -173,7 +176,7 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
                         "for progressive MP4 with parallel connections off"
                 )
             }
-            val okHttpFactory = OkHttpDataSource.Factory(playbackHttpClient).apply {
+            val okHttpFactory = OkHttpDataSource.Factory(chunkSessionHttpClient).apply {
                 setDefaultRequestProperties(sanitizedHeaders)
                 setUserAgent(DEFAULT_USER_AGENT)
             }

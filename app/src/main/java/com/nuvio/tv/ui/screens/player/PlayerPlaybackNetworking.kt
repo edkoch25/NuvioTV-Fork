@@ -109,8 +109,17 @@ internal object PlayerPlaybackNetworking {
      *
      * Deliberately fire-and-forget: nothing awaits it, every failure is
      * swallowed, and a pool miss simply leaves the probe to handshake exactly as
-     * before. It replaces the probe's handshake rather than adding a request, so
-     * it is close to request-neutral against a rate-limiting source.
+     * before. Correction (26 Jul capture): this ADDS one tiny request per press
+     * -- the old "close to request-neutral" claim was false. The payoff is that
+     * a fully drained bytes=0-0 body returns its connection to the shared pool.
+     *
+     * S1m: TWO warms are fired. Startup runs two concurrent cold opens after
+     * the probe (the tail continuation and chunk 0's own download); h1 cannot
+     * multiplex, and a single pooled socket can be claimed by only one of them
+     * -- the loser paid the full cold connect (median 849 ms of non-transport
+     * residual, 26 Jul capture). Two pooled sockets cover the probe plus the
+     * first claimant, and the drained probe connection re-enters the pool for
+     * the other.
      */
     fun prewarmPlaybackConnection(url: String?, headers: Map<String, String>?) {
         val target = url?.trim().orEmpty()
@@ -128,16 +137,22 @@ internal object PlayerPlaybackNetworking {
             return
         }
         try {
-            prewarmHttpClient.newCall(request).enqueue(object : okhttp3.Callback {
-                override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
-                    // No-op by design: the probe will handshake as it does today.
-                }
+            // S1m: two independent calls enqueued back-to-back run
+            // concurrently (dispatcher maxRequestsPerHost is 32), so OkHttp
+            // opens two sockets; each drains its one-byte body and both
+            // re-enter the shared pool warm.
+            repeat(2) {
+                prewarmHttpClient.newCall(request).enqueue(object : okhttp3.Callback {
+                    override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
+                        // No-op by design: the probe will handshake as it does today.
+                    }
 
-                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
-                    // Draining the one-byte body is what makes the connection reusable.
-                    response.use { it.body?.bytes() }
-                }
-            })
+                    override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                        // Draining the one-byte body is what makes the connection reusable.
+                        response.use { it.body?.bytes() }
+                    }
+                })
+            }
         } catch (_: Exception) {
             // Dispatcher rejection or any other failure: nothing to do.
         }
@@ -146,7 +161,11 @@ internal object PlayerPlaybackNetworking {
     /**
      * S1g: shares [NuvioExoPlayerPerformanceHelper.sharedConnectionPool] with the
      * playback data sources, which is the whole point -- a connection warmed here
-     * must be the one the probe later picks up.
+     * must be the one the probe later picks up. History: proven FALSE on the
+     * live path in the 26 Jul capture (disjoint POOL_IDs) because the pool was
+     * a swapped var and this lazy captured the pre-swap instance. The pool is
+     * now a fixed singleton val, so every applyNetworkOptimizations client
+     * shares it by construction; POOL_ID stays as the standing verification.
      */
     private val prewarmHttpClient: OkHttpClient by lazy {
         playbackHttpClient.newBuilder()
@@ -157,12 +176,11 @@ internal object PlayerPlaybackNetworking {
 
     /**
      * S1g's pool-sharing claim is only true if the prewarm client and the
-     * client the probe uses hold the SAME ConnectionPool instance.
-     * applyNetworkOptimizations overwrites the inherited pool with
-     * NuvioExoPlayerPerformanceHelper.sharedConnectionPool, and that field is
-     * reassigned when the pool size changes (2 connections gives 4, the
-     * default is 8) -- so two lazily-built clients can capture different
-     * instances depending on construction order. These two integers decide it.
+     * client the probe uses hold the SAME ConnectionPool instance. The 26 Jul
+     * capture decided it: the pool was then a reassigned var and the two
+     * integers differed (44918017 vs 158407223). The var is now a fixed
+     * singleton val, so matching ids are the EXPECTED steady state; a
+     * mismatch here means the invariant regressed.
      */
     private fun logPoolIdentity(label: String, client: OkHttpClient) {
         val poolId = System.identityHashCode(client.connectionPool)
