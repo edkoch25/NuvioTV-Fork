@@ -1686,7 +1686,23 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
             val timeoutSeconds = playerSettings.streamAutoPlayTimeoutSeconds
 
             val innerJob = launch {
-                streamRepository.getStreamsFromAllAddons(
+                // S5 binge lookahead (part 2): read THROUGH the prefetch cache.
+                //
+                // This call site went straight to the repository, so the
+                // lookahead above would have filled a cache the binge path never
+                // consulted. streamsFor() substitutes the flow rather than
+                // bypassing this consumer: a hit emits Loading then one Success
+                // then completes, which is indistinguishable from a very fast
+                // scrape, so the timeout/auto-select machinery below is
+                // untouched. A miss, an expired entry or a join timeout falls
+                // through to the live flow, i.e. exactly today's behaviour.
+                //
+                // The win is not only the scrape: with a hit, searchSettled
+                // completes almost immediately and the bounded
+                // streamAutoPlayTimeoutSeconds wait (3 s on Paul's device) is
+                // skipped rather than served.
+                com.nuvio.tv.core.stream.StreamPrefetchCache.streamsFor(
+                    repository = streamRepository,
                     type = type,
                     videoId = nextVideo.id,
                     season = nextVideo.season,

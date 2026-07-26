@@ -294,7 +294,61 @@ internal fun PlayerRuntimeController.resetPostPlayOverlayState(clearEpisode: Boo
     }
 }
 
+/**
+ * S5 binge lookahead: start the next episode's scrape before it is pressed.
+ *
+ * Called from [evaluatePostPlayOverlayVisibility], which the progress loop
+ * already invokes on every tick for both engines with the position and
+ * duration this needs. Sharing that call site is deliberate -- a second
+ * per-tick hook would be a second thing to keep in step.
+ *
+ * Why the trigger is near the END of the episode and not at its start:
+ * StreamPrefetchCache entries carry debrid cached-availability annotations
+ * and expire after five minutes. A prefetch fired when playback began would
+ * be forty minutes stale by the time the next-episode button is pressed.
+ *
+ * Six minutes exceeds that five-minute TTL by design (Paul's call, 26 Jul).
+ * The first fire expires with about a minute of episode left, and because
+ * [StreamPrefetchCache.prefetch] no-ops on a fresh or identical in-flight key,
+ * the very next tick after expiry re-fires it for free -- no re-arm state to
+ * hold. The second entry lands with roughly fifty seconds to spare and stays
+ * fresh for about four minutes past the episode end, which also covers
+ * dwelling on the post-play card. Cost is two scrape cycles per episode.
+ *
+ * No ranker is supplied: PrefetchSelectionSupplier is not injected into the
+ * player runtime, so the pre-resolve of the winner stays with the details and
+ * continue-watching paths for now. The scrape plus the auto-select timeout is
+ * the bulk of the transition cost regardless.
+ */
+internal fun PlayerRuntimeController.maybePrefetchNextEpisodeForBinge(
+    positionMs: Long,
+    durationMs: Long
+) {
+    if (!hasRenderedFirstFrame) return
+    val type = contentType ?: return
+    val nextVideo = nextEpisodeVideo ?: return
+    if (_uiState.value.nextEpisode?.hasAired != true) return
+
+    val effectiveDuration = durationMs.takeIf { it > 0L } ?: lastKnownDuration
+    if (effectiveDuration <= 0L) return
+    val remainingMs = effectiveDuration - positionMs
+    if (remainingMs <= 0L || remainingMs > BINGE_LOOKAHEAD_TRIGGER_MS) return
+
+    com.nuvio.tv.core.stream.StreamPrefetchCache.prefetch(
+        repository = streamRepository,
+        type = type,
+        videoId = nextVideo.id,
+        season = nextVideo.season,
+        episode = nextVideo.episode,
+        source = "binge_lookahead"
+    )
+}
+
+/** S5: how much of the episode may remain when the lookahead prefetch fires. */
+private const val BINGE_LOOKAHEAD_TRIGGER_MS = 6L * 60L * 1000L
+
 internal fun PlayerRuntimeController.evaluatePostPlayOverlayVisibility(positionMs: Long, durationMs: Long) {
+    maybePrefetchNextEpisodeForBinge(positionMs, durationMs)
     if (!hasRenderedFirstFrame) return
 
     val state = _uiState.value
