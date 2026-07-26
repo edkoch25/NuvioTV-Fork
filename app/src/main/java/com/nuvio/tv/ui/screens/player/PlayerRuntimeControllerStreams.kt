@@ -1538,6 +1538,18 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
     val nextVideo = nextEpisodeVideo ?: return
     val type = contentType ?: return
 
+    // Instrument (26 Jul capture gap): everything between the press and
+    // resolving_debrid was unmeasured, so the addon scrape and the bounded
+    // streamAutoPlayTimeoutSeconds wait were both invisible and the transition
+    // budget was inferred rather than read. These two lines close that.
+    // Logged under TTFF_STAGE so the existing capture tag filter is unchanged.
+    val nextEpisodePressElapsedMs = android.os.SystemClock.elapsedRealtime()
+    android.util.Log.i(
+        "TTFF_STAGE",
+        "NEXT_EPISODE_PRESS userInitiated=$userInitiated " +
+            "season=${nextVideo.season} episode=${nextVideo.episode}"
+    )
+
     val state = _uiState.value
     val nextInfo = state.nextEpisode ?: return
     if (!nextInfo.hasAired) {
@@ -1769,6 +1781,16 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                 innerJob.cancel()
             }
 
+            // Everything above is scrape + auto-select, including the bounded
+            // timeout wait. Subtracting this from the press stamp prices the
+            // block S5 part 2 targets; the resolve that follows is already
+            // priced by resolving_debrid -> resolving_debrid_done.
+            android.util.Log.i(
+                "TTFF_STAGE",
+                "NEXT_EPISODE_STREAMS_SETTLED " +
+                    "ms=${android.os.SystemClock.elapsedRealtime() - nextEpisodePressElapsedMs} " +
+                    "selected=${selectedStream != null} timeoutElapsed=$timeoutElapsed"
+            )
             val streamToPlay = selectedStream?.let {
                 resolveDirectDebridStreamIfNeeded(it, nextVideo.season, nextVideo.episode)
             }
