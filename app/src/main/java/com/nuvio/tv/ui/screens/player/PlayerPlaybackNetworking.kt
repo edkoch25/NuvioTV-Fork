@@ -226,7 +226,9 @@ internal object PlayerPlaybackNetworking {
         val protos = client.protocols.joinToString(",")
         android.util.Log.i(
             "NuvioNet",
-            "POOL_ID client=$label pool=$poolId protocols=$protos"
+            "POOL_ID client=$label pool=$poolId protocols=$protos " +
+                "maxIdle=${NuvioExoPlayerPerformanceHelper.NUVIO_SHARED_POOL_MAX_IDLE} " +
+                "demand=${NuvioExoPlayerPerformanceHelper.connectionPoolSize}"
         )
     }
 

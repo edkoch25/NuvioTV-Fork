@@ -46,7 +46,7 @@ object NuvioExoPlayerPerformanceHelper {
     // strictly safe at any connection count; making it a val enforces the
     // sharing invariant at the type level.
     val sharedConnectionPool: okhttp3.ConnectionPool = okhttp3.ConnectionPool(
-        DEFAULT_NUVIO_CONNECTION_POOL_SIZE,
+        NUVIO_SHARED_POOL_MAX_IDLE,
         3,
         java.util.concurrent.TimeUnit.MINUTES
     )
@@ -59,6 +59,24 @@ object NuvioExoPlayerPerformanceHelper {
     const val DEFAULT_NUVIO_BACK_BUFFER_MS = 1_500
     const val DEFAULT_NUVIO_INITIAL_BITRATE_ESTIMATE = 50_000_000L     // 50 Mbps
     const val DEFAULT_NUVIO_CONNECTION_POOL_SIZE = 8
+
+    /**
+     * Max IDLE connections retained by [sharedConnectionPool].
+     *
+     * Regression fix. Before the S1g root fix the pool was rebuilt at
+     * parallelConnectionCount * 2 (12 at six connections); making it a fixed
+     * singleton pinned it at DEFAULT_NUVIO_CONNECTION_POOL_SIZE = 8, BELOW the
+     * concurrent chunk demand. A ConnectionPool's size caps idle retention
+     * rather than concurrency, so nothing blocked -- but every connection past
+     * the eighth was evicted as soon as it went idle and the next burst
+     * reopened it cold. Both captures show that: 4 of ~12 concurrent chunk
+     * opens cold mid-playback in nt3, 3 in nt2.
+     *
+     * Set well above any reachable parallel setting. An idle pooled connection
+     * is a socket and a few KB, and the three-minute idle timeout still reaps
+     * them.
+     */
+    const val NUVIO_SHARED_POOL_MAX_IDLE = 32
 
     // ─── Customization Variables ──────────────────────────────────────────────
     @Volatile
