@@ -39,6 +39,14 @@ import java.util.concurrent.atomic.AtomicLong
  *  - proto is the negotiated protocol. Playback is expected to be http/1.1,
  *    since applyNetworkOptimizations pins it when the h2 toggle is off.
  *  - range distinguishes the prewarm (bytes=0-0) from the probe and chunks.
+ *
+ * N6 V3-lite (post-capture, 26 Jul 2026): the capture proved the cold-open
+ * residual (410-895 ms, median 849) is NOT dns/tcp/tls -- but this listener
+ * collapsed three windows into one number: callStart->dnsStart (dispatcher /
+ * connection-acquisition wait), dnsEnd->connectStart (route planning), and
+ * connectEnd->responseHeadersEnd (request write + server TTFB). The preDns /
+ * route / ttfb / acqToHdr fields name them. acqToHdr also decomposes POOLED
+ * calls, which emit no dns/connect events at all.
  */
 internal class PlaybackConnectionEventListener(
     private val id: Long
@@ -48,6 +56,17 @@ internal class PlaybackConnectionEventListener(
     private var dnsT0 = 0L
     private var connT0 = 0L
     private var tlsT0 = 0L
+
+    // N6 V3-lite (26 Jul capture, NEW-15 action): absolute stamps so the one
+    // residual number splits into named windows. dnsEndT/connEndT/headersT
+    // bracket window 2 (route planning) and window 3 (request write + TTFB);
+    // acqT prices connection acquisition on BOTH cold and pooled calls --
+    // dns/connect events never fire on a pooled call, so acqT is the only
+    // stamp that decomposes the pooled 265-375 ms call-to-headers.
+    private var dnsEndT = 0L
+    private var connEndT = 0L
+    private var headersT = 0L
+    private var acqT = 0L
 
     private var dnsMs = -1L
     private var connMs = -1L
@@ -74,7 +93,8 @@ internal class PlaybackConnectionEventListener(
     }
 
     override fun dnsEnd(call: Call, domainName: String, inetAddressList: List<InetAddress>) {
-        dnsMs = now() - dnsT0
+        dnsEndT = now()
+        dnsMs = dnsEndT - dnsT0
     }
 
     override fun connectStart(call: Call, inetSocketAddress: InetSocketAddress, proxy: Proxy) {
@@ -96,7 +116,8 @@ internal class PlaybackConnectionEventListener(
         proxy: Proxy,
         protocol: Protocol?
     ) {
-        connMs = now() - connT0
+        connEndT = now()
+        connMs = connEndT - connT0
         if (protocol != null) proto = protocol.toString()
     }
 
@@ -112,11 +133,13 @@ internal class PlaybackConnectionEventListener(
     }
 
     override fun connectionAcquired(call: Call, connection: Connection) {
+        acqT = now()
         if (proto == null) proto = connection.protocol().toString()
     }
 
     override fun responseHeadersEnd(call: Call, response: Response) {
-        headersMs = now() - callT0
+        headersT = now()
+        headersMs = headersT - callT0
         code = response.code
     }
 
@@ -133,11 +156,21 @@ internal class PlaybackConnectionEventListener(
         val rangeLabel = range ?: "none"
         val hostLabel = host ?: "unknown"
         val protoLabel = proto ?: "unknown"
+        // V3-lite derived windows; -1 when the bracketing events never fired
+        // (e.g. dns/connect on a pooled call). preDns = dispatcher/queue wait,
+        // route = dnsEnd->connectStart, ttfb = connectEnd->headers (request
+        // write + server think), acqToHdr = acquisition->headers, the only
+        // decomposition available on a pooled call.
+        val preDnsMs = if (dnsT0 > 0L) dnsT0 - callT0 else -1L
+        val routeMs = if (dnsEndT > 0L && connT0 > 0L) connT0 - dnsEndT else -1L
+        val ttfbMs = if (connEndT > 0L && headersT > 0L) headersT - connEndT else -1L
+        val acqToHdrMs = if (acqT > 0L && headersT > 0L) headersT - acqT else -1L
         Log.i(
             TAG,
             "NET_CONN id=$id outcome=$outcome pooled=${opens == 0} opens=$opens " +
                 "dns=${dnsMs}ms connect=${connMs}ms tls=${tlsMs}ms " +
                 "headers=${headersMs}ms total=${totalMs}ms " +
+                "preDns=${preDnsMs}ms route=${routeMs}ms ttfb=${ttfbMs}ms acqToHdr=${acqToHdrMs}ms " +
                 "code=$code proto=$protoLabel range=$rangeLabel host=$hostLabel"
         )
     }
