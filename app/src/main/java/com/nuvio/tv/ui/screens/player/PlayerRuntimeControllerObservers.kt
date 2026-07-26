@@ -583,9 +583,32 @@ internal fun PlayerRuntimeController.fetchSkipIntervals(id: String?, season: Int
     skipIntroFetchedKey = key
 
     scope.launch {
+        val fetchT0 = android.os.SystemClock.elapsedRealtime()
         skipIntervals = withTimeoutOrNull(15_000L) {
             skipIntroRepository.getSkipIntervals(imdbId, season, episode)
         } ?: emptyList()
+        // The nt4 capture could not answer why the next-episode card fired at
+        // the 99% threshold rather than at the start of a two-minute credit
+        // roll. SkipIntroRepository logs only its no-data path, and at DEBUG,
+        // so silence was consistent with three different worlds: intervals
+        // returned but no outro among them, no data at all, or the 15 s
+        // timeout elapsing. This line separates them. Logged at INFO under
+        // TTFF_STAGE so it lands in the standing capture filter.
+        //
+        // PlayerNextEpisodeRules is deliberately NOT instrumented: it is a
+        // pure object under unit test, and android.util.Log there would throw
+        // in the JVM test source set. The interval list is the input that
+        // decides its branch, so logging it here is sufficient.
+        val intervalTypes = if (skipIntervals.isEmpty()) {
+            "-"
+        } else {
+            skipIntervals.joinToString(",") { it.type }
+        }
+        android.util.Log.i(
+            "TTFF_STAGE",
+            "SKIP_INTERVALS n=${skipIntervals.size} types=$intervalTypes " +
+                "ms=${android.os.SystemClock.elapsedRealtime() - fetchT0} key=$key"
+        )
     }
 }
 
