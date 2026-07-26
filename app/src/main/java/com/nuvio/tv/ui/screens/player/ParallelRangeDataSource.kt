@@ -658,12 +658,45 @@ internal class ParallelRangeDataSource(
         var diagProbeOpenMs = -1L
         var diagBootstrapMs = -1L
 
-        val openLength: Long
+        // S1m (bounded probe -- closes the 26 Jul capture's "unranged GET"):
+        // ExoPlayer's initial spec is position=0/length=UNSET, which
+        // OkHttpDataSource sends with NO Range header -- a full-file 200.
+        // Closing that with ~1 GB unread DISCARDS the socket, so the tail
+        // continuation and chunk 0 each paid a fresh cold connect (median
+        // 849 ms of non-transport residual per open, 26 Jul capture).
+        // Requesting exactly the bootstrap window instead makes the body
+        // fully consumable, so close() returns the connection to the shared
+        // pool; the total length comes from the 206's Content-Range. A server
+        // that ignores Range (200: no Content-Range) gets one fresh unbounded
+        // reopen and then the pre-existing sniff + single-connection
+        // fallback, unchanged.
+        var openLength: Long
+        val boundedProbeLength = if (dataSpec.length != C.LENGTH_UNSET.toLong()) {
+            minOf(dataSpec.length, BOOTSTRAP_READ_BYTES)
+        } else {
+            BOOTSTRAP_READ_BYTES
+        }
         try {
-            openLength = probeSource.open(dataSpec)
+            probeSource.open(dataSpec.buildUpon().setLength(boundedProbeLength).build())
             diagProbeOpenMs = SystemClock.uptimeMillis() - diagOpenStartMs
             resolvedUri = probeSource.uri // Final URL after redirects (CDN URL)
             onResolvedUri(resolvedUri)
+            val probeTotal = parseContentRangeTotal(probeSource.responseHeaders)
+            if (probeTotal != C.LENGTH_UNSET.toLong()) {
+                val remaining = (probeTotal - dataSpec.position).coerceAtLeast(0L)
+                openLength = if (dataSpec.length != C.LENGTH_UNSET.toLong()) {
+                    minOf(dataSpec.length, remaining)
+                } else {
+                    remaining
+                }
+            } else {
+                // Range not honoured: revert to the pre-S1m single unbounded
+                // open so the sniff below sees exactly what it always saw.
+                Log.w(TAG, "Bounded probe got no Content-Range; reopening unbounded")
+                try { probeSource.close() } catch (_: Exception) {}
+                openLength = probeSource.open(dataSpec)
+                diagProbeOpenMs = SystemClock.uptimeMillis() - diagOpenStartMs
+            }
         } catch (e: Exception) {
             probeSource.close()
             throw e
@@ -1253,6 +1286,21 @@ internal class ParallelRangeDataSource(
     }
 
     /** Read only a small startup window from an already-opened DataSource. */
+    /**
+     * S1m: total file size from a 206's Content-Range ("bytes 0-262143/N").
+     * Returns C.LENGTH_UNSET when the header is absent or the total is
+     * opaque (an asterisk), which the caller treats as "Range not honoured".
+     */
+    private fun parseContentRangeTotal(headers: Map<String, List<String>>): Long {
+        val value = headers.entries
+            .firstOrNull { it.key.equals("Content-Range", ignoreCase = true) }
+            ?.value?.firstOrNull()
+            ?: return C.LENGTH_UNSET.toLong()
+        val totalPart = value.substringAfterLast('/', missingDelimiterValue = "").trim()
+        if (totalPart.isEmpty() || totalPart == "*") return C.LENGTH_UNSET.toLong()
+        return totalPart.toLongOrNull() ?: C.LENGTH_UNSET.toLong()
+    }
+
     private fun readBootstrapChunk(ds: DataSource, maxBytes: Int): DownloadedChunk {
         val buffer = ByteArray(maxBytes)
         var totalRead = 0
