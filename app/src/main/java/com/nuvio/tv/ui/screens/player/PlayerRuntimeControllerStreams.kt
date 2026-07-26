@@ -1629,6 +1629,9 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
             var autoSelectTriggered = false
             var timeoutElapsed = false
             var lastError: NetworkResult.Error? = null
+            // nt7 (task 3): time spent ranking inside the settle window.
+            var selectionRankMs = 0L
+            var selectionRankCalls = 0
             // Completed as soon as a stream is selected or the addon search
             // finishes, so the waiting code below resumes without polling.
             val searchSettled = CompletableDeferred<Unit>()
@@ -1636,7 +1639,7 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
             val debridStreamPreferences =
                 debridSettingsDataStore.settings.first().streamPreferences
 
-            fun trySelectStream(data: List<AddonStreams>): Stream? {
+            fun trySelectStreamInner(data: List<AddonStreams>): Stream? {
                 val orderedStreams = StreamAutoPlaySelector.orderAddonStreams(data, installedAddonOrder)
                 val allStreams = orderedStreams.flatMap { it.streams }
                 // preferBingeGroupInSelection was passed explicitly here as the
@@ -1666,7 +1669,7 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                 )
             }
 
-            fun tryBingeGroupOnly(data: List<AddonStreams>): Stream? {
+            fun tryBingeGroupOnlyInner(data: List<AddonStreams>): Stream? {
                 if (currentStreamBingeGroup == null || !playerSettings.streamAutoPlayPreferBingeGroupForNextEpisode) return null
                 val orderedStreams = StreamAutoPlaySelector.orderAddonStreams(data, installedAddonOrder)
                 val allStreams = orderedStreams.flatMap { it.streams }
@@ -1687,6 +1690,29 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                     debridStreamPreferences = debridStreamPreferences,
                     bingeGroupOnly = true
                 )
+            }
+
+            // nt7 (task 3): the 27 Jul capture prices ranking at ~500 ms
+            // on this device (PREFETCH rank_only ms=531/496), which would
+            // account for nearly all of nt6's one 647 ms settle against
+            // 43/48 ms siblings -- but only a measurement on the settle
+            // line itself can adjudicate re-rank vs slow-await. These
+            // wrappers keep the original names so all call sites are
+            // untouched; both local selectors funnel through them.
+            fun trySelectStream(data: List<AddonStreams>): Stream? {
+                val rankT0 = android.os.SystemClock.elapsedRealtime()
+                val result = trySelectStreamInner(data)
+                selectionRankMs += android.os.SystemClock.elapsedRealtime() - rankT0
+                selectionRankCalls++
+                return result
+            }
+
+            fun tryBingeGroupOnly(data: List<AddonStreams>): Stream? {
+                val rankT0 = android.os.SystemClock.elapsedRealtime()
+                val result = tryBingeGroupOnlyInner(data)
+                selectionRankMs += android.os.SystemClock.elapsedRealtime() - rankT0
+                selectionRankCalls++
+                return result
             }
 
             fun recordSelection(candidate: Stream) {
@@ -1789,7 +1815,8 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                 "TTFF_STAGE",
                 "NEXT_EPISODE_STREAMS_SETTLED " +
                     "ms=${android.os.SystemClock.elapsedRealtime() - nextEpisodePressElapsedMs} " +
-                    "selected=${selectedStream != null} timeoutElapsed=$timeoutElapsed"
+                    "selected=${selectedStream != null} timeoutElapsed=$timeoutElapsed " +
+                    "selectMs=$selectionRankMs selectCalls=$selectionRankCalls"
             )
             val streamToPlay = selectedStream?.let {
                 resolveDirectDebridStreamIfNeeded(it, nextVideo.season, nextVideo.episode)
