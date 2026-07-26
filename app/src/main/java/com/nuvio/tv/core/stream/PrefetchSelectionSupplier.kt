@@ -199,6 +199,30 @@ class PrefetchSelectionSupplier @Inject constructor(
             "PREFETCH resolve result=$resultLabel " +
                 "ms=${SystemClock.elapsedRealtime() - resolveT0}"
         )
+
+        // Patch B (26 Jul capture): warm the playback connection HERE, not at
+        // the press.
+        //
+        // nt2 fired the prewarm from StreamScreen once the press-path resolve
+        // returned. The capture showed why that cannot work: the prewarm was
+        // enqueued at 16:02:37.096 and took 1,408 ms (cold DNS 285 + connect
+        // 330 + TTFB 791), while the datasource probe opened at 16:02:38.023 --
+        // 926 ms later, and so 482 ms too early to find anything pooled. The
+        // probe paid a full cold connect anyway; only DNS was saved.
+        //
+        // A prefetch resolve typically completes seconds before the press, so
+        // firing here gives the warm-up the headroom it never had. When the
+        // press arrives inside the prefetch (PREFETCH join), this simply fires
+        // as early as the URL can possibly be known, which is no worse than
+        // nt2. StreamScreen's call stays as the fallback for paths that never
+        // prefetched; on a warmed pool it costs one pooled round trip.
+        //
+        // Deliberately fire-and-forget and outside the resultLabel branch's
+        // logging, so a resolver change cannot silently drop the warm.
+        if (result is DirectDebridResolveResult.Success) {
+            com.nuvio.tv.ui.screens.player.PlayerPlaybackNetworking
+                .prewarmPlaybackConnection(result.url, null)
+        }
     }
 
     private companion object {

@@ -132,7 +132,17 @@ internal object PlayerPlaybackNetworking {
             val builder = okhttp3.Request.Builder().url(target)
             headers?.forEach { (name, value) -> builder.header(name, value) }
             // Set last so a caller-supplied Range can never widen the warm-up.
-            builder.header("Range", "bytes=0-0").build()
+            //
+            // Patch B (26 Jul capture): was bytes=0-0. A one-byte body opens a
+            // socket whose congestion window is still at its initial value, and
+            // the capture priced that precisely -- the bounded probe's 256 KB
+            // bootstrap read took 718 ms over a connection warmed with one byte
+            // and 40 ms over a connection that had already carried an 8 MB
+            // chunk. Connection MATURITY matters as much as connection
+            // existence. Warming with exactly BOOTSTRAP_READ_BYTES grows the
+            // window and requests precisely the bytes the probe's bootstrap
+            // read wants next, so the CDN edge has them hot.
+            builder.header("Range", "bytes=0-262143").build()
         } catch (_: Exception) {
             return
         }
