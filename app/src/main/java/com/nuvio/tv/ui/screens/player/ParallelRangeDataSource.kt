@@ -860,7 +860,29 @@ internal class ParallelRangeDataSource(
             val future = activeSession.futures[chunkIndex] ?: return C.RESULT_END_OF_INPUT
             activeSession.noteRead(chunkIndex)
             try {
+                // RS_CHUNK_WAIT: read() blocks on the WHOLE chunk future, so
+                // ExoPlayer sees nothing of an 8 MB chunk until all 8 MB have
+                // landed -- even though the first 500 KB arrived in ~60 ms.
+                // Whether that gates the FIRST FRAME has never been measured,
+                // and three different fixes depend on the answer. If ExoPlayer
+                // renders before reading past BOOTSTRAP_READ_BYTES, chunk 0 is
+                // irrelevant to TTFF. If it reads 1-3 MB, raising the bootstrap
+                // constant is a one-line win. If it reads past a whole chunk,
+                // only progressive in-flight reads help.
+                //
+                // Correlate these against first_frame_rendered in the capture:
+                // the count before it, and the highest pos, is the answer.
+                // preDone separates a real stall from an already-complete chunk.
+                // site= distinguishes the two read() overloads; ExoPlayer's
+                // progressive path uses the ByteArray one.
+                val blockT0 = SystemClock.elapsedRealtime()
+                val preDone = future.isDone
                 currentChunk = future.get(60, TimeUnit.SECONDS)
+                Log.i(
+                    TAG,
+                    "RS_CHUNK_WAIT site=bytearray pos=$position chunk=$chunkIndex " +
+                        "waitMs=${SystemClock.elapsedRealtime() - blockT0} preDone=$preDone"
+                )
             } catch (e: Exception) {
                 if (closed.get()) return C.RESULT_END_OF_INPUT
                 // nt7: a failed download is not retryable by waiting — drop
@@ -1484,7 +1506,29 @@ internal class ParallelRangeDataSource(
             val future = activeSession.futures[chunkIndex] ?: return C.RESULT_END_OF_INPUT
             activeSession.noteRead(chunkIndex)
             try {
+                // RS_CHUNK_WAIT: read() blocks on the WHOLE chunk future, so
+                // ExoPlayer sees nothing of an 8 MB chunk until all 8 MB have
+                // landed -- even though the first 500 KB arrived in ~60 ms.
+                // Whether that gates the FIRST FRAME has never been measured,
+                // and three different fixes depend on the answer. If ExoPlayer
+                // renders before reading past BOOTSTRAP_READ_BYTES, chunk 0 is
+                // irrelevant to TTFF. If it reads 1-3 MB, raising the bootstrap
+                // constant is a one-line win. If it reads past a whole chunk,
+                // only progressive in-flight reads help.
+                //
+                // Correlate these against first_frame_rendered in the capture:
+                // the count before it, and the highest pos, is the answer.
+                // preDone separates a real stall from an already-complete chunk.
+                // site= distinguishes the two read() overloads; ExoPlayer's
+                // progressive path uses the ByteArray one.
+                val blockT0 = SystemClock.elapsedRealtime()
+                val preDone = future.isDone
                 currentChunk = future.get(60, TimeUnit.SECONDS)
+                Log.i(
+                    TAG,
+                    "RS_CHUNK_WAIT site=bytebuffer pos=$position chunk=$chunkIndex " +
+                        "waitMs=${SystemClock.elapsedRealtime() - blockT0} preDone=$preDone"
+                )
             } catch (e: Exception) {
                 if (closed.get()) return C.RESULT_END_OF_INPUT
                 // P-F1: mirror of the byte[] path — cancel before dropping,
