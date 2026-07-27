@@ -187,6 +187,38 @@ internal data class ExoConstructionFingerprint(
 )
 
 /**
+ * nt14: push the current player settings onto the shared media-source factory.
+ *
+ * Extracted from initializePlayer because the nt13 chunk-0 pre-start runs
+ * earlier, in switchToEpisodeStream, and the factory's geometry fields
+ * (parallel on/off, connection count, chunk size) are what the companion
+ * session store keys on. Applied only inside initializePlayer, the pre-start
+ * would key a session on whatever the PREVIOUS stream left behind, and the
+ * player would then decline to adopt it. Idempotent, so calling it from both
+ * sites is safe.
+ */
+internal fun PlayerRuntimeController.applyMediaSourceFactorySettings(playerSettings: PlayerSettings) {
+    if (playerSettings.bufferEngineEnabled) {
+        mediaSourceFactory.vodCacheEnabled = playerSettings.vodCacheEnabled
+        mediaSourceFactory.vodCacheSizeMode = playerSettings.vodCacheSizeMode
+        mediaSourceFactory.vodCacheSizeMb = playerSettings.vodCacheSizeMb
+    } else {
+        mediaSourceFactory.vodCacheEnabled = false
+    }
+
+    if (playerSettings.parallelNetworkEnabled) {
+        mediaSourceFactory.useParallelConnections = playerSettings.useParallelConnections
+        mediaSourceFactory.parallelConnectionCount = playerSettings.parallelConnectionCount
+        mediaSourceFactory.parallelChunkSizeKb = playerSettings.parallelChunkSizeKb
+        mediaSourceFactory.nuvioPerformanceModeEnabled = playerSettings.nuvioPerformanceModeEnabled
+    } else {
+        // Reset each playback so the factory doesn't keep last stream's state.
+        mediaSourceFactory.useParallelConnections = false
+        mediaSourceFactory.nuvioPerformanceModeEnabled = false
+    }
+}
+
+/**
  * nt10: returns true when an ExoPlayer was actually released, so the caller
  * can skip the settle that only a release needs.
  */
@@ -661,24 +693,7 @@ internal fun PlayerRuntimeController.initializePlayer(
             // (back buffer shrink + budget reduction) rather than blanket-disabling user
             // settings at init, since the stream content isn't known yet at this point.
             val bufferEngineEffective = playerSettings.bufferEngineEnabled
-            if (bufferEngineEffective) {
-                mediaSourceFactory.vodCacheEnabled = playerSettings.vodCacheEnabled
-                mediaSourceFactory.vodCacheSizeMode = playerSettings.vodCacheSizeMode
-                mediaSourceFactory.vodCacheSizeMb = playerSettings.vodCacheSizeMb
-            } else {
-                mediaSourceFactory.vodCacheEnabled = false
-            }
-
-            if (playerSettings.parallelNetworkEnabled) {
-                mediaSourceFactory.useParallelConnections = playerSettings.useParallelConnections
-                mediaSourceFactory.parallelConnectionCount = playerSettings.parallelConnectionCount
-                mediaSourceFactory.parallelChunkSizeKb = playerSettings.parallelChunkSizeKb
-                mediaSourceFactory.nuvioPerformanceModeEnabled = playerSettings.nuvioPerformanceModeEnabled
-            } else {
-                // Reset each playback so the factory doesn't keep last stream's state.
-                mediaSourceFactory.useParallelConnections = false
-                mediaSourceFactory.nuvioPerformanceModeEnabled = false
-            }
+            applyMediaSourceFactorySettings(playerSettings)
 
             // Log the effective state (post-gating), not the raw settings.
             Log.i(

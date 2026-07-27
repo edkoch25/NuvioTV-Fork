@@ -1281,12 +1281,20 @@ internal fun PlayerRuntimeController.switchToEpisodeStream(
     // datasource (measured across five transitions, 27 Jul 2026). Start chunk 0
     // into that gap. Fresh presses deliberately do not call this, so every
     // capture carries its own control arm.
-    runCatching {
-        mediaSourceFactory.prestartChunk0(
-            url = url,
-            headers = newHeaders,
-            filename = stream.behaviorHints?.filename
-        )
+    //
+    // nt14: the settings push must happen first. initializePlayer does it too,
+    // but that runs after this point, so without it the pre-start keys its
+    // session on the previous stream's geometry.
+    scope.launch {
+        val settingsForPrestart = playerSettingsDataStore.playerSettings.first()
+        applyMediaSourceFactorySettings(settingsForPrestart)
+        runCatching {
+            mediaSourceFactory.prestartChunk0(
+                url = url,
+                headers = newHeaders,
+                filename = stream.behaviorHints?.filename
+            )
+        }
     }
 
     val targetVideo = forcedTargetVideo
