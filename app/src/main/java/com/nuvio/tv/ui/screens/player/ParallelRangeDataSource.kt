@@ -186,7 +186,10 @@ internal class ParallelRangeDataSource(
 
         private class ChunkSession(
             val requestUri: Uri,
-            val requestHeaders: Map<String, String>,
+            // nt15: identity only, never used to build a request. Settable so a
+            // session adopted from the pre-start can take the open-time headers;
+            // otherwise every subsequent open would see a key mismatch.
+            @Volatile var requestHeaders: Map<String, String>,
             val chunkSize: Long,
             val chunkCap: Int,
             // nt2: size of the live prefetch window (effectivePrefetchDepth).
@@ -361,12 +364,27 @@ internal class ParallelRangeDataSource(
                 val pending = pendingChunkSession
                 if (pending != null) {
                     val pendingFresh = SystemClock.uptimeMillis() - pending.lastUsedAtMs <= RETAINED_SESSION_TTL_MS
+                    // nt15: the DataSpec header map is deliberately NOT part of this
+                    // test. media3 adds Icy-MetaData when ProgressiveMediaSource
+                    // builds the spec, so the pre-start -- which has no DataSpec --
+                    // can never predict it; that one header rejected every adoption
+                    // in the 27 Jul captures. Excluding it is safe because the field
+                    // is identity only: chunk downloads build their own DataSpec from
+                    // the URI and a byte range, and the real request headers come from
+                    // the OkHttp factory both sides share. URI and chunk geometry
+                    // still gate adoption, and both were already matching.
                     val pendingMatches = pendingFresh && !pending.abandoned.get() &&
-                        pending.requestUri == requestUri && pending.chunkSize == chunkSz &&
-                        pending.requestHeaders == requestHeaders
+                        pending.requestUri == requestUri && pending.chunkSize == chunkSz
                     pendingChunkSession = null
                     if (pendingMatches) {
-                        Log.i(TAG, "PRESTART: adopted pre-started session, chunk(s) held=${pending.futures.size}")
+                        Log.i(
+                            TAG,
+                            "PRESTART: adopted pre-started session, chunk(s) held=${pending.futures.size} " +
+                                "headerRekey=${pending.requestHeaders.keys.sorted()}->${requestHeaders.keys.sorted()}"
+                        )
+                        // Take the open-time headers so the ordinary session-identity
+                        // check keeps matching on every later open (seeks included).
+                        pending.requestHeaders = requestHeaders
                         pending.lastUsedAtMs = SystemClock.uptimeMillis()
                         currentChunkSession = pending
                         return pending
