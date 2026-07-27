@@ -206,6 +206,10 @@ internal class ParallelRangeDataSource(
             @Volatile var lastRateLimitAtMs: Long = 0L
             val rateLimitClampCount = AtomicInteger(0)
             val activeSources: MutableSet<DataSource> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+            // nt7 (progressive reads): live views of downloads in
+            // flight, keyed like futures. Entries are owned by the
+            // download attempt that registered them (two-arg remove).
+            val inFlight = ConcurrentHashMap<Long, InFlightChunk>()
             @Volatile var lastUsedAtMs: Long = SystemClock.uptimeMillis()
 
             fun touch(chunkIndex: Long) {
@@ -304,6 +308,7 @@ internal class ParallelRangeDataSource(
             }
             session.futures.clear()
             session.lastTouch.clear()
+            session.inFlight.clear()
         }
 
         /**
@@ -466,6 +471,25 @@ internal class ParallelRangeDataSource(
 
     private class DownloadedChunk(val buffer: PooledBuffer, val size: Int)
 
+    /**
+     * nt7 (progressive reads): live view of a chunk download in flight.
+     * [watermark] is volatile and written AFTER the bytes below it have
+     * landed, so a reader that loads it may safely read [0, watermark)
+     * through a duplicate() view. [lock] guards buffer release only:
+     * the failure path nulls and frees [buffer] under it, and readers
+     * copy out under it, so a freed (native) buffer is never touched.
+     * Success never releases here -- the buffer graduates into the
+     * completed DownloadedChunk and follows the session lifecycle.
+     * Bytes below the watermark are identical across retry attempts
+     * (same HTTP range of the same file), so a reader that consumed
+     * from a failed attempt has still served correct data.
+     */
+    private class InFlightChunk(buffer: PooledBuffer) {
+        val lock = Any()
+        var buffer: PooledBuffer? = buffer
+        @Volatile var watermark: Int = 0
+    }
+
     internal data class BootstrapCacheEntry(
         val requestUri: Uri,
         val startPosition: Long,
@@ -518,6 +542,7 @@ internal class ParallelRangeDataSource(
     // demonstrated sequential consumption, so side-cursor opens (tiny reads,
     // then reopen) never trigger the connections+1 chunk prefetch fan-out.
     private var bytesServedThisOpen: Long = 0L
+    private var inFlightServeLogged: Boolean = false
     // nt7 memory-tiered chunk cap: low-RAM devices keep nt6's ceiling
     // (connections + 2); high-RAM gets two extra chunks of LRU headroom.
     private val sessionChunkCap: Int = effectivePrefetchDepth +
@@ -859,6 +884,17 @@ internal class ParallelRangeDataSource(
             ensureChunkScheduled(chunkIndex)
             val future = activeSession.futures[chunkIndex] ?: return C.RESULT_END_OF_INPUT
             activeSession.noteRead(chunkIndex)
+            // nt7 (progressive reads): the 27 Jul capture shows read()
+            // blocked 525/648 ms on chunk 0's LAST byte while the ~2.5 MB
+            // it needed (bufferedMs=992 at 20.5 Mbps) had been on the
+            // device for hundreds of ms (~4.8 MB landed by arrival).
+            // Serve below the in-flight watermark instead; when nothing
+            // is available yet, fall through to the blocking path
+            // unchanged (RS_CHUNK_WAIT still prices it).
+            if (!future.isDone) {
+                val served = tryServeFromInFlight(activeSession, chunkIndex, buffer, offset, toRead)
+                if (served > 0) return served
+            }
             try {
                 // RS_CHUNK_WAIT: read() blocks on the WHOLE chunk future, so
                 // ExoPlayer sees nothing of an 8 MB chunk until all 8 MB have
@@ -977,6 +1013,61 @@ internal class ParallelRangeDataSource(
         // Keep the eviction cursor with the reader while the continuation runs.
         activeSession.noteRead(position / chunkSize)
         Log.d(TAG, "Continuation open at $position, $length bytes to boundary $end")
+    }
+
+    /** Free an in-flight attempt's buffer under its lock, so a reader
+     *  mid-copy can never touch freed (native) memory. */
+    private fun releaseInFlightBuffer(
+        activeSession: ChunkSession,
+        chunkIndex: Long,
+        inFlight: InFlightChunk,
+        buffer: PooledBuffer
+    ) {
+        synchronized(inFlight.lock) {
+            inFlight.buffer = null
+            activeSession.inFlight.remove(chunkIndex, inFlight)
+            releaseBuffer(buffer)
+        }
+    }
+
+    /**
+     * nt7 (progressive reads): serve player bytes from a chunk still
+     * downloading. Returns 0 when nothing below the watermark covers the
+     * read position, and the caller falls through to the existing
+     * blocking path unchanged. duplicate() keeps the download thread's
+     * position mutations unshared (P-F0b pattern); the copy-out runs
+     * under the attempt's release lock.
+     */
+    private fun tryServeFromInFlight(
+        activeSession: ChunkSession,
+        chunkIndex: Long,
+        target: ByteArray,
+        targetOffset: Int,
+        maxLength: Int
+    ): Int {
+        val inFlight = activeSession.inFlight[chunkIndex] ?: return 0
+        val offsetInChunk = (position % chunkSize).toInt()
+        val available = inFlight.watermark - offsetInChunk
+        if (available <= 0) return 0
+        val toCopy = minOf(maxLength, available)
+        synchronized(inFlight.lock) {
+            val buf = inFlight.buffer ?: return 0
+            val view = buf.byteBuffer.duplicate()
+            view.position(offsetInChunk)
+            view.get(target, targetOffset, toCopy)
+        }
+        if (!inFlightServeLogged) {
+            inFlightServeLogged = true
+            Log.i(
+                TAG,
+                "RS_INFLIGHT pos=$position chunk=$chunkIndex " +
+                    "watermark=${inFlight.watermark} served=$toCopy"
+            )
+        }
+        position += toCopy
+        bytesRemaining -= toCopy
+        bytesServedThisOpen += toCopy
+        return toCopy
     }
 
     private fun scheduleChunks() {
@@ -1113,7 +1204,7 @@ internal class ParallelRangeDataSource(
             // requested range is exact — a chunk that comes back short must
             // fail (and retry) rather than be cached as if complete.
             val expectedBytes = if (sessionLength > 0L) end - start else -1L
-            val chunk = readIntoChunk(activeSession, ds, future, expectedBytes)
+            val chunk = readIntoChunk(activeSession, chunkIndex, ds, future, expectedBytes)
             Log.d(TAG, "Successfully downloaded chunk $chunkIndex, size=${chunk.size} bytes")
             return chunk
         } finally {
@@ -1234,11 +1325,17 @@ internal class ParallelRangeDataSource(
     /** Read from an already-opened DataSource into a pooled chunk buffer. */
     private fun readIntoChunk(
         activeSession: ChunkSession,
+        chunkIndex: Long,
         ds: DataSource,
         future: CompletableFuture<*>,
         expectedBytes: Long
     ): DownloadedChunk {
         val buffer = acquireBuffer()
+        // nt7 (progressive reads): publish this attempt. Registered
+        // AFTER acquireBuffer so an allocation OOM never leaves a
+        // dangling entry; a retry attempt overwrites its predecessor.
+        val inFlight = InFlightChunk(buffer)
+        activeSession.inFlight[chunkIndex] = inFlight
         val tempArray = readBufferLocal.get()!!
         var totalRead = 0
         var consecutiveZeroReads = 0
@@ -1286,6 +1383,8 @@ internal class ParallelRangeDataSource(
                     consecutiveZeroReads = 0
                 }
                 totalRead += read
+                // Volatile store orders every buffer write above it.
+                inFlight.watermark = totalRead
             }
             // pre-nt3 short-chunk rejection: a premature EOF inside a known
             // range must not produce a cached "complete" chunk — a short
@@ -1295,14 +1394,17 @@ internal class ParallelRangeDataSource(
                 throw IOException("Short chunk: read $totalRead of $expectedBytes bytes")
             }
         } catch (e: Exception) {
-            releaseBuffer(buffer)
+            releaseInFlightBuffer(activeSession, chunkIndex, inFlight, buffer)
             if (activeSession.abandoned.get()) throw IOException("Session abandoned")
             throw e
         }
         if (activeSession.abandoned.get()) {
-            releaseBuffer(buffer)
+            releaseInFlightBuffer(activeSession, chunkIndex, inFlight, buffer)
             throw IOException("Session abandoned")
         }
+        // Success: the buffer graduates into the completed chunk; only
+        // the in-flight view is retired (ownership-gated).
+        activeSession.inFlight.remove(chunkIndex, inFlight)
         buffer.byteBuffer.flip()
         return DownloadedChunk(buffer, totalRead)
     }
@@ -1394,6 +1496,7 @@ internal class ParallelRangeDataSource(
         currentChunkReadOffset = 0
         bootstrapChunk = null
         bootstrapStartPosition = C.TIME_UNSET
+        inFlightServeLogged = false
     }
 
     override fun close() {
