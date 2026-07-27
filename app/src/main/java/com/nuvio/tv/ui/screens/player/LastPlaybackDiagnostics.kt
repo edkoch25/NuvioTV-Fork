@@ -63,6 +63,10 @@ data class LastPlaybackDiagnostics(
     val videoCodec: String? = null,       // e.g. "Dolby Vision", "HEVC", "AV1"
     val videoHdrType: String? = null,     // e.g. "Dolby Vision", "HDR10", "HLG", "SDR"
     val audioPath: String? = null,        // e.g. "TrueHD → Passthrough (TrueHD, 48 kHz, 8ch)"
+    // What the platform claimed the chain could take, captured at sink build. The
+    // per-format passthrough overrides exist because this is sometimes wrong, so the
+    // claim itself is the first thing worth seeing in a report.
+    val audioCapabilities: String? = null, // e.g. "direct: AC3 EAC3 TrueHD · absent: DTS DTS-HD · surround: MANUAL"
 
     // Buffer telemetry (rebuffers counted after first frame; re-persisted at playback end)
     val rebufferCount: Int = 0,
@@ -108,6 +112,7 @@ data class LastPlaybackDiagnostics(
         put("videoCodec", videoCodec ?: JSONObject.NULL)
         put("videoHdrType", videoHdrType ?: JSONObject.NULL)
         put("audioPath", audioPath ?: JSONObject.NULL)
+        put("audioCapabilities", audioCapabilities ?: JSONObject.NULL)
         put("rebufferCount", rebufferCount)
         put("rebufferTotalMs", rebufferTotalMs)
         put("result", result)
@@ -155,6 +160,7 @@ data class LastPlaybackDiagnostics(
                 videoCodec = o.optString("videoCodec", "").let { if (it.isBlank() || it == "null") null else it },
                 videoHdrType = o.optString("videoHdrType", "").let { if (it.isBlank() || it == "null") null else it },
                 audioPath = o.optString("audioPath", "").let { if (it.isBlank() || it == "null") null else it },
+                audioCapabilities = o.optString("audioCapabilities", "").let { if (it.isBlank() || it == "null") null else it },
                 rebufferCount = o.optInt("rebufferCount", 0),
                 rebufferTotalMs = o.optLong("rebufferTotalMs", 0L),
                 result = o.optString("result", "Pending")

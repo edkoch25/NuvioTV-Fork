@@ -2386,6 +2386,9 @@ private class SubtitleOffsetRenderersFactory(
             .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
             .setAudioProcessors(arrayOf(gainAudioProcessor))
         val baseAudioSink = builder.build()
+        // Read-only capability snapshot for the diagnostics page. Never opens an
+        // AudioTrack - startup IEC61937 activity is a wedge risk on some HALs.
+        AudioCapabilityReport.capture(context)
         val playbackSpeedAwareAudioSink = PlaybackSpeedAwareAudioSink(
             baseAudioSink,
             initialForcePcm,
@@ -3207,6 +3210,7 @@ private fun PlayerRuntimeController.recordFirstFrameDiagnostics(
             dvConversionOccurred
         ),
         audioPath = currentAudioPathDescription,
+        audioCapabilities = AudioCapabilityReport.latest,
         videoBitrate = run {
             val durationMsVal = player.duration.takeIf { it != C.TIME_UNSET } ?: 0L
             val sizeBytes = currentVideoSize
