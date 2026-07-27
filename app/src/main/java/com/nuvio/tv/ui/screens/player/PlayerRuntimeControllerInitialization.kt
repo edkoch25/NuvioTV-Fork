@@ -216,6 +216,7 @@ internal fun PlayerRuntimeController.applyMediaSourceFactorySettings(playerSetti
         mediaSourceFactory.useParallelConnections = false
         mediaSourceFactory.nuvioPerformanceModeEnabled = false
     }
+    lastAppliedPlayerSettings = playerSettings
 }
 
 /**

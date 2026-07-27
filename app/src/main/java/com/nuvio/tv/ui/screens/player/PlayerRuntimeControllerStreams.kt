@@ -1285,9 +1285,20 @@ internal fun PlayerRuntimeController.switchToEpisodeStream(
     // nt14: the settings push must happen first. initializePlayer does it too,
     // but that runs after this point, so without it the pre-start keys its
     // session on the previous stream's geometry.
-    scope.launch {
-        val settingsForPrestart = playerSettingsDataStore.playerSettings.first()
-        applyMediaSourceFactorySettings(settingsForPrestart)
+    //
+    // nt16: from the cached snapshot, synchronously. nt14 read the settings Flow
+    // here, and that Flow is cold -- every transition paid a full datastore read.
+    // Measured 27 Jul: chunk 0 started 982 and 935 ms after the URL was final,
+    // against 79 ms when this hook was synchronous. That was most of the head
+    // start the hook exists to create, spent acquiring settings that the previous
+    // initializePlayer had already resolved.
+    //
+    // A null snapshot means no playback has initialised yet, which cannot happen
+    // on a transition. Stale settings (changed mid-session, before the next
+    // initializePlayer) key the session on the wrong geometry, the player
+    // declines to adopt it, and the path falls back to opening as it always did.
+    lastAppliedPlayerSettings?.let { cachedSettings ->
+        applyMediaSourceFactorySettings(cachedSettings)
         runCatching {
             mediaSourceFactory.prestartChunk0(
                 url = url,
