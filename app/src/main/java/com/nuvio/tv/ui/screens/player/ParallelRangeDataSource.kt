@@ -72,6 +72,14 @@ internal class ParallelRangeDataSource(
         // construction (an exhausted window falls through to the chunk path).
         private const val BOOTSTRAP_READ_BYTES = 256L * 1024L
 
+        // nt9: backstop for the in-flight wait, not a schedule. Cold TTFB
+        // topped out at 985 ms and response headers at ~1,300 ms across the
+        // 26-27 Jul captures, so a download that has produced nothing after
+        // three seconds is not merely slow to start; exceeding the cap just
+        // restores the pre-nt7 blocking path, which has its own 60 s bound.
+        private const val IN_FLIGHT_WAIT_CAP_MS = 3_000L
+        private const val IN_FLIGHT_POLL_MS = 2L
+
         private val readBufferLocal = object : ThreadLocal<ByteArray>() {
             override fun initialValue(): ByteArray = ByteArray(READ_BUFFER_SIZE)
         }
@@ -911,7 +919,7 @@ internal class ParallelRangeDataSource(
             // is available yet, fall through to the blocking path
             // unchanged (RS_CHUNK_WAIT still prices it).
             if (!future.isDone) {
-                val served = tryServeFromInFlight(activeSession, chunkIndex, buffer, offset, toRead)
+                val served = awaitServeFromInFlight(activeSession, chunkIndex, future, buffer, offset, toRead)
                 if (served > 0) return served
             }
             try {
@@ -1050,43 +1058,84 @@ internal class ParallelRangeDataSource(
     }
 
     /**
-     * nt7 (progressive reads): serve player bytes from a chunk still
-     * downloading. Returns 0 when nothing below the watermark covers the
-     * read position, and the caller falls through to the existing
-     * blocking path unchanged. duplicate() keeps the download thread's
-     * position mutations unshared (P-F0b pattern); the copy-out runs
-     * under the attempt's release lock.
+     * nt9: serve player bytes from a chunk still downloading, WAITING for
+     * the first bytes rather than giving up when none have landed yet.
+     *
+     * nt7 shipped this as a single attempt and it worked -- because the
+     * probe's 289-438 ms round trip was accidentally load-bearing, giving
+     * the download a head start so the reader arrived to find megabytes
+     * buffered (27 Jul: watermark=3131392, zero pre-frame block). nt8 then
+     * removed the probe on a prefetched press, the reader began arriving
+     * ~107 ms after the download started -- before its response headers had
+     * returned at 372 ms -- and every attempt found watermark=0, fell
+     * through, and blocked on the WHOLE 8 MB chunk (RS_CHUNK_WAIT
+     * waitMs=2746, first frame 4,023 ms).
+     *
+     * Waiting makes the two compose: the reader is released the moment the
+     * first bytes land, whatever produced the gap. The wait ends early on
+     * completion, on failure (both surface as future.isDone, so the
+     * caller's existing handling runs), and on close. duplicate() keeps the
+     * download thread's position mutations unshared (P-F0b pattern); the
+     * copy-out runs under the attempt's release lock.
      */
-    private fun tryServeFromInFlight(
+    private fun awaitServeFromInFlight(
         activeSession: ChunkSession,
         chunkIndex: Long,
+        future: CompletableFuture<*>,
         target: ByteArray,
         targetOffset: Int,
         maxLength: Int
     ): Int {
-        val inFlight = activeSession.inFlight[chunkIndex] ?: return 0
         val offsetInChunk = (position % chunkSize).toInt()
-        val available = inFlight.watermark - offsetInChunk
-        if (available <= 0) return 0
-        val toCopy = minOf(maxLength, available)
-        synchronized(inFlight.lock) {
-            val buf = inFlight.buffer ?: return 0
-            val view = buf.byteBuffer.duplicate()
-            view.position(offsetInChunk)
-            view.get(target, targetOffset, toCopy)
+        val waitT0 = SystemClock.elapsedRealtime()
+        while (true) {
+            // Completion is the caller's business: its future.get() is then
+            // instant, and a FAILED download completes here too, so its
+            // existing retire-and-rethrow path runs unchanged.
+            if (closed.get() || future.isDone) return 0
+            // Re-read every pass: a retry attempt registers a fresh entry,
+            // and the first attempt may not have registered one yet.
+            val inFlight = activeSession.inFlight[chunkIndex]
+            if (inFlight != null) {
+                val available = inFlight.watermark - offsetInChunk
+                if (available > 0) {
+                    val toCopy = minOf(maxLength, available)
+                    synchronized(inFlight.lock) {
+                        val buf = inFlight.buffer ?: return 0
+                        val view = buf.byteBuffer.duplicate()
+                        view.position(offsetInChunk)
+                        view.get(target, targetOffset, toCopy)
+                    }
+                    val waitedMs = SystemClock.elapsedRealtime() - waitT0
+                    if (!inFlightServeLogged) {
+                        inFlightServeLogged = true
+                        Log.i(
+                            TAG,
+                            "RS_INFLIGHT pos=$position chunk=$chunkIndex " +
+                                "watermark=${inFlight.watermark} served=$toCopy waitMs=$waitedMs"
+                        )
+                    }
+                    position += toCopy
+                    bytesRemaining -= toCopy
+                    bytesServedThisOpen += toCopy
+                    return toCopy
+                }
+            }
+            if (SystemClock.elapsedRealtime() - waitT0 >= IN_FLIGHT_WAIT_CAP_MS) {
+                Log.i(
+                    TAG,
+                    "RS_INFLIGHT_GIVEUP pos=$position chunk=$chunkIndex " +
+                        "waitMs=${SystemClock.elapsedRealtime() - waitT0}"
+                )
+                return 0
+            }
+            try {
+                Thread.sleep(IN_FLIGHT_POLL_MS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return 0
+            }
         }
-        if (!inFlightServeLogged) {
-            inFlightServeLogged = true
-            Log.i(
-                TAG,
-                "RS_INFLIGHT pos=$position chunk=$chunkIndex " +
-                    "watermark=${inFlight.watermark} served=$toCopy"
-            )
-        }
-        position += toCopy
-        bytesRemaining -= toCopy
-        bytesServedThisOpen += toCopy
-        return toCopy
     }
 
     private fun scheduleChunks() {
