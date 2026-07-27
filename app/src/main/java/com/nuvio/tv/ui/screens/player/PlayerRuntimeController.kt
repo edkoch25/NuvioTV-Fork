@@ -359,6 +359,10 @@ class PlayerRuntimeController(
     internal var currentBitrateAwareLoadControl: BitrateAwareLoadControl? = null
     /** Back buffer (ms) the user configured, captured at build to restore once DV7 status is known. */
     internal var configuredBackBufferMs: Int = 0
+    /** nt12: the per-stream listeners registered on the live ExoPlayer, tracked so a
+     *  reused instance can drop the previous stream's listeners before re-adding. */
+    internal var currentExoPlayerListener: androidx.media3.common.Player.Listener? = null
+    internal var currentExoAnalyticsListener: androidx.media3.exoplayer.analytics.AnalyticsListener? = null
     internal var metaVideos: List<Video> = emptyList()
     internal var metaGenres: List<String> = emptyList()
     internal var metaCountry: String? = null

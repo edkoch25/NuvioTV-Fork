@@ -185,6 +185,8 @@ private fun PlayerRuntimeController.disposeExoPlayerBeforeRebuild(): Boolean {
     val releasedExistingPlayer = _exoPlayer != null
     _exoPlayer = null
     playbackSpeedAwareAudioSink = null
+    currentExoPlayerListener = null
+    currentExoAnalyticsListener = null
     return releasedExistingPlayer
 }
 
@@ -1112,7 +1114,9 @@ internal fun PlayerRuntimeController.initializePlayer(
                 }
                 prepare()
 
-                addListener(object : Player.Listener {
+                currentExoPlayerListener?.let { staleListener -> removeListener(staleListener) }
+                currentExoPlayerListener = null
+                val exoPlayerListenerForStream = object : Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         if (isReleasingPlayer) return
                         if (playbackState == Player.STATE_BUFFERING || playbackState == Player.STATE_READY) {
@@ -1597,9 +1601,13 @@ internal fun PlayerRuntimeController.initializePlayer(
                             )
                         }
                     }
-                })
+                }
+                currentExoPlayerListener = exoPlayerListenerForStream
+                addListener(exoPlayerListenerForStream)
 
-                addAnalyticsListener(object : AnalyticsListener {
+                currentExoAnalyticsListener?.let { staleListener -> removeAnalyticsListener(staleListener) }
+                currentExoAnalyticsListener = null
+                val exoAnalyticsListenerForStream = object : AnalyticsListener {
                     override fun onAudioTrackInitialized(
                         eventTime: AnalyticsListener.EventTime,
                         audioTrackConfig: androidx.media3.exoplayer.audio.AudioSink.AudioTrackConfig
@@ -1837,7 +1845,9 @@ internal fun PlayerRuntimeController.initializePlayer(
                             wasCanceled = wasCanceled
                         )
                     }
-                })
+                }
+                currentExoAnalyticsListener = exoAnalyticsListenerForStream
+                addAnalyticsListener(exoAnalyticsListenerForStream)
             }
             if (!startupSubtitlePreparation.fetchCompleted) {
                 fetchAddonSubtitles()
