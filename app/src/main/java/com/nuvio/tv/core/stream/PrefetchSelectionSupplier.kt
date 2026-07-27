@@ -66,10 +66,12 @@ class PrefetchSelectionSupplier @Inject constructor(
         groups: List<AddonStreams>,
         contentId: String?,
         season: Int?,
-        episode: Int?
+        episode: Int?,
+        bingeOverride: String? = null,
+        bingeGroupOnly: Boolean = false
     ): PrefetchedSelection? {
         val rankT0 = SystemClock.elapsedRealtime()
-        val selection = rank(groups, contentId)
+        val selection = rank(groups, contentId, bingeOverride, bingeGroupOnly)
         // §2.7(a): the cache's total_ms covers this call AND preResolve.
         // Logged here so the rank component needs no subtraction.
         val winnerLabel = if (selection == null) "none" else "yes"
@@ -94,7 +96,9 @@ class PrefetchSelectionSupplier @Inject constructor(
      */
     private suspend fun rank(
         groups: List<AddonStreams>,
-        contentId: String?
+        contentId: String?,
+        bingeOverride: String?,
+        bingeGroupOnly: Boolean
     ): PrefetchedSelection? {
         val settings = playerSettingsDataStore.playerSettings.first()
         if (settings.streamAutoPlayMode == StreamAutoPlayMode.MANUAL) return null
@@ -104,7 +108,18 @@ class PrefetchSelectionSupplier @Inject constructor(
             .enabledAddons()
             .map { it.displayName }
 
-        val preferredBingeGroup = if (
+        // nt10: a caller that KNOWS the group the press will prefer supplies
+        // it. The binge lookahead does -- it is running inside the playback
+        // whose group the next-episode path will match against -- and
+        // without it the two disagree whenever Prefer Binge Group is on and
+        // Reuse Binge Group is off. The 27 Jul capture measured that
+        // disagreement: the lookahead pre-resolved a 7.5 GB stream on
+        // nexus-198, the press selected a 2.1 GB one on nexus-170, so the
+        // pre-resolve missed DirectDebridResolver's cache (1,083 ms) and
+        // Patch B's prewarm had warmed the wrong node (2,093 ms cold probe).
+        // The cache-backed derivation stays the default for the three
+        // callers with no playback in progress.
+        val preferredBingeGroup = bingeOverride ?: if (
             settings.streamAutoPlayPreferBingeGroupForNextEpisode &&
             settings.streamAutoPlayReuseBingeGroup
         ) {
@@ -130,7 +145,8 @@ class PrefetchSelectionSupplier @Inject constructor(
         val winner = AutoPlaySelection.select(
             streams = allStreams,
             inputs = inputs,
-            debridStreamPreferences = preferences
+            debridStreamPreferences = preferences,
+            bingeGroupOnly = bingeGroupOnly
         ) ?: return null
 
         return PrefetchedSelection(

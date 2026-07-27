@@ -355,11 +355,23 @@ internal fun PlayerRuntimeController.maybePrefetchNextEpisodeForBinge(
         episode = nextVideo.episode,
         source = "binge_lookahead",
         rank = { groups ->
+            // nt10: mirror the press path exactly. PlayerRuntimeControllerStreams
+            // ranks the next episode with preferredBingeGroup =
+            // currentStreamBingeGroup (gated on the Prefer setting alone) and
+            // bingeGroupOnly = true; predicting that with different inputs
+            // pre-resolves a stream the press will not choose, which is worse
+            // than not predicting at all -- it spends a debrid add AND warms
+            // the wrong CDN node.
+            val preferBinge = playerSettingsDataStore.playerSettings.first()
+                .streamAutoPlayPreferBingeGroupForNextEpisode
+            val lookaheadBingeGroup = currentStreamBingeGroup?.takeIf { preferBinge }
             prefetchSelectionSupplier.rankAndPreResolve(
                 groups = groups,
                 contentId = contentId,
                 season = nextVideo.season,
-                episode = nextVideo.episode
+                episode = nextVideo.episode,
+                bingeOverride = lookaheadBingeGroup,
+                bingeGroupOnly = lookaheadBingeGroup != null
             )
         }
     )
