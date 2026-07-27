@@ -675,6 +675,20 @@
     <string name="audio_force_optical_passthrough_sub">Transcodes multichannel formats (TrueHD, DTS, AAC, etc.) to Dolby Digital 5.1 in real-time for Optical/SPDIF connections.</string>
     <string name="audio_mat_passthrough">TrueHD MAT Passthrough (experimental)</string>
     <string name="audio_mat_passthrough_sub">App-side MAT/IEC61937 packing for TrueHD. May help passthrough on some boxes; can cause dropouts or silence on others. Leave off unless testing.</string>
+    <!--
+      Per-format passthrough labels.
+
+      Copyright (C) 2005-2026 Team Kodi
+      SPDX-License-Identifier: GPL-2.0-or-later
+
+      The label wording follows Kodi's audio settings (xbmc/xbmc,
+      system/settings/settings.xml with resource.language.en_gb). "DTS capable receiver"
+      (#254) and "DTS-HD capable receiver" (#347) are used verbatim; the AC-3 (#364) and
+      TrueHD (#349) labels differ only in punctuation and a vendor prefix. Phrasing each
+      switch as a question about the user's hardware rather than about codec routing is
+      Kodi's design, and is why these read the way they do. Subtitles are original to
+      this fork.
+    -->
     <string name="audio_passthrough_ac3">Dolby Digital (AC-3) capable receiver</string>
     <string name="audio_passthrough_ac3_sub">Off decodes AC-3 to PCM in the app. Turn off only if your receiver or TV cannot decode AC-3.</string>
     <string name="audio_passthrough_eac3">Dolby Digital Plus (E-AC-3) capable receiver</string>

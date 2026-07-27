@@ -6,7 +6,9 @@
  *
  * The per-format passthrough model (one switch per compressed format, phrased as a
  * receiver capability) follows Kodi's audiooutput.{ac3,eac3,dts,truehd,dtshd}passthrough
- * settings. Kodi is GPL-2.0-or-later; no Kodi code is reproduced here.
+ * settings. Kodi is GPL-2.0-or-later. No Kodi code is reproduced in this file; the
+ * user-facing label wording, which is partly verbatim, is credited where it lives in
+ * res/values/strings.xml.
  */
 package com.nuvio.tv.core.player
 
