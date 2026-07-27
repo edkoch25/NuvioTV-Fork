@@ -371,7 +371,25 @@ internal class ParallelRangeDataSource(
                         currentChunkSession = pending
                         return pending
                     }
-                    Log.i(TAG, "PRESTART: pre-started session discarded (no match at open)")
+                    Log.i(
+                        TAG,
+                        "PRESTART: pre-started session discarded (no match at open) " +
+                            "uriMatch=${pending.requestUri == requestUri} " +
+                            "chunkMatch=${pending.chunkSize == chunkSz} " +
+                            "headerMatch=${pending.requestHeaders == requestHeaders} " +
+                            "fresh=$pendingFresh abandoned=${pending.abandoned.get()} " +
+                            "pendingChunk=${pending.chunkSize} openChunk=$chunkSz " +
+                            "pendingHeaderKeys=${pending.requestHeaders.keys.sorted()} " +
+                            "openHeaderKeys=${requestHeaders.keys.sorted()} " +
+                            "pendingHost=${pending.requestUri.host} openHost=${requestUri.host} " +
+                            "pendingScheme=${pending.requestUri.scheme} openScheme=${requestUri.scheme} " +
+                            "pendingPathLen=${pending.requestUri.path?.length ?: -1} " +
+                            "openPathLen=${requestUri.path?.length ?: -1} " +
+                            "pendingQueryLen=${pending.requestUri.query?.length ?: -1} " +
+                            "openQueryLen=${requestUri.query?.length ?: -1} " +
+                            "pendingUriLen=${pending.requestUri.toString().length} " +
+                            "openUriLen=${requestUri.toString().length}"
+                    )
                     teardownSessionLocked(pending, poolCap)
                 }
                 // nt6: fresh session, fresh clamp story for the HUD.
@@ -1834,7 +1852,13 @@ internal class ParallelRangeDataSource(
         session = pending
         try {
             ensureChunkScheduled(0L)
-            Log.i(TAG, "PRESTART: scheduled chunk 0 ahead of player build (chunkSize=${chunkSize / 1024L}KB)")
+            Log.i(
+                TAG,
+                "PRESTART: scheduled chunk 0 ahead of player build " +
+                    "chunkSize=${chunkSize / 1024L}KB host=${uri.host} " +
+                    "pathLen=${uri.path?.length ?: -1} queryLen=${uri.query?.length ?: -1} " +
+                    "uriLen=${uri.toString().length}"
+            )
         } finally {
             session = null
         }
