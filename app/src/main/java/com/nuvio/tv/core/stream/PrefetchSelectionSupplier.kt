@@ -67,11 +67,10 @@ class PrefetchSelectionSupplier @Inject constructor(
         contentId: String?,
         season: Int?,
         episode: Int?,
-        bingeOverride: String? = null,
-        bingeGroupOnly: Boolean = false
+        bingeOverride: String? = null
     ): PrefetchedSelection? {
         val rankT0 = SystemClock.elapsedRealtime()
-        val selection = rank(groups, contentId, bingeOverride, bingeGroupOnly)
+        val selection = rank(groups, contentId, bingeOverride)
         // §2.7(a): the cache's total_ms covers this call AND preResolve.
         // Logged here so the rank component needs no subtraction.
         val winnerLabel = if (selection == null) "none" else "yes"
@@ -97,8 +96,7 @@ class PrefetchSelectionSupplier @Inject constructor(
     private suspend fun rank(
         groups: List<AddonStreams>,
         contentId: String?,
-        bingeOverride: String?,
-        bingeGroupOnly: Boolean
+        bingeOverride: String?
     ): PrefetchedSelection? {
         val settings = playerSettingsDataStore.playerSettings.first()
         if (settings.streamAutoPlayMode == StreamAutoPlayMode.MANUAL) return null
@@ -145,8 +143,7 @@ class PrefetchSelectionSupplier @Inject constructor(
         val winner = AutoPlaySelection.select(
             streams = allStreams,
             inputs = inputs,
-            debridStreamPreferences = preferences,
-            bingeGroupOnly = bingeGroupOnly
+            debridStreamPreferences = preferences
         ) ?: return null
 
         return PrefetchedSelection(

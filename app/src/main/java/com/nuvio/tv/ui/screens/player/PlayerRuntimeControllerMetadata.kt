@@ -355,13 +355,23 @@ internal fun PlayerRuntimeController.maybePrefetchNextEpisodeForBinge(
         episode = nextVideo.episode,
         source = "binge_lookahead",
         rank = { groups ->
-            // nt10: mirror the press path exactly. PlayerRuntimeControllerStreams
-            // ranks the next episode with preferredBingeGroup =
-            // currentStreamBingeGroup (gated on the Prefer setting alone) and
-            // bingeGroupOnly = true; predicting that with different inputs
-            // pre-resolves a stream the press will not choose, which is worse
-            // than not predicting at all -- it spends a debrid add AND warms
-            // the wrong CDN node.
+            // Mirror what the press SETTLES on, which is not its first
+            // attempt. PlayerRuntimeControllerStreams tries
+            // tryBingeGroupOnly opportunistically while the scrape is still
+            // arriving, but when nothing matches it falls through on timeout
+            // to trySelectStream -- a full select carrying
+            // currentStreamBingeGroup as a PREFERENCE, not a requirement.
+            //
+            // nt10 replicated only the early attempt and stopped there. The
+            // 27 Jul capture caught the consequence immediately: no stream in
+            // the next episode shared the current binge group, the lookahead
+            // returned winner=none, and the transition paid a full 1,743 ms
+            // resolve and a 2,093 ms cold probe -- worse than the
+            // quality-ranked guess it replaced. The press meanwhile settled
+            // in 343 ms with selectCalls=2, which is the fall-through in the
+            // log. Cross-episode binge-group matches are the exception, not
+            // the rule, so the fall-through is the common path and the only
+            // one worth predicting.
             val preferBinge = playerSettingsDataStore.playerSettings.first()
                 .streamAutoPlayPreferBingeGroupForNextEpisode
             val lookaheadBingeGroup = currentStreamBingeGroup?.takeIf { preferBinge }
@@ -370,8 +380,7 @@ internal fun PlayerRuntimeController.maybePrefetchNextEpisodeForBinge(
                 contentId = contentId,
                 season = nextVideo.season,
                 episode = nextVideo.episode,
-                bingeOverride = lookaheadBingeGroup,
-                bingeGroupOnly = lookaheadBingeGroup != null
+                bingeOverride = lookaheadBingeGroup
             )
         }
     )
