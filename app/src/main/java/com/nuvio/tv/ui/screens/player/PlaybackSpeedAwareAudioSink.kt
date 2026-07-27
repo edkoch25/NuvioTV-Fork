@@ -659,6 +659,23 @@ internal class PlaybackSpeedAwareAudioSink(
         return shouldRejectDirectPlayback(format)
     }
 
+    /**
+     * True when the *user's per-format policy* is the reason this format is being
+     * decoded, as opposed to a speed change or a PCM-fallback recovery.
+     *
+     * The distinction matters because the renderer routes these to the bundled FFmpeg
+     * decoder rather than the device one. Measured on an Amlogic S905X5M:
+     * c2.amlogic.audio.decoder.dtshd folds a 5.1 DTS-HD MA track to 2 channels, where
+     * FFmpeg returns the full 6. A user who switches a format off is asking for it to
+     * be decoded properly, not halved, so the vendor decoder is not trusted for this
+     * path. Speed changes and 5001-error recovery keep the device decoder, which is
+     * cheaper and has never been implicated.
+     */
+    fun isPolicyDeniedPassthrough(format: Format): Boolean {
+        return isBitstreamFormat(format) &&
+            passthroughPolicy.deniesPassthrough(format.sampleMimeType)
+    }
+
     /** Returns true if audio is currently playing in direct passthrough mode. */
     fun isDirectPlaybackActive(): Boolean {
         val format = currentInputFormat ?: return false

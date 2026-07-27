@@ -138,6 +138,32 @@ class AudioPassthroughPolicyTest {
 
     // ── Group mapping ──
 
+    /**
+     * Commit 1c routes every policy-denied format to the bundled FFmpeg decoder, so a
+     * format that can be denied but has no FFmpeg codec would lose its audio track
+     * entirely. This pins that invariant: the deniable set must stay a subset of what
+     * FfmpegLibrary.getCodecName maps.
+     */
+    @Test
+    fun everyDeniableMimeHasABundledFfmpegDecoder() {
+        val ffmpegCodecByMime = mapOf(
+            MimeTypes.AUDIO_AC3 to "ac3",
+            MimeTypes.AUDIO_E_AC3 to "eac3",
+            MimeTypes.AUDIO_E_AC3_JOC to "eac3",
+            MimeTypes.AUDIO_TRUEHD to "truehd",
+            MimeTypes.AUDIO_DTS to "dca",
+            MimeTypes.AUDIO_DTS_HD to "dca"
+        )
+        for (mime in allBitstreamMimeTypes) {
+            if (AudioPassthroughPolicy.groupOf(mime) != null) {
+                assertTrue(
+                    "$mime is deniable but has no bundled FFmpeg decoder",
+                    ffmpegCodecByMime.containsKey(mime)
+                )
+            }
+        }
+    }
+
     @Test
     fun groupOf_mapsOnlyTheFiveDeniableFamilies() {
         assertEquals(Group.AC3, AudioPassthroughPolicy.groupOf(MimeTypes.AUDIO_AC3))
