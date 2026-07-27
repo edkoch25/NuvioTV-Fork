@@ -363,6 +363,9 @@ class PlayerRuntimeController(
      *  reused instance can drop the previous stream's listeners before re-adding. */
     internal var currentExoPlayerListener: androidx.media3.common.Player.Listener? = null
     internal var currentExoAnalyticsListener: androidx.media3.exoplayer.analytics.AnalyticsListener? = null
+    /** nt12: fingerprint of the constructor-baked configuration of the live ExoPlayer;
+     *  a transition may reuse the instance only when the fresh derivation matches. */
+    internal var lastExoConstructionFingerprint: ExoConstructionFingerprint? = null
     internal var metaVideos: List<Video> = emptyList()
     internal var metaGenres: List<String> = emptyList()
     internal var metaCountry: String? = null

@@ -155,6 +155,38 @@ private suspend fun PlayerRuntimeController.resolveCurrentStreamMimeType(
 }
 
 /**
+ * nt12: the constructor-baked configuration of an ExoPlayer build. Everything here
+ * is fixed at construction (renderers-factory arguments, load-control geometry,
+ * bandwidth-meter mode, the libass build fork); per-media-source and live-settable
+ * state (track-selector parameters, frame-rate strategy, extractors config) is
+ * deliberately excluded and re-applied on the reuse branch instead.
+ */
+internal data class ExoConstructionFingerprint(
+    val useLibass: Boolean,
+    val isHls: Boolean,
+    val performanceModeEnabled: Boolean,
+    val bufferEngineEnabled: Boolean,
+    val minBufferMs: Int,
+    val maxBufferMs: Int,
+    val bufferForPlaybackMs: Int,
+    val bufferForPlaybackAfterRebufferMs: Int,
+    val backBufferDurationMs: Int,
+    val targetBufferSizeMb: Int,
+    val bufferBudgetManaged: Boolean,
+    val allowLargeTargetBuffer: Boolean,
+    val downmixEnabled: Boolean,
+    val audioOutputChannels: com.nuvio.tv.data.local.AudioOutputChannels,
+    val maintainOriginalAudioOnDownmix: Boolean,
+    val forceOpticalPassthroughActive: Boolean,
+    val matPassthroughEnabled: Boolean,
+    val initialForcePcm: Boolean,
+    val extensionRendererMode: Int,
+    val convertToDv81Active: Boolean,
+    val mapDv7ToHevc: Boolean,
+    val tunnelingEnabled: Boolean
+)
+
+/**
  * nt10: returns true when an ExoPlayer was actually released, so the caller
  * can skip the settle that only a release needs.
  */
@@ -208,6 +240,12 @@ internal fun PlayerRuntimeController.initializePlayer(
 
     scope.launch {
         try {
+            // nt12 reuse: snapshot the live player's constructor-baked companions
+            // before the per-stream resets and construction overwrite the fields.
+            // Consumed only on the reuse branch at the build fork.
+            val previousTrackSelectorForReuse = trackSelector
+            val previousLoadControlForReuse = _loadControl
+            val previousBitrateAwareLoadControlForReuse = currentBitrateAwareLoadControl
             if (allowEngineFailover) {
                 startupEngineFailoverTriggered = false
             }
@@ -543,6 +581,9 @@ internal fun PlayerRuntimeController.initializePlayer(
                     .build()
             }
             val bandwidthMeter = SafeBandwidthMeter(rawBandwidthMeter, isHls)
+            // nt12 reuse: the custom-buffer budget must be visible at the build fork so a
+            // reused BitrateAwareLoadControl can be reset to build-equivalent state.
+            var customBufferBudgetBytes = 0L
             val loadControl = if (playerSettings.nuvioPerformanceModeEnabled) {
                 effectiveBackBufferDurationMs = NuvioExoPlayerPerformanceHelper.backBufferMs
                 currentBitrateAwareLoadControl = null
@@ -562,7 +603,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                     MemoryBudget.effectiveBufferMb(bufferSettings.targetBufferSizeMb)
                         .coerceAtLeast(MemoryBudget.MIN_BUFFER_MB)
                 }
-                val budgetBytes = budgetMbEffective.toLong() * 1024L * 1024L
+                customBufferBudgetBytes = budgetMbEffective.toLong() * 1024L * 1024L
                 // Build with the user's back buffer so seek-back works immediately (it can't
                 // depend on the player re-polling the LoadControl). First frame only lowers it
                 // to 0 for confirmed DV7 on low-RAM; everything else keeps it.
@@ -597,7 +638,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                     prioritizeTimeOverSizeThresholds = true,
                     backBufferDurationMs = backBufferMsAtBuild,
                     retainBackBufferFromKeyframe = true,
-                    budgetBytes = budgetBytes,
+                    budgetBytes = customBufferBudgetBytes,
                     allocator = allocator
                 ).also { currentBitrateAwareLoadControl = it }
             } else {
@@ -962,6 +1003,77 @@ internal fun PlayerRuntimeController.initializePlayer(
                     .build()
             }
 
+            val constructionFingerprint = ExoConstructionFingerprint(
+                useLibass = useLibass,
+                isHls = isHls,
+                performanceModeEnabled = playerSettings.nuvioPerformanceModeEnabled,
+                bufferEngineEnabled = playerSettings.bufferEngineEnabled,
+                minBufferMs = playerSettings.bufferSettings.minBufferMs,
+                maxBufferMs = playerSettings.bufferSettings.maxBufferMs,
+                bufferForPlaybackMs = playerSettings.bufferSettings.bufferForPlaybackMs,
+                bufferForPlaybackAfterRebufferMs = playerSettings.bufferSettings.bufferForPlaybackAfterRebufferMs,
+                backBufferDurationMs = playerSettings.bufferSettings.backBufferDurationMs,
+                targetBufferSizeMb = playerSettings.bufferSettings.targetBufferSizeMb,
+                bufferBudgetManaged = playerSettings.bufferBudgetManaged,
+                allowLargeTargetBuffer = playerSettings.allowLargeTargetBuffer,
+                downmixEnabled = playerSettings.downmixEnabled,
+                audioOutputChannels = playerSettings.audioOutputChannels,
+                maintainOriginalAudioOnDownmix = playerSettings.maintainOriginalAudioOnDownmix,
+                forceOpticalPassthroughActive = isForcePassthroughActive,
+                matPassthroughEnabled = playerSettings.matPassthroughEnabled,
+                initialForcePcm = hasTriedAudioPcmFallback,
+                extensionRendererMode = effectiveDecoderPriority,
+                convertToDv81Active = convertToDv81Active,
+                mapDv7ToHevc = mapDv7ToHevcEnabled,
+                tunnelingEnabled = playerSettings.tunnelingEnabled
+            )
+            val reuseCandidatePlayer = _exoPlayer
+            val reuseLivePlayer = reuseCandidatePlayer != null &&
+                !useLibass && !activePlayerUsesLibass &&
+                previousTrackSelectorForReuse != null &&
+                constructionFingerprint == lastExoConstructionFingerprint
+            if (reuseLivePlayer) {
+                Log.i(
+                    PlayerRuntimeController.TAG,
+                    "PLAYER_REUSE: reusing live ExoPlayer across transition; " +
+                        "fingerprint unchanged host=${url.safeHost()}"
+                )
+                // Drop the previous stream's listeners before anything below can
+                // fire a callback into them: a playWhenReady flip observed by the
+                // old listener would set userPausedManually and start the new
+                // stream paused.
+                currentExoPlayerListener?.let { staleListener ->
+                    runCatching { reuseCandidatePlayer!!.removeListener(staleListener) }
+                }
+                currentExoPlayerListener = null
+                currentExoAnalyticsListener?.let { staleListener ->
+                    runCatching { reuseCandidatePlayer!!.removeAnalyticsListener(staleListener) }
+                }
+                currentExoAnalyticsListener = null
+                runCatching { reuseCandidatePlayer!!.playWhenReady = false }
+                // The freshly derived companions cannot be installed on a live
+                // player; restore the live instances and re-apply the fresh
+                // per-stream state onto them.
+                previousTrackSelectorForReuse!!.setParameters(trackSelector!!.parameters)
+                trackSelector = previousTrackSelectorForReuse
+                _loadControl = previousLoadControlForReuse
+                currentBitrateAwareLoadControl = previousBitrateAwareLoadControlForReuse
+                previousBitrateAwareLoadControlForReuse?.let { liveLoadControl ->
+                    liveLoadControl.setBackBufferDurationOverrideMs(configuredBackBufferMs)
+                    effectiveBackBufferDurationMs = configuredBackBufferMs
+                    liveLoadControl.setBudgetBytesOverride(customBufferBudgetBytes)
+                }
+                reuseCandidatePlayer!!.setVideoChangeFrameRateStrategy(
+                    nuvioFrameRateStrategy(playerSettings.frameRateMatchingMode)
+                )
+                // The rebuild path wires the per-stream extractors factory inside
+                // buildDefaultPlayer(); the reuse path must wire it itself so DV
+                // conversion and subtitle parsing follow the new stream.
+                mediaSourceFactory.configureSubtitleParsing(
+                    extractorsFactory = effectiveExtractorsFactory,
+                    subtitleParserFactory = null
+                )
+            } else {
             // nt10: the settle exists to let a just-released decoder and its
             // surface stand down before the next one is built. On a FRESH
             // start there is nothing to stand down: the 27 Jul capture shows
@@ -996,6 +1108,8 @@ internal fun PlayerRuntimeController.initializePlayer(
             } else {
                 buildDefaultPlayer()
             }
+            } // nt12: end rebuild branch of the reuse fork
+            lastExoConstructionFingerprint = constructionFingerprint
             activePlayerUsesLibass = useLibass
             libassPipelineSwitchInFlight = false
 
