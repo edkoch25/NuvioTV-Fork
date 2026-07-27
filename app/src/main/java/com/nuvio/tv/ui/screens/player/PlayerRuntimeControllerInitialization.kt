@@ -180,6 +180,7 @@ internal data class ExoConstructionFingerprint(
     val forceOpticalPassthroughActive: Boolean,
     val matPassthroughEnabled: Boolean,
     val initialForcePcm: Boolean,
+    val audioPassthroughPolicy: com.nuvio.tv.core.player.AudioPassthroughPolicy,
     val extensionRendererMode: Int,
     val convertToDv81Active: Boolean,
     val mapDv7ToHevc: Boolean,
@@ -919,7 +920,23 @@ internal fun PlayerRuntimeController.initializePlayer(
             }
 
             // ── Renderers Factory (Combining Libass offsets + Audio Gain + Video Fallback) ──
+            // Per-format passthrough overrides. softwareDecodersAvailable gates the whole
+            // policy on a fallback decoder existing at all: with Decoder Priority set to
+            // "Device only" the FFmpeg audio renderer is absent from the renderer list, so
+            // denying passthrough could leave a format with no decoder. In that state the
+            // policy denies nothing. Hoisted to a local val because the reuse fingerprint
+            // below must see the same value the sink is built with.
+            val audioPassthroughPolicy = com.nuvio.tv.core.player.AudioPassthroughPolicy(
+                allowAc3 = playerSettings.allowAc3Passthrough,
+                allowEac3 = playerSettings.allowEac3Passthrough,
+                allowTrueHd = playerSettings.allowTrueHdPassthrough,
+                allowDts = playerSettings.allowDtsPassthrough,
+                allowDtsHd = playerSettings.allowDtsHdPassthrough,
+                softwareDecodersAvailable =
+                    effectiveDecoderPriority != DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF
+            )
             val renderersFactory = SubtitleOffsetRenderersFactory(
+                audioPassthroughPolicy = audioPassthroughPolicy,
                 context = context,
                 subtitleDelayUsProvider = subtitleDelayUs::get,
                 audioDelayUsProvider = audioDelayUs::get,
@@ -1038,6 +1055,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                 forceOpticalPassthroughActive = isForcePassthroughActive,
                 matPassthroughEnabled = playerSettings.matPassthroughEnabled,
                 initialForcePcm = hasTriedAudioPcmFallback,
+                audioPassthroughPolicy = audioPassthroughPolicy,
                 extensionRendererMode = effectiveDecoderPriority,
                 convertToDv81Active = convertToDv81Active,
                 mapDv7ToHevc = mapDv7ToHevcEnabled,
@@ -2327,6 +2345,7 @@ private class SubtitleOffsetRenderersFactory(
     private val downmixNormalizationEnabled: Boolean,
     private val forceOpticalPassthrough: Boolean,
     private val matPassthroughEnabled: Boolean,
+    private val audioPassthroughPolicy: com.nuvio.tv.core.player.AudioPassthroughPolicy,
     private val playbackSpeedProvider: () -> Float,
     private val initialForcePcm: Boolean = false,
     private val onPlaybackSpeedAwareAudioSinkCreated: (PlaybackSpeedAwareAudioSink) -> Unit,
@@ -2370,7 +2389,8 @@ private class SubtitleOffsetRenderersFactory(
         val playbackSpeedAwareAudioSink = PlaybackSpeedAwareAudioSink(
             baseAudioSink,
             initialForcePcm,
-            forceAc3Support = forceOpticalPassthrough
+            forceAc3Support = forceOpticalPassthrough,
+            passthroughPolicy = audioPassthroughPolicy
         )
         playbackSpeedAwareAudioSink.setInitialPlaybackSpeed(playbackSpeedProvider())
         onPlaybackSpeedAwareAudioSinkCreated(playbackSpeedAwareAudioSink)

@@ -75,6 +75,11 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
     onSetRememberAudioDelayPerDevice: (Boolean) -> Unit,
     onSetTunnelingEnabled: (Boolean) -> Unit,
     onSetForceOpticalPassthrough: (Boolean) -> Unit,
+    onSetAllowAc3Passthrough: (Boolean) -> Unit,
+    onSetAllowEac3Passthrough: (Boolean) -> Unit,
+    onSetAllowTrueHdPassthrough: (Boolean) -> Unit,
+    onSetAllowDtsPassthrough: (Boolean) -> Unit,
+    onSetAllowDtsHdPassthrough: (Boolean) -> Unit,
     onSetDv5ToDv81Enabled: (Boolean) -> Unit,
     onSetDv7ToDv81PreserveMappingEnabled: (Boolean) -> Unit,
     onSetStripHdr10PlusSei: (Boolean) -> Unit,
@@ -268,6 +273,76 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
                     onCheckedChange = onSetForceOpticalPassthrough,
                     onFocused = onItemFocused,
                     enabled = enabled && playerSettings.decoderPriority != 0
+                )
+            }
+        }
+
+        if (isExoEngine) {
+            item(key = "audio_passthrough_ac3") {
+                ToggleSettingsItem(
+                    icon = Icons.Default.VolumeUp,
+                    title = stringResource(R.string.audio_passthrough_ac3),
+                    subtitle = stringResource(R.string.audio_passthrough_ac3_sub),
+                    isChecked = playerSettings.allowAc3Passthrough,
+                    onCheckedChange = onSetAllowAc3Passthrough,
+                    onFocused = onItemFocused,
+                    enabled = enabled
+                )
+            }
+        }
+
+        if (isExoEngine) {
+            item(key = "audio_passthrough_eac3") {
+                ToggleSettingsItem(
+                    icon = Icons.Default.VolumeUp,
+                    title = stringResource(R.string.audio_passthrough_eac3),
+                    subtitle = stringResource(R.string.audio_passthrough_eac3_sub),
+                    isChecked = playerSettings.allowEac3Passthrough,
+                    onCheckedChange = onSetAllowEac3Passthrough,
+                    onFocused = onItemFocused,
+                    enabled = enabled
+                )
+            }
+        }
+
+        if (isExoEngine) {
+            item(key = "audio_passthrough_truehd") {
+                ToggleSettingsItem(
+                    icon = Icons.Default.VolumeUp,
+                    title = stringResource(R.string.audio_passthrough_truehd),
+                    subtitle = stringResource(R.string.audio_passthrough_truehd_sub),
+                    isChecked = playerSettings.allowTrueHdPassthrough,
+                    onCheckedChange = onSetAllowTrueHdPassthrough,
+                    onFocused = onItemFocused,
+                    enabled = enabled
+                )
+            }
+        }
+
+        if (isExoEngine) {
+            item(key = "audio_passthrough_dts") {
+                ToggleSettingsItem(
+                    icon = Icons.Default.VolumeUp,
+                    title = stringResource(R.string.audio_passthrough_dts),
+                    subtitle = stringResource(R.string.audio_passthrough_dts_sub),
+                    isChecked = playerSettings.allowDtsPassthrough,
+                    onCheckedChange = onSetAllowDtsPassthrough,
+                    onFocused = onItemFocused,
+                    enabled = enabled
+                )
+            }
+        }
+
+        if (isExoEngine) {
+            item(key = "audio_passthrough_dtshd") {
+                ToggleSettingsItem(
+                    icon = Icons.Default.VolumeUp,
+                    title = stringResource(R.string.audio_passthrough_dtshd),
+                    subtitle = stringResource(R.string.audio_passthrough_dtshd_sub),
+                    isChecked = playerSettings.allowDtsHdPassthrough,
+                    onCheckedChange = onSetAllowDtsHdPassthrough,
+                    onFocused = onItemFocused,
+                    enabled = enabled
                 )
             }
         }

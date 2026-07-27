@@ -675,6 +675,16 @@
     <string name="audio_force_optical_passthrough_sub">Transcodes multichannel formats (TrueHD, DTS, AAC, etc.) to Dolby Digital 5.1 in real-time for Optical/SPDIF connections.</string>
     <string name="audio_mat_passthrough">TrueHD MAT Passthrough (experimental)</string>
     <string name="audio_mat_passthrough_sub">App-side MAT/IEC61937 packing for TrueHD. May help passthrough on some boxes; can cause dropouts or silence on others. Leave off unless testing.</string>
+    <string name="audio_passthrough_ac3">Dolby Digital (AC-3) capable receiver</string>
+    <string name="audio_passthrough_ac3_sub">On: send AC-3 to your receiver untouched. Off: decode it in the app and send PCM. Turn off only if your receiver or TV cannot decode AC-3. Decoded output is governed by the Downmix and Output Channels settings.</string>
+    <string name="audio_passthrough_eac3">Dolby Digital Plus (E-AC-3) capable receiver</string>
+    <string name="audio_passthrough_eac3_sub">Covers Dolby Digital Plus and DD+ Atmos. Off decodes to PCM in the app. Turn off only if your receiver or TV cannot decode Dolby Digital Plus. Decoded output is governed by the Downmix and Output Channels settings.</string>
+    <string name="audio_passthrough_truehd">Dolby TrueHD capable receiver</string>
+    <string name="audio_passthrough_truehd_sub">Covers TrueHD and TrueHD Atmos. Off decodes to PCM in the app, which loses Atmos. Turn off only if your receiver or TV cannot decode TrueHD. Decoded output is governed by the Downmix and Output Channels settings.</string>
+    <string name="audio_passthrough_dts">DTS capable receiver</string>
+    <string name="audio_passthrough_dts_sub">Off decodes DTS to PCM in the app. Turn off if your receiver or TV cannot decode DTS - some TVs no longer license it. Decoded output is governed by the Downmix and Output Channels settings.</string>
+    <string name="audio_passthrough_dtshd">DTS-HD capable receiver</string>
+    <string name="audio_passthrough_dtshd_sub">Covers DTS-HD MA, DTS-HD HRA and DTS:X. Off decodes to PCM in the app, which loses DTS:X. Turn off if your receiver handles plain DTS but not DTS-HD. Decoded output is governed by the Downmix and Output Channels settings.</string>
     <!-- DV7 Handling Mode -->
     <string name="dv7_handling_title">Dolby Vision Handling</string>
     <string name="dv7_handling_dialog_subtitle">Choose how DV streams are processed at playback time.</string>

@@ -12,6 +12,7 @@ import androidx.media3.exoplayer.audio.AudioOffloadSupport
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.ForwardingAudioSink
+import com.nuvio.tv.core.player.AudioPassthroughPolicy
 import java.lang.reflect.Field
 import java.nio.ByteBuffer
 import kotlin.math.abs
@@ -44,7 +45,13 @@ internal class PlaybackSpeedAwareAudioSink(
      * support at the wrapper survives the dynamic-capabilities design. Scoped
      * to AC-3 <= 5.1 only: that is what S/PDIF can carry.
      */
-    private val forceAc3Support: Boolean = false
+    private val forceAc3Support: Boolean = false,
+    /**
+     * Which formats the user has said their receiver can decode. Defaults to
+     * [AudioPassthroughPolicy.ALLOW_ALL], which denies nothing - so a construction
+     * site that omits it keeps the platform-report behaviour rather than changing it.
+     */
+    private val passthroughPolicy: AudioPassthroughPolicy = AudioPassthroughPolicy.ALLOW_ALL
 ) : ForwardingAudioSink(delegate) {
 
     private val startedWithForcedPcm: Boolean = initialForcePcm
@@ -659,7 +666,15 @@ internal class PlaybackSpeedAwareAudioSink(
     }
 
     private fun shouldRejectDirectPlayback(format: Format): Boolean {
-        return isBitstreamFormat(format) && (forcePcmForCurrentSession || playbackSpeed != 1f)
+        if (!isBitstreamFormat(format)) return false
+        if (forcePcmForCurrentSession || playbackSpeed != 1f) return true
+        // Per-format user override. Inert on the default policy, so with every switch
+        // left on this function is behaviourally identical to before. This is the only
+        // chokepoint that needs to change: getFormatSupport, getFormatOffloadSupport,
+        // configure and shouldForcePcmForFormat all route through here, and
+        // PlaybackSpeedAwareAudioRenderer keys its decoder selection, bypass decision
+        // and offload support off shouldForcePcmForFormat.
+        return passthroughPolicy.deniesPassthrough(format.sampleMimeType)
     }
 
     private fun markPcmFallbackIfNeeded(format: Format?, speed: Float): Boolean {

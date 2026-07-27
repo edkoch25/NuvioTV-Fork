@@ -296,6 +296,11 @@ fun PlaybackSettingsContent(
                 },
                 onSetTunnelingEnabled = { enabled -> coroutineScope.launch { viewModel.setTunnelingEnabled(enabled) } },
                 onSetForceOpticalPassthrough = { enabled -> coroutineScope.launch { viewModel.setForceOpticalPassthrough(enabled) } },
+                onSetAllowAc3Passthrough = { allowed -> coroutineScope.launch { viewModel.setAllowAc3Passthrough(allowed) } },
+                onSetAllowEac3Passthrough = { allowed -> coroutineScope.launch { viewModel.setAllowEac3Passthrough(allowed) } },
+                onSetAllowTrueHdPassthrough = { allowed -> coroutineScope.launch { viewModel.setAllowTrueHdPassthrough(allowed) } },
+                onSetAllowDtsPassthrough = { allowed -> coroutineScope.launch { viewModel.setAllowDtsPassthrough(allowed) } },
+                onSetAllowDtsHdPassthrough = { allowed -> coroutineScope.launch { viewModel.setAllowDtsHdPassthrough(allowed) } },
                 onShowDv7HandlingModeDialog = { openDialog { showDv7HandlingModeDialog = true } },
                 onSetDv5ToDv81Enabled = { enabled ->
                     coroutineScope.launch { viewModel.setDv5ToDv81Enabled(enabled) }

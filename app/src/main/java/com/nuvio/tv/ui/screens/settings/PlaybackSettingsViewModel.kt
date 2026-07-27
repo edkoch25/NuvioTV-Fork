@@ -127,6 +127,26 @@ class PlaybackSettingsViewModel @Inject constructor(
         playerSettingsDataStore.setForceOpticalPassthrough(enabled)
     }
 
+    suspend fun setAllowAc3Passthrough(allowed: Boolean) {
+        playerSettingsDataStore.setAllowAc3Passthrough(allowed)
+    }
+
+    suspend fun setAllowEac3Passthrough(allowed: Boolean) {
+        playerSettingsDataStore.setAllowEac3Passthrough(allowed)
+    }
+
+    suspend fun setAllowTrueHdPassthrough(allowed: Boolean) {
+        playerSettingsDataStore.setAllowTrueHdPassthrough(allowed)
+    }
+
+    suspend fun setAllowDtsPassthrough(allowed: Boolean) {
+        playerSettingsDataStore.setAllowDtsPassthrough(allowed)
+    }
+
+    suspend fun setAllowDtsHdPassthrough(allowed: Boolean) {
+        playerSettingsDataStore.setAllowDtsHdPassthrough(allowed)
+    }
+
     suspend fun setMatPassthroughEnabled(enabled: Boolean) {
         playerSettingsDataStore.setMatPassthroughEnabled(enabled)
     }

@@ -225,6 +225,15 @@ data class PlayerSettings(
     val maintainOriginalAudioOnDownmix: Boolean = true,
     val tunnelingEnabled: Boolean = false,
     val forceOpticalPassthrough: Boolean = false,
+    // Per-format passthrough overrides. True (the default) delegates to the
+    // platform's capability report exactly as before; false denies passthrough for
+    // that format so the renderer decodes it to PCM. For chains whose EDID claims a
+    // format the receiver cannot actually decode.
+    val allowAc3Passthrough: Boolean = true,
+    val allowEac3Passthrough: Boolean = true,
+    val allowTrueHdPassthrough: Boolean = true,
+    val allowDtsPassthrough: Boolean = true,
+    val allowDtsHdPassthrough: Boolean = true,
     // §9.5: route TrueHD through the app-side MAT/IEC61937 packer instead of the
     // vendor HAL. Off by default; only takes effect on boxes that accept an
     // ENCODING_IEC61937 AudioTrack (falls back to normal passthrough otherwise).
@@ -473,6 +482,11 @@ class PlayerSettingsDataStore @Inject constructor(
         booleanPreferencesKey("downmix_normalization_enabled")
     private val tunnelingEnabledKey = booleanPreferencesKey("tunneling_enabled")
     private val forceOpticalPassthroughKey = booleanPreferencesKey("force_optical_passthrough")
+    private val allowAc3PassthroughKey = booleanPreferencesKey("allow_ac3_passthrough")
+    private val allowEac3PassthroughKey = booleanPreferencesKey("allow_eac3_passthrough")
+    private val allowTrueHdPassthroughKey = booleanPreferencesKey("allow_truehd_passthrough")
+    private val allowDtsPassthroughKey = booleanPreferencesKey("allow_dts_passthrough")
+    private val allowDtsHdPassthroughKey = booleanPreferencesKey("allow_dts_hd_passthrough")
     private val matPassthroughEnabledKey = booleanPreferencesKey("mat_passthrough_enabled")
     private val skipSilenceKey = booleanPreferencesKey("skip_silence")
     private val audioAmplificationDbKey = intPreferencesKey("audio_amplification_db")
@@ -816,6 +830,11 @@ class PlayerSettingsDataStore @Inject constructor(
                         ?: !(prefs[downmixNormalizationEnabledLegacyKey] ?: false),
                 tunnelingEnabled = prefs[tunnelingEnabledKey] ?: false,
                 forceOpticalPassthrough = prefs[forceOpticalPassthroughKey] ?: false,
+                allowAc3Passthrough = prefs[allowAc3PassthroughKey] ?: true,
+                allowEac3Passthrough = prefs[allowEac3PassthroughKey] ?: true,
+                allowTrueHdPassthrough = prefs[allowTrueHdPassthroughKey] ?: true,
+                allowDtsPassthrough = prefs[allowDtsPassthroughKey] ?: true,
+                allowDtsHdPassthrough = prefs[allowDtsHdPassthroughKey] ?: true,
                 matPassthroughEnabled = prefs[matPassthroughEnabledKey] ?: false,
                 skipSilence = prefs[skipSilenceKey] ?: false,
                 audioAmplificationDb = (prefs[audioAmplificationDbKey] ?: 0).coerceIn(
@@ -1048,6 +1067,36 @@ class PlayerSettingsDataStore @Inject constructor(
     suspend fun setForceOpticalPassthrough(enabled: Boolean) {
         store().edit { prefs ->
             prefs[forceOpticalPassthroughKey] = enabled
+        }
+    }
+
+    suspend fun setAllowAc3Passthrough(allowed: Boolean) {
+        store().edit { prefs ->
+            prefs[allowAc3PassthroughKey] = allowed
+        }
+    }
+
+    suspend fun setAllowEac3Passthrough(allowed: Boolean) {
+        store().edit { prefs ->
+            prefs[allowEac3PassthroughKey] = allowed
+        }
+    }
+
+    suspend fun setAllowTrueHdPassthrough(allowed: Boolean) {
+        store().edit { prefs ->
+            prefs[allowTrueHdPassthroughKey] = allowed
+        }
+    }
+
+    suspend fun setAllowDtsPassthrough(allowed: Boolean) {
+        store().edit { prefs ->
+            prefs[allowDtsPassthroughKey] = allowed
+        }
+    }
+
+    suspend fun setAllowDtsHdPassthrough(allowed: Boolean) {
+        store().edit { prefs ->
+            prefs[allowDtsHdPassthroughKey] = allowed
         }
     }
 
