@@ -119,6 +119,54 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
         customSubtitleParserFactory = subtitleParserFactory
     }
 
+    /**
+     * nt13: the chunk-session shape for one stream -- resolved mime, whether the
+     * chunk-session source engages at all, and the connection/chunk geometry.
+     *
+     * Extracted so the chunk-0 pre-start path derives it through exactly the same
+     * code createMediaSource does. The companion session store keys on the request
+     * URI *and* the chunk size, so a second derivation that drifted by even one
+     * branch would create a session the player then declines to adopt -- silently
+     * paying for a chunk nobody reads. One function, two callers, no drift.
+     */
+    private data class ChunkSessionShape(
+        val resolvedMimeType: String?,
+        val isHls: Boolean,
+        val isDash: Boolean,
+        val mp4SessionMode: Boolean,
+        val useChunkSessionSource: Boolean,
+        val effectiveConnections: Int,
+        val effectiveChunkBytes: Long
+    )
+
+    private fun resolveChunkSessionShape(
+        url: String,
+        filename: String?,
+        responseHeaders: Map<String, String>,
+        mimeTypeOverride: String?
+    ): ChunkSessionShape {
+        val resolvedMimeType = mimeTypeOverride ?: inferMimeType(
+            url = url,
+            filename = filename,
+            responseHeaders = responseHeaders
+        )
+        val isHls = resolvedMimeType == MimeTypes.APPLICATION_M3U8
+        val isDash = resolvedMimeType == MimeTypes.APPLICATION_MPD
+        val mp4SessionMode = !useParallelConnections && !isHls && !isDash &&
+            resolvedMimeType == MimeTypes.VIDEO_MP4
+        val useChunkSessionSource = (useParallelConnections || mp4SessionMode) && !isHls && !isDash
+        return ChunkSessionShape(
+            resolvedMimeType = resolvedMimeType,
+            isHls = isHls,
+            isDash = isDash,
+            mp4SessionMode = mp4SessionMode,
+            useChunkSessionSource = useChunkSessionSource,
+            effectiveConnections = if (mp4SessionMode) 1 else parallelConnectionCount,
+            effectiveChunkBytes =
+                if (mp4SessionMode) MP4_SESSION_CHUNK_BYTES else parallelChunkSizeKb.toLong() * 1024L
+        )
+    }
+
     fun createMediaSource(
         context: Context,
         url: String,
@@ -133,13 +181,15 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
         val sanitizedHeaders = sanitizeHeaders(headers)
         val httpDataSourceFactory = PlayerPlaybackNetworking.createDataSourceFactory(context, sanitizedHeaders)
 
-        val resolvedMimeType = mimeTypeOverride ?: inferMimeType(
+        val chunkSessionShape = resolveChunkSessionShape(
             url = url,
             filename = filename,
-            responseHeaders = responseHeaders
+            responseHeaders = responseHeaders,
+            mimeTypeOverride = mimeTypeOverride
         )
-        val isHls = resolvedMimeType == MimeTypes.APPLICATION_M3U8
-        val isDash = resolvedMimeType == MimeTypes.APPLICATION_MPD
+        val resolvedMimeType = chunkSessionShape.resolvedMimeType
+        val isHls = chunkSessionShape.isHls
+        val isDash = chunkSessionShape.isDash
 
         val mediaItemBuilder = MediaItem.Builder().setUri(url)
         resolvedMimeType?.let(mediaItemBuilder::setMimeType)
@@ -163,9 +213,8 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
         // prefetch caps lookahead at two chunks; side cursors fetch only the
         // chunk they touch). HLS/DASH, non-MP4 progressive, and parallel-on
         // behaviour are unchanged.
-        val mp4SessionMode = !useParallelConnections && !isHls && !isDash &&
-            resolvedMimeType == MimeTypes.VIDEO_MP4
-        val useChunkSessionSource = (useParallelConnections || mp4SessionMode) && !isHls && !isDash
+        val mp4SessionMode = chunkSessionShape.mp4SessionMode
+        val useChunkSessionSource = chunkSessionShape.useChunkSessionSource
         parallelStartupPrefetchUnlocked.set(!useChunkSessionSource)
         val progressiveUpstreamFactory: DataSource.Factory = if (useChunkSessionSource) {
             if (mp4SessionMode) {
@@ -181,9 +230,8 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
                 setUserAgent(DEFAULT_USER_AGENT)
             }
             run {
-                val effectiveConnections = if (mp4SessionMode) 1 else parallelConnectionCount
-                val effectiveChunkBytes =
-                    if (mp4SessionMode) MP4_SESSION_CHUNK_BYTES else parallelChunkSizeKb.toLong() * 1024L
+                val effectiveConnections = chunkSessionShape.effectiveConnections
+                val effectiveChunkBytes = chunkSessionShape.effectiveChunkBytes
                 ParallelRangeDataSource.Factory(
                     okHttpFactory,
                     effectiveConnections,
