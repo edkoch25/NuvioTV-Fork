@@ -1275,6 +1275,20 @@ internal fun PlayerRuntimeController.switchToEpisodeStream(
     val newHeaders = PlayerMediaSourceFactory.sanitizeHeaders(
         stream.behaviorHints?.proxyHeaders?.request
     )
+
+    // nt13: the URL and headers are final here, the outgoing stream is already
+    // stopped, and the player is still ~1.3-3.1 s away from opening the
+    // datasource (measured across five transitions, 27 Jul 2026). Start chunk 0
+    // into that gap. Fresh presses deliberately do not call this, so every
+    // capture carries its own control arm.
+    runCatching {
+        mediaSourceFactory.prestartChunk0(
+            url = url,
+            headers = newHeaders,
+            filename = stream.behaviorHints?.filename
+        )
+    }
+
     val targetVideo = forcedTargetVideo
         ?: _uiState.value.episodes.firstOrNull { it.id == _uiState.value.episodeStreamsForVideoId }
 

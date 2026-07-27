@@ -167,6 +167,45 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
         )
     }
 
+    /**
+     * nt13: schedule chunk 0 for [url] before the player is built. No-op unless the
+     * chunk-session source would actually engage for this stream, and no-op in MP4
+     * session mode -- that shape depends on the resolved mime type, which is firmer
+     * at createMediaSource time than it is here, and a geometry mismatch costs a
+     * wasted chunk. Safe to call more than once for the same URL.
+     */
+    fun prestartChunk0(
+        url: String,
+        headers: Map<String, String>,
+        filename: String? = null,
+        responseHeaders: Map<String, String> = emptyMap(),
+        mimeTypeOverride: String? = null
+    ) {
+        val shape = resolveChunkSessionShape(
+            url = url,
+            filename = filename,
+            responseHeaders = responseHeaders,
+            mimeTypeOverride = mimeTypeOverride
+        )
+        if (!shape.useChunkSessionSource || shape.mp4SessionMode) return
+        val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return
+        val okHttpFactory = OkHttpDataSource.Factory(chunkSessionHttpClient).apply {
+            setDefaultRequestProperties(sanitizeHeaders(headers))
+            setUserAgent(DEFAULT_USER_AGENT)
+        }
+        ParallelRangeDataSource.Factory(
+            okHttpFactory,
+            shape.effectiveConnections,
+            shape.effectiveChunkBytes,
+            useNativeMemory = nuvioPerformanceModeEnabled,
+            prefetchDepthChunks = computePrefetchDepthChunks(
+                shape.effectiveConnections,
+                shape.effectiveChunkBytes,
+                shape.mp4SessionMode
+            )
+        ).prestartChunk0(uri)
+    }
+
     fun createMediaSource(
         context: Context,
         url: String,

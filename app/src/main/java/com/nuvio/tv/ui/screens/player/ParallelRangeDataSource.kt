@@ -266,6 +266,13 @@ internal class ParallelRangeDataSource(
 
         private val sessionLock = Any()
         private var currentChunkSession: ChunkSession? = null
+        // nt13: a session created speculatively at stream-resolve time, holding a
+        // chunk-0 download that is already in flight before the player exists.
+        // Kept in its own slot on purpose: on a transition the OUTGOING stream is
+        // still playing and still owns currentChunkSession, so a pre-start must
+        // never tear that down. The old session dies at adoption instead -- the
+        // moment the player commits to the new source.
+        private var pendingChunkSession: ChunkSession? = null
 
         /** Release one session buffer: recycle to the pool, or free directly on teardown. */
         private fun releaseSessionBuffer(buffer: PooledBuffer, chunkSz: Long, poolCap: Int) {
@@ -343,6 +350,29 @@ internal class ParallelRangeDataSource(
                         return existing
                     }
                     teardownSessionLocked(existing, poolCap)
+                    currentChunkSession = null
+                }
+                // nt13: adopt a pre-started session when the player opens the very
+                // URI it was created for. Chunk 0 is already downloading (or done),
+                // so this open skips the wait that would otherwise start here.
+                // Geometry is part of the key: a shape mismatch means the pre-start
+                // derived differently from createMediaSource, and adopting would be
+                // worse than starting clean.
+                val pending = pendingChunkSession
+                if (pending != null) {
+                    val pendingFresh = SystemClock.uptimeMillis() - pending.lastUsedAtMs <= RETAINED_SESSION_TTL_MS
+                    val pendingMatches = pendingFresh && !pending.abandoned.get() &&
+                        pending.requestUri == requestUri && pending.chunkSize == chunkSz &&
+                        pending.requestHeaders == requestHeaders
+                    pendingChunkSession = null
+                    if (pendingMatches) {
+                        Log.i(TAG, "PRESTART: adopted pre-started session, chunk(s) held=${pending.futures.size}")
+                        pending.lastUsedAtMs = SystemClock.uptimeMillis()
+                        currentChunkSession = pending
+                        return pending
+                    }
+                    Log.i(TAG, "PRESTART: pre-started session discarded (no match at open)")
+                    teardownSessionLocked(pending, poolCap)
                 }
                 // nt6: fresh session, fresh clamp story for the HUD.
                 hudClampLatched = false
@@ -363,6 +393,44 @@ internal class ParallelRangeDataSource(
             synchronized(sessionLock) {
                 currentChunkSession?.let { teardownSessionLocked(it, poolCap = 0) }
                 currentChunkSession = null
+                // nt13: a pre-start that was never adopted must not outlive the player.
+                pendingChunkSession?.let { teardownSessionLocked(it, poolCap = 0) }
+                pendingChunkSession = null
+            }
+        }
+
+        /**
+         * nt13: create the pending session for [requestUri] if one is not already
+         * usable. Returns null when a pre-start would be pointless (the live session
+         * already serves this URI) or unsafe (a pending session for this URI exists).
+         */
+        private fun obtainPendingSession(
+            requestUri: Uri,
+            requestHeaders: Map<String, String>,
+            chunkSz: Long,
+            chunkCap: Int,
+            poolCap: Int,
+            prefetchWindow: Int
+        ): ChunkSession? {
+            synchronized(sessionLock) {
+                val live = currentChunkSession
+                if (live != null && !live.abandoned.get() && live.requestUri == requestUri &&
+                    live.chunkSize == chunkSz && live.requestHeaders == requestHeaders
+                ) {
+                    return null
+                }
+                val existingPending = pendingChunkSession
+                if (existingPending != null) {
+                    if (!existingPending.abandoned.get() && existingPending.requestUri == requestUri &&
+                        existingPending.chunkSize == chunkSz && existingPending.requestHeaders == requestHeaders
+                    ) {
+                        return null
+                    }
+                    teardownSessionLocked(existingPending, poolCap)
+                }
+                val created = ChunkSession(requestUri, requestHeaders, chunkSz, chunkCap, prefetchWindow)
+                pendingChunkSession = created
+                return created
             }
         }
 
@@ -1748,6 +1816,31 @@ internal class ParallelRangeDataSource(
     }
 
     /**
+     * nt13: schedule chunk 0 for [uri] onto a pending session, before the player
+     * exists. Measured on 27 Jul 2026, chunk 0 starts 1,268-3,065 ms after the
+     * stream URL is final -- the whole probe-and-build prefix is dead time from
+     * chunk 0's point of view. Downloading needs neither the probe nor the file
+     * length: downloadChunkOnce ranges against requestUri and, with no session
+     * length yet, takes start + chunkSize.
+     *
+     * This instance is a throwaway scheduler: it borrows its own session field so
+     * ensureChunkScheduled can run, then drops it. Ownership of the download sits
+     * with the session (nt7), which outlives every instance.
+     */
+    internal fun prestartChunk0(uri: Uri) {
+        val pending = obtainPendingSession(
+            uri, emptyMap(), chunkSize, sessionChunkCap, maxPoolSize, effectivePrefetchDepth
+        ) ?: return
+        session = pending
+        try {
+            ensureChunkScheduled(0L)
+            Log.i(TAG, "PRESTART: scheduled chunk 0 ahead of player build (chunkSize=${chunkSize / 1024L}KB)")
+        } finally {
+            session = null
+        }
+    }
+
+    /**
      * Factory for creating ParallelRangeDataSource instances.
      */
     class Factory(
@@ -1762,6 +1855,15 @@ internal class ParallelRangeDataSource(
     ) : DataSource.Factory {
         @Volatile
         private var startupBootstrapCache: BootstrapCacheEntry? = null
+
+        /**
+         * nt13: pre-start chunk 0 through a throwaway instance of this factory, so
+         * the session geometry is derived by exactly the code that will later open
+         * the stream.
+         */
+        fun prestartChunk0(uri: Uri) {
+            (createDataSource() as ParallelRangeDataSource).prestartChunk0(uri)
+        }
 
         override fun createDataSource(): DataSource {
             return ParallelRangeDataSource(
