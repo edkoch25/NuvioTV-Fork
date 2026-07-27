@@ -639,12 +639,28 @@ internal class ParallelRangeDataSource(
                 remaining
             }
             bootstrapPrefetchDeferred = true
-            // S1: only when the target chunk is not already held. A reopen INTO a
-            // held chunk (the fill reopen after the tail seek) keeps today's
-            // instant path, which is what preserves its ~600 ms buffered head
-            // start at first frame.
-            pendingContinuationOpen = allowContinuationReopen &&
-                attachedSession.futures[position / chunkSize] == null
+            // nt8: the tail seek may land inside the prefetched Cues
+            // window. Serving it through the existing bootstrap-window
+            // machinery (bootstrapChunk at an arbitrary start position)
+            // replaces the bounded continuation GET -- the 700-1,050 ms
+            // tail leg measured across the 26-27 Jul captures -- with a
+            // heap read. A miss keeps today's path unchanged.
+            val cachedTail = PrefetchWindowStore.peekTail(dataSpec.uri, position)
+            if (cachedTail != null) {
+                bootstrapChunk = DownloadedChunk(
+                    PooledBuffer(null, ByteBuffer.wrap(cachedTail.bootstrapData)),
+                    cachedTail.bootstrapSize
+                )
+                bootstrapStartPosition = cachedTail.startPosition
+                pendingContinuationOpen = false
+            } else {
+                // S1: only when the target chunk is not already held. A reopen INTO a
+                // held chunk (the fill reopen after the tail seek) keeps today's
+                // instant path, which is what preserves its ~600 ms buffered head
+                // start at first frame.
+                pendingContinuationOpen = allowContinuationReopen &&
+                    attachedSession.futures[position / chunkSize] == null
+            }
             Log.d(
                 TAG,
                 "Attached to warm session for reopen at $position, " +
@@ -653,7 +669,10 @@ internal class ParallelRangeDataSource(
             return bytesRemaining
         }
 
-        consumeBootstrapCache(dataSpec)?.let { cached ->
+        // nt8: the prefetch-time prewarm may have captured this exact
+        // window (same URI, position 0, 256 KiB) plus the total length --
+        // in which case the probe round trip is skipped entirely.
+        (consumeBootstrapCache(dataSpec) ?: PrefetchWindowStore.consumeHead(dataSpec))?.let { cached ->
             resolvedUri = cached.resolvedUri
             onResolvedUri(resolvedUri)
             totalFileLength = cached.totalFileLength
@@ -1722,5 +1741,77 @@ internal class ParallelRangeDataSource(
                 }
             )
         }
+    }
+}
+
+/**
+ * nt8: single-slot head + tail byte windows captured by the prefetch-time
+ * prewarm (PlayerPlaybackNetworking), consumed by ParallelRangeDataSource.
+ *
+ * The head IS the probe: same URI, position 0, the same 256 KiB window,
+ * plus the total length from the 206's Content-Range -- everything open()
+ * otherwise pays a network round trip to learn (289-1,023 ms probeOpen
+ * across the 27 Jul capture). The tail is the Matroska Cues window the
+ * extractor reads next (last 1 MiB; the reference file's tail leg read
+ * 789 KB), which otherwise costs a bounded continuation GET.
+ *
+ * Ownership/threading: entries hold immutable heap arrays behind
+ * @Volatile single slots; writers are OkHttp callback threads, readers
+ * the player's open() path. Head consumption is one-shot (mirroring the
+ * instance-level startupBootstrapCache semantics); the tail is
+ * non-clearing within TTL so re-seeks into the Cues stay free. A URI
+ * mismatch, an expired TTL, or an empty slot all fall through to today's
+ * network path. Cached bytes stay valid even if the CDN link later
+ * expires -- they were already downloaded; expiry surfaces on the chunk
+ * downloads exactly as it does today.
+ *
+ * Upstream: NuvioMedia/NuvioTV. Licensed under GPL-3.0.
+ */
+internal object PrefetchWindowStore {
+    private const val TAG = "ParallelRangeDS"
+    private const val TTL_MS = 300_000L
+    const val TAIL_WINDOW_BYTES = 1_048_576L
+
+    @Volatile private var head: ParallelRangeDataSource.BootstrapCacheEntry? = null
+    @Volatile private var tail: ParallelRangeDataSource.BootstrapCacheEntry? = null
+
+    fun putHead(entry: ParallelRangeDataSource.BootstrapCacheEntry) {
+        head = entry
+        Log.i(
+            TAG,
+            "PREFETCH_WINDOW put head bytes=${entry.bootstrapSize} " +
+                "total=${entry.totalFileLength} host=${entry.resolvedUri?.host}"
+        )
+    }
+
+    fun putTail(entry: ParallelRangeDataSource.BootstrapCacheEntry) {
+        tail = entry
+        Log.i(TAG, "PREFETCH_WINDOW put tail start=${entry.startPosition} bytes=${entry.bootstrapSize}")
+    }
+
+    fun consumeHead(dataSpec: DataSpec): ParallelRangeDataSource.BootstrapCacheEntry? {
+        val cached = head ?: return null
+        if (SystemClock.uptimeMillis() - cached.createdAtUptimeMs > TTL_MS) {
+            head = null
+            return null
+        }
+        if (dataSpec.position != 0L || cached.startPosition != 0L) return null
+        if (dataSpec.length != C.LENGTH_UNSET.toLong()) return null
+        if (dataSpec.uri != cached.requestUri) return null
+        head = null
+        Log.i(TAG, "PREFETCH_WINDOW head hit bytes=${cached.bootstrapSize} total=${cached.totalFileLength}")
+        return cached
+    }
+
+    fun peekTail(uri: Uri, position: Long): ParallelRangeDataSource.BootstrapCacheEntry? {
+        val cached = tail ?: return null
+        if (SystemClock.uptimeMillis() - cached.createdAtUptimeMs > TTL_MS) {
+            tail = null
+            return null
+        }
+        if (uri != cached.requestUri) return null
+        if (position < cached.startPosition || position >= cached.startPosition + cached.bootstrapSize) return null
+        Log.i(TAG, "PREFETCH_WINDOW tail hit pos=$position start=${cached.startPosition}")
+        return cached
     }
 }

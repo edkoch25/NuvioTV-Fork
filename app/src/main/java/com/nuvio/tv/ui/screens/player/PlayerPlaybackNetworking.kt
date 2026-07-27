@@ -176,24 +176,128 @@ internal object PlayerPlaybackNetworking {
             return
         }
         try {
-            // S1m: two independent calls enqueued back-to-back run
-            // concurrently (dispatcher maxRequestsPerHost is 32), so OkHttp
-            // opens two sockets; each drains its one-byte body and both
-            // re-enter the shared pool warm.
-            repeat(2) {
-                prewarmHttpClient.newCall(request).enqueue(object : okhttp3.Callback {
-                    override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
-                        // No-op by design: the probe will handshake as it does today.
-                    }
+            // S1m enqueued two identical head warms so OkHttp opened two
+            // sockets. nt8: the first warm's body is no longer discarded --
+            // it is exactly the probe's bootstrap window, and its 206
+            // Content-Range reveals the total length, so both are captured
+            // into PrefetchWindowStore for the press to consume (probe
+            // skipped entirely). The second socket is then warmed with the
+            // LAST 1 MiB -- the Matroska Cues the extractor reads next --
+            // instead of a duplicate head, killing the tail continuation
+            // leg too. A failure or a non-206 falls back to a duplicate
+            // head warm: the pre-nt8 two-socket behaviour, store untouched.
+            prewarmHttpClient.newCall(request).enqueue(object : okhttp3.Callback {
+                override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
+                    // No-op by design: the probe will handshake as it does today.
+                }
 
-                    override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
-                        // Draining the one-byte body is what makes the connection reusable.
-                        response.use { it.body?.bytes() }
+                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                    val stored = response.use { resp ->
+                        if (resp.code != 206) return@use false
+                        val body = resp.body ?: return@use false
+                        val bytes = try {
+                            body.bytes()
+                        } catch (_: Exception) {
+                            return@use false
+                        }
+                        if (bytes.isEmpty() || bytes.size > 262144) return@use false
+                        val total = parsePrewarmContentRangeTotal(resp.header("Content-Range"))
+                        if (total <= 0L) return@use false
+                        PrefetchWindowStore.putHead(
+                            ParallelRangeDataSource.BootstrapCacheEntry(
+                                requestUri = android.net.Uri.parse(target),
+                                startPosition = 0L,
+                                resolvedUri = android.net.Uri.parse(resp.request.url.toString()),
+                                openLength = total,
+                                totalFileLength = total,
+                                bootstrapData = bytes,
+                                bootstrapSize = bytes.size,
+                                createdAtUptimeMs = android.os.SystemClock.uptimeMillis()
+                            )
+                        )
+                        enqueueTailPrewarm(target, headers, total)
+                        true
                     }
-                })
-            }
+                    if (!stored) {
+                        // Range-hostile or failed head: keep the second socket.
+                        try {
+                            prewarmHttpClient.newCall(request).enqueue(discardingWarmCallback)
+                        } catch (_: Exception) {
+                        }
+                    }
+                }
+            })
         } catch (_: Exception) {
             // Dispatcher rejection or any other failure: nothing to do.
+        }
+    }
+
+    /** nt8: total length from "bytes 0-262143/9402232472"; -1 when absent or opaque. */
+    private fun parsePrewarmContentRangeTotal(value: String?): Long {
+        val totalPart = value?.substringAfterLast('/', missingDelimiterValue = "")?.trim() ?: return -1L
+        if (totalPart.isEmpty() || totalPart == "*") return -1L
+        return totalPart.toLongOrNull() ?: -1L
+    }
+
+    /** nt8: the pre-nt8 warm behaviour -- drain and discard, socket to pool. */
+    private val discardingWarmCallback = object : okhttp3.Callback {
+        override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
+            // No-op by design.
+        }
+
+        override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+            response.use { it.body?.bytes() }
+        }
+    }
+
+    /**
+     * nt8: warm the second socket with the extractor's NEXT read -- the
+     * tail window -- and capture it. Rejects short bodies (the window must
+     * be exact for position arithmetic) and skips files small enough that
+     * the head window already covers them.
+     */
+    private fun enqueueTailPrewarm(target: String, headers: Map<String, String>?, total: Long) {
+        val tailWindow = PrefetchWindowStore.TAIL_WINDOW_BYTES
+        val tailStart = total - tailWindow
+        if (tailStart <= 262144L) return
+        val tailRequest = try {
+            val builder = okhttp3.Request.Builder().url(target)
+            headers?.forEach { (name, value) -> builder.header(name, value) }
+            builder.header("Range", "bytes=$tailStart-${total - 1}").build()
+        } catch (_: Exception) {
+            return
+        }
+        try {
+            prewarmHttpClient.newCall(tailRequest).enqueue(object : okhttp3.Callback {
+                override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
+                    // No-op by design.
+                }
+
+                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                    response.use { resp ->
+                        if (resp.code != 206) return@use
+                        val bytes = try {
+                            resp.body?.bytes()
+                        } catch (_: Exception) {
+                            null
+                        } ?: return@use
+                        if (bytes.size.toLong() != tailWindow) return@use
+                        PrefetchWindowStore.putTail(
+                            ParallelRangeDataSource.BootstrapCacheEntry(
+                                requestUri = android.net.Uri.parse(target),
+                                startPosition = tailStart,
+                                resolvedUri = android.net.Uri.parse(resp.request.url.toString()),
+                                openLength = tailWindow,
+                                totalFileLength = total,
+                                bootstrapData = bytes,
+                                bootstrapSize = bytes.size,
+                                createdAtUptimeMs = android.os.SystemClock.uptimeMillis()
+                            )
+                        )
+                    }
+                }
+            })
+        } catch (_: Exception) {
         }
     }
 
