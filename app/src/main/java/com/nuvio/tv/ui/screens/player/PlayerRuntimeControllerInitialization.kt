@@ -154,7 +154,11 @@ private suspend fun PlayerRuntimeController.resolveCurrentStreamMimeType(
     )
 }
 
-private fun PlayerRuntimeController.disposeExoPlayerBeforeRebuild() {
+/**
+ * nt10: returns true when an ExoPlayer was actually released, so the caller
+ * can skip the settle that only a release needs.
+ */
+private fun PlayerRuntimeController.disposeExoPlayerBeforeRebuild(): Boolean {
     notifyAudioSessionUpdate(false)
     try {
         currentMediaSession?.release()
@@ -178,8 +182,10 @@ private fun PlayerRuntimeController.disposeExoPlayerBeforeRebuild() {
             "PLAYER_RELEASE: site=rebuild exoReleaseMs=$releaseMs timeoutMs=$PLAYER_RELEASE_TIMEOUT_MS"
         )
     }
+    val releasedExistingPlayer = _exoPlayer != null
     _exoPlayer = null
     playbackSpeedAwareAudioSink = null
+    return releasedExistingPlayer
 }
 
 // AFR settle hold duration (Exo parity with mpvDelayStartAfterAfrSwitch).
@@ -954,8 +960,19 @@ internal fun PlayerRuntimeController.initializePlayer(
                     .build()
             }
 
-            disposeExoPlayerBeforeRebuild()
-            delay(PLAYER_REBUILD_SETTLE_DELAY_MS)
+            // nt10: the settle exists to let a just-released decoder and its
+            // surface stand down before the next one is built. On a FRESH
+            // start there is nothing to stand down: the 27 Jul capture shows
+            // no PLAYER_RELEASE line on the startup path at all, so the
+            // 120 ms was dead time on the critical path of every first play.
+            // It still runs on a genuine rebuild, which is the case it was
+            // written for. Beyond its own cost, the delay holds back
+            // prepare() -- and prepare() is what opens the datasource and
+            // starts chunk 0, whose ~470 ms of server TTFB can only be
+            // overlapped, never removed.
+            if (disposeExoPlayerBeforeRebuild()) {
+                delay(PLAYER_REBUILD_SETTLE_DELAY_MS)
+            }
 
             _exoPlayer = if (useLibass) {
                 val playerDataSourceFactory = LoggingDataSourceFactory(PlayerPlaybackNetworking.createDataSourceFactory(context, headers), "BUILDER_LIBASS")
