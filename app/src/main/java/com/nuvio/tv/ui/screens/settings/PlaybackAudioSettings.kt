@@ -81,7 +81,6 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
     onSetAllowDtsPassthrough: (Boolean) -> Unit,
     onSetAllowDtsHdPassthrough: (Boolean) -> Unit,
     onSetDv5ToDv81Enabled: (Boolean) -> Unit,
-    onSetDv7ToDv81PreserveMappingEnabled: (Boolean) -> Unit,
     onSetStripHdr10PlusSei: (Boolean) -> Unit,
     onItemFocused: () -> Unit = {},
     enabled: Boolean = true,
@@ -379,20 +378,6 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
                 enabled = enabled
             )
         }
-        item(key = "audio_dv7_preserve_mapping") {
-            ToggleSettingsItem(
-                icon = Icons.Default.Tune,
-                title = stringResource(R.string.audio_dv7_preserve_mapping_title),
-                subtitle = stringResource(R.string.audio_dv7_preserve_mapping_sub),
-                // Show off outside Convert to DV8.1 so a persisted value doesn't read as active.
-                isChecked = playerSettings.dv7ToDv81PreserveMappingEnabled &&
-                        playerSettings.dv7HandlingMode == Dv7HandlingMode.DV81_LIBDOVI,
-                onCheckedChange = onSetDv7ToDv81PreserveMappingEnabled,
-                onFocused = onItemFocused,
-                enabled = enabled && playerSettings.dv7HandlingMode == Dv7HandlingMode.DV81_LIBDOVI
-            )
-        }
-
         item(key = "audio_dv5_to_dv81") {
             ToggleSettingsItem(
                 icon = Icons.Default.Tune,

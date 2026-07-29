@@ -305,11 +305,6 @@ fun PlaybackSettingsContent(
                 onSetDv5ToDv81Enabled = { enabled ->
                     coroutineScope.launch { viewModel.setDv5ToDv81Enabled(enabled) }
                 },
-                onSetDv7ToDv81PreserveMappingEnabled = { enabled ->
-                    coroutineScope.launch {
-                        viewModel.setDv7ToDv81PreserveMappingEnabled(enabled)
-                    }
-                },
                 onSetNuvioPerformanceModeEnabled = { enabled ->
                     coroutineScope.launch { viewModel.setNuvioPerformanceModeEnabled(enabled) }
                     memoryUsageTrigger++
