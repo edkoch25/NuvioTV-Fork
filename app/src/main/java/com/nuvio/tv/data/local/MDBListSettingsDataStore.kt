@@ -33,6 +33,7 @@ class MDBListSettingsDataStore @Inject constructor(
     private val showAudienceKey = booleanPreferencesKey("mdblist_show_audience")
     private val showMetacriticKey = booleanPreferencesKey("mdblist_show_metacritic")
     private val showMalKey = booleanPreferencesKey("mdblist_show_mal")
+    private val trackingEnabledKey = booleanPreferencesKey("mdblist_tracking_enabled")
 
     val settings: Flow<MDBListSettings> = profileManager.activeProfileId.flatMapLatest { pid ->
         factory.get(pid, FEATURE).data.map { prefs ->
@@ -46,7 +47,8 @@ class MDBListSettingsDataStore @Inject constructor(
                 showTomatoes = prefs[showTomatoesKey] ?: true,
                 showAudience = prefs[showAudienceKey] ?: true,
                 showMetacritic = prefs[showMetacriticKey] ?: true,
-                showMal = prefs[showMalKey] ?: true
+                showMal = prefs[showMalKey] ?: true,
+                trackingEnabled = prefs[trackingEnabledKey] ?: false
             )
         }
     }
@@ -89,5 +91,9 @@ class MDBListSettingsDataStore @Inject constructor(
 
     suspend fun setShowMal(enabled: Boolean) {
         store().edit { it[showMalKey] = enabled }
+    }
+
+    suspend fun setTrackingEnabled(enabled: Boolean) {
+        store().edit { it[trackingEnabledKey] = enabled }
     }
 }

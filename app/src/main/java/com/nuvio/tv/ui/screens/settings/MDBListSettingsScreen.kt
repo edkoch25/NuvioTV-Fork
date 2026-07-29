@@ -107,6 +107,16 @@ fun MDBListSettingsContent(
                     )
                 }
 
+                item(key = "mdblist_tracking") {
+                    SettingsToggleRow(
+                        title = stringResource(R.string.mdblist_tracking_title),
+                        subtitle = stringResource(R.string.mdblist_tracking_subtitle),
+                        checked = uiState.trackingEnabled,
+                        enabled = uiState.enabled,
+                        onToggle = { viewModel.onEvent(MDBListSettingsEvent.ToggleTracking(!uiState.trackingEnabled)) }
+                    )
+                }
+
                 item(key = "mdblist_trakt") {
                     SettingsToggleRow(
                         title = stringResource(R.string.mdblist_trakt_title),

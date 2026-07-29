@@ -10,5 +10,6 @@ data class MDBListSettings(
     val showTomatoes: Boolean = true,
     val showAudience: Boolean = true,
     val showMetacritic: Boolean = true,
-    val showMal: Boolean = true
+    val showMal: Boolean = true,
+    val trackingEnabled: Boolean = false
 )

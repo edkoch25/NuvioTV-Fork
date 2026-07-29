@@ -1006,6 +1006,8 @@
     <string name="mdblist_enable_subtitle">Fetch ratings from external providers in metadata detail screen</string>
     <string name="mdblist_api_key_title">API Key</string>
     <string name="mdblist_api_key_subtitle">Required to fetch ratings from MDBList</string>
+    <string name="mdblist_tracking_title">Watch Tracking</string>
+    <string name="mdblist_tracking_subtitle">Scrobble playback to your MDBList watch history (marks watched at 80%)</string>
     <string name="mdblist_trakt_title">Trakt</string>
     <string name="mdblist_trakt_subtitle">Show Trakt score</string>
     <string name="mdblist_imdb_title">IMDb</string>

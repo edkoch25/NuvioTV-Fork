@@ -729,6 +729,10 @@ internal fun PlayerRuntimeController.emitScrobbleStart() {
             item = item,
             progressPercent = progressPercent
         )
+        mdbListScrobbleService.scrobbleStart(
+            item = item,
+            progressPercent = progressPercent
+        )
         if (requestGeneration != scrobbleStartRequestGeneration || !hasRequestedScrobbleStartForCurrentItem) return@launch
         hasSentScrobbleStartForCurrentItem = true
     }
@@ -748,6 +752,10 @@ internal fun PlayerRuntimeController.emitScrobbleStop(progressPercent: Float? = 
             item = item,
             progressPercent = percent
         )
+        mdbListScrobbleService.scrobbleStop(
+            item = item,
+            progressPercent = percent
+        )
     }
     scrobbleStartRequestGeneration++
     hasRequestedScrobbleStartForCurrentItem = false
@@ -763,6 +771,10 @@ internal fun PlayerRuntimeController.emitPauseScrobbleStop(progressPercent: Floa
 
     scope.launch(kotlinx.coroutines.NonCancellable) {
         traktScrobbleService.scrobbleStop(
+            item = item,
+            progressPercent = progressPercent
+        )
+        mdbListScrobbleService.scrobbleStop(
             item = item,
             progressPercent = progressPercent
         )
