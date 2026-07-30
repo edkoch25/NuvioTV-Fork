@@ -143,7 +143,8 @@ fun MDBListSettingsContent(
                         subtitle = stringResource(R.string.mdblist_account_subtitle),
                         value = uiState.username ?: notSetLabel,
                         onClick = { viewModel.refreshAccount() },
-                        enabled = uiState.enabled
+                        enabled = uiState.enabled,
+                        trailingIcon = null
                     )
                 }
 
@@ -153,7 +154,8 @@ fun MDBListSettingsContent(
                         subtitle = stringResource(R.string.mdblist_plan_subtitle),
                         value = uiState.plan ?: notSetLabel,
                         onClick = { viewModel.refreshAccount() },
-                        enabled = uiState.enabled
+                        enabled = uiState.enabled,
+                        trailingIcon = null
                     )
                 }
 
@@ -165,7 +167,8 @@ fun MDBListSettingsContent(
                         subtitle = stringResource(R.string.mdblist_requests_subtitle),
                         value = if (used != null && limit != null) "" + used + " / " + limit else notSetLabel,
                         onClick = { viewModel.refreshAccount() },
-                        enabled = uiState.enabled
+                        enabled = uiState.enabled,
+                        trailingIcon = null
                     )
                 }
 
