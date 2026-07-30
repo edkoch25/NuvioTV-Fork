@@ -6,6 +6,7 @@ import com.nuvio.tv.data.remote.dto.mdblist.MDBListLastActivitiesDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListPlaybackItemDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListScrobbleRequestDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListScrobbleResponseDto
+import com.nuvio.tv.data.remote.dto.mdblist.MDBListWatchedResponseDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListUserDto
 import retrofit2.Response
 import retrofit2.http.Body
@@ -70,6 +71,21 @@ interface MDBListApi {
     suspend fun getLastActivities(
         @Query("apikey") apiKey: String
     ): Response<MDBListLastActivitiesDto>
+
+    /**
+     * Watch history, paged. no-cache for the same reason as the other sync
+     * reads: a cached page would report a stale watched set, and a watched
+     * set that is wrong in the "not watched" direction is the harmful one.
+     *
+     * No total is returned - page until `has_more` is false.
+     */
+    @Headers("Cache-Control: no-cache")
+    @GET("sync/watched")
+    suspend fun getWatched(
+        @Query("apikey") apiKey: String,
+        @Query("offset") offset: Int,
+        @Query("limit") limit: Int
+    ): Response<MDBListWatchedResponseDto>
 
     /** Accepts either a playback id or the scrobble payload; id is used here. */
     @POST("scrobble/clear")
