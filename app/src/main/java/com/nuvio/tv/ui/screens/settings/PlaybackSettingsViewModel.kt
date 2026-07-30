@@ -217,10 +217,6 @@ class PlaybackSettingsViewModel @Inject constructor(
         playerSettingsDataStore.setDv5ToDv81Enabled(enabled)
     }
 
-    suspend fun setDv7ToDv81PreserveMappingEnabled(enabled: Boolean) {
-        playerSettingsDataStore.setDv7ToDv81PreserveMappingEnabled(enabled)
-    }
-
     suspend fun setDv7HandlingMode(mode: Dv7HandlingMode) {
         playerSettingsDataStore.setDv7HandlingMode(mode)
         // The conversion-mode override only applies when handling is Convert to

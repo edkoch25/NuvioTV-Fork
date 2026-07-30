@@ -484,7 +484,6 @@ private fun PlayerRuntimeController.buildPlaybackIssuePlaybackSettingsInput(): P
         showPlayerLoadingStatus = settings.showPlayerLoadingStatus,
         playbackIssueReportsEnabled = settings.playbackIssueReportsEnabled,
         dv5ToDv81Enabled = settings.dv5ToDv81Enabled,
-        dv7ToDv81PreserveMappingEnabled = settings.dv7ToDv81PreserveMappingEnabled,
         dv7HandlingMode = settings.dv7HandlingMode.name,
         dv7LibdoviModeOverride = settings.dv7LibdoviModeOverride,
         stripHdr10PlusSei = settings.stripHdr10PlusSei,

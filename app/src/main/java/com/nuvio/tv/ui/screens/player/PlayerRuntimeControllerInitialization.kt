@@ -547,7 +547,6 @@ internal fun PlayerRuntimeController.initializePlayer(
                         "effectiveMode=$effectiveDv7Mode " +
                         "dv81Active=$dv7ToDv81SettingActive " +
                         "dv5Compat=${playerSettings.dv5ToDv81Enabled} " +
-                        "preserveMapping=${playerSettings.dv7ToDv81PreserveMappingEnabled} " +
                         "buildNative=${DoviBridge.isNativeEnabledInBuild} " +
                         "libraryLoaded=${DoviBridge.isLibraryLoaded} " +
                         "extractorHookReady=${dv7ToDv81Probe.extractorHookReady} " +
@@ -998,8 +997,6 @@ internal fun PlayerRuntimeController.initializePlayer(
                                 dv7Mode1Forced -> 1
                                 else -> -1
                             },
-                            preserveMapping = playerSettings.dv7ToDv81PreserveMappingEnabled &&
-                                    manualDv81Selected,
                             dv5Enabled = playerSettings.dv5ToDv81Enabled,
                             manualDv81 = manualDv81Selected && !dv7Mode1Forced
                         ),
@@ -3189,12 +3186,7 @@ private fun PlayerRuntimeController.recordFirstFrameDiagnostics(
         dv7DoviSignalRewrites = signalingRewrites.toInt(),
         dvSourceProfile = sourceProfile?.toString(),
         dvElType = when (DolbyVisionConversionStats.getLastElType()) {
-            DoviBridge.EL_TYPE_FEL ->
-                if (DolbyVisionConversionStats.isPreserveMappingOnFel()) {
-                    "FEL (preserve mapping requested \u2014 standard 8.1 used)"
-                } else {
-                    "FEL"
-                }
+            DoviBridge.EL_TYPE_FEL -> "FEL"
             DoviBridge.EL_TYPE_MEL -> "MEL"
             DoviBridge.EL_TYPE_NONE, -1 -> "unknown"
             else -> null

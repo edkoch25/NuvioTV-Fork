@@ -256,7 +256,6 @@ data class PlayerSettings(
     // Dolby Vision settings (libdovi conversion). dv7HandlingMode == HDR10_BASE_LAYER
     // replaces the legacy mapDV7ToHevc boolean (strip DV7, play HEVC base layer).
     val dv5ToDv81Enabled: Boolean = false,
-    val dv7ToDv81PreserveMappingEnabled: Boolean = false,
     val dv7HandlingMode: Dv7HandlingMode = Dv7HandlingMode.AUTO,
     // Experimental libdovi conversion-mode override. -1 = auto (use the
     // profile-driven auto-pick); 0..4 = force that exact libdovi mode
@@ -509,7 +508,6 @@ class PlayerSettingsDataStore @Inject constructor(
     // from older versions don't lose their saved DV5/preserve-mapping toggle state. Only
     // the Kotlin var names here and the PlayerSettings field names were de-experimentalized.
     private val dv5ToDv81EnabledKey = booleanPreferencesKey("experimental_dv5_to_dv81_enabled")
-    private val dv7ToDv81PreserveMappingEnabledKey = booleanPreferencesKey("experimental_dv7_to_dv81_preserve_mapping_enabled")
     private val dv7HandlingModeKey = stringPreferencesKey("dv7_handling_mode")
     // Legacy "DV7 - HEVC" boolean, read only to migrate existing users to HDR10_BASE_LAYER.
     private val legacyMapDv7ToHevcKey = booleanPreferencesKey("map_dv7_to_hevc")
@@ -864,7 +862,6 @@ class PlayerSettingsDataStore @Inject constructor(
                     ?.toSet()
                     ?: emptySet(),
                 dv5ToDv81Enabled = prefs[dv5ToDv81EnabledKey] ?: false,
-                dv7ToDv81PreserveMappingEnabled = prefs[dv7ToDv81PreserveMappingEnabledKey] ?: false,
                 dv7HandlingMode = when {
                     prefs[dv7HandlingModeKey] != null ->
                         Dv7HandlingMode.fromStoredString(prefs[dv7HandlingModeKey])
@@ -1466,7 +1463,6 @@ class PlayerSettingsDataStore @Inject constructor(
 
     // Dolby Vision setters (libdovi conversion)
     suspend fun setDv5ToDv81Enabled(enabled: Boolean) { store().edit { it[dv5ToDv81EnabledKey] = enabled } }
-    suspend fun setDv7ToDv81PreserveMappingEnabled(enabled: Boolean) { store().edit { it[dv7ToDv81PreserveMappingEnabledKey] = enabled } }
     suspend fun setDv7HandlingMode(mode: Dv7HandlingMode) { store().edit { it[dv7HandlingModeKey] = mode.name } }
     suspend fun setDv7LibdoviModeOverride(mode: Int) { store().edit { it[dv7LibdoviModeOverrideKey] = mode.coerceIn(-1, 4) } }
     suspend fun setStripHdr10PlusSei(enabled: Boolean) { store().edit { it[stripHdr10PlusSeiKey] = enabled } }

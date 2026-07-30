@@ -109,10 +109,8 @@ internal object DolbyVisionConversionStats {
     private val rpuDropCount = AtomicLong(0)
     @Volatile private var lastSourceProfile: Int? = null
     @Volatile private var lastConversionMode: Int? = null
-    // DV7 F3: EL type of the current stream (DoviBridge.EL_TYPE_* / -1 / -2),
-    // and whether preserve-mapping was active on a FEL source.
+    // DV7 F3: EL type of the current stream (DoviBridge.EL_TYPE_* / -1 / -2).
     @Volatile private var lastElType: Int? = null
-    @Volatile private var preserveMappingOnFel = false
 
     fun reset() {
         codecStringRewriteCount.set(0)
@@ -120,7 +118,6 @@ internal object DolbyVisionConversionStats {
         lastSourceProfile = null
         lastConversionMode = null
         lastElType = null
-        preserveMappingOnFel = false
     }
 
     fun recordElType(code: Int) {
@@ -128,12 +125,6 @@ internal object DolbyVisionConversionStats {
     }
 
     fun getLastElType(): Int? = lastElType
-
-    fun recordPreserveMappingOnFel() {
-        preserveMappingOnFel = true
-    }
-
-    fun isPreserveMappingOnFel(): Boolean = preserveMappingOnFel
 
     fun recordRpuDrop() {
         rpuDropCount.incrementAndGet()
@@ -161,14 +152,13 @@ internal object DolbyVisionConversionStats {
 
 /**
  * Drives the per-stream conversion decision. Mirrors the auto-pick used by the
- * extractor hook installer: profile-7 default = mode 1 (ToMel); profile-7 with
- * preserve-mapping = mode 5 (8.1 preserve); profile 5 = mode 3; a [forcedMode]
- * in 0..4 overrides all of it.
+ * extractor hook installer: profile-7 AUTO = mode 1 (ToMel); profile-7 manual
+ * Convert-to-DV8.1 = mode 2; profile 5 = mode 2; a [forcedMode] in 0..4
+ * overrides all of it.
  */
 internal data class DolbyVisionConversionConfig(
     val active: Boolean,
     val forcedMode: Int = -1,
-    val preserveMapping: Boolean = false,
     val dv5Enabled: Boolean = false,
     /** True when the user explicitly chose "Convert to DV8.1" (not AUTO). */
     val manualDv81: Boolean = false
@@ -210,14 +200,17 @@ internal data class DolbyVisionConversionConfig(
      * contract and the code agree, and it stays correct if upstream libdovi
      * ever aligns the code with its docs (which would turn 3 into 8.4).
      *
-     * Kotlin mode 5 (preserve mapping) is translated by the native shim
-     * (map_conversion_mode in dovi_bridge.cpp) to C-API mode 2, because the
-     * C API cannot express preserve-mapping; see the shim comment.
+     * Preserve-mapping (To81MappingPreserved) is deliberately never
+     * requested. It is unreachable through the C API in every libdovi 3.x
+     * release including master, and executing modes 1/2/5 against upstream's
+     * own P7 FEL fixtures shows it retains the source composer curves --
+     * the pre-2.0 behaviour upstream moved away from in commit b45e20e,
+     * because those curves assume an enhancement layer this pipeline strips.
+     * The mode-5 shim in dovi_bridge.cpp is retained as a safety net.
      */
     fun conversionMode(profile: Int?): Int {
         if (forcedMode in 0..4) return forcedMode
         return when {
-            (profile == 7 || profile == null) && preserveMapping -> 5
             profile == 5 -> 2
             manualDv81 -> 2 // manual Convert to DV8.1 prefers mode 2 (falls back to 1)
             else -> 1       // AUTO convert stays on mode 1

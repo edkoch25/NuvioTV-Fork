@@ -93,7 +93,6 @@ private val localOnlyPlayerProfileSettingsKeys = setOf(
     "persist_audio_amplification",
     "remember_audio_delay_per_device",
     "experimental_dv5_to_dv81_enabled",
-    "experimental_dv7_to_dv81_preserve_mapping_enabled",
     "dv7_handling_mode",
     "map_dv7_to_hevc",
     "dv7_libdovi_mode_override",

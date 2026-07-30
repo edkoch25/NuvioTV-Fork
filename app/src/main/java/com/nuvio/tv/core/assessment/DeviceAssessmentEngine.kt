@@ -43,9 +43,9 @@ import org.json.JSONObject
  *    confidently wrong, and strip adds per-sample work on the demux hot
  *    path - field-observed destabilising a 3 GB Tegra on 100 Mbit/s
  *    remuxes. Advisory text stays; one-tap apply does not touch them.
- *  - dv7ToDv81PreserveMappingEnabled and dv7LibdoviModeOverride are
- *    deliberately ABSENT: no queryable fact decides them (panel-dependent,
- *    eyes-on only), so the assessment does not mention them at all.
+ *  - dv7LibdoviModeOverride is deliberately ABSENT: no queryable fact
+ *    decides it (panel-dependent, eyes-on only), so the assessment does
+ *    not mention it at all.
  *  - Audio is out of scope: the only honest AVR decode probe makes sound.
  *  - Tier 3 buffer profiles are user intent; the stability signal only
  *    SUGGESTS one, it never auto-applies. Profile numbers and the stability

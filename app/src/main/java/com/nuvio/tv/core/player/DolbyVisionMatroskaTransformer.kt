@@ -87,18 +87,9 @@ internal class DolbyVisionMatroskaTransformer(
     // enhancement layer to type.)
     private var elTypeProbed = false
 
-    private fun recordElTypeAndGuard(sample: ByteArray, offset: Int, nalSize: Int) {
+    private fun probeElType(sample: ByteArray, offset: Int, nalSize: Int) {
         val code = DoviBridge.detectRpuElType(sample, offset, nalSize)
         DolbyVisionConversionStats.recordElType(code)
-        if (code == DoviBridge.EL_TYPE_FEL && config.preserveMapping) {
-            DolbyVisionConversionStats.recordPreserveMappingOnFel()
-            android.util.Log.i(
-                TAG,
-                "DV7_MKV: FEL source with preserve-mapping active -- tone " +
-                    "mapping without the enhancement layer is title-dependent " +
-                    "(informational, user's choice is respected)"
-            )
-        }
     }
 
     override fun onDolbyVisionBlockAdditionalData(
@@ -355,7 +346,7 @@ internal class DolbyVisionMatroskaTransformer(
                     // RPU, plus the soft preserve-mapping-on-FEL guard.
                     if (!elTypeProbed) {
                         elTypeProbed = true
-                        recordElTypeAndGuard(sample, offset, nalSize)
+                        probeElType(sample, offset, nalSize)
                     }
                     val outLen = if (rpuConversionAbandoned) {
                         -1
