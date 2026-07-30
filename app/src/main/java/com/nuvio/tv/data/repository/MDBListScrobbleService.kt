@@ -47,6 +47,9 @@ class MDBListScrobbleService @Inject constructor(
 ) {
     companion object {
         private const val TAG = "MDBListScrobbleSvc"
+
+        /** Measured server-side session-commit latency (~1.5s) plus margin. */
+        private const val POST_STOP_REFRESH_DELAY_MS = 2_500L
     }
 
     private data class ScrobbleStamp(
@@ -137,11 +140,17 @@ class MDBListScrobbleService @Inject constructor(
                     timestampMs = System.currentTimeMillis()
                 )
                 if (action == "stop") {
-                    // Mirror the Trakt path: a stop changes the paused-session
-                    // set server-side, so refresh the read model immediately
-                    // rather than waiting for the next app-level trigger.
-                    // Gated, not forced, so the change-gate stamps advance.
-                    mdbListProgressService.refreshNow()
+                    // A stop changes the paused-session set server-side, but the
+                    // row commits asynchronously: measured 2026-07-30, a session's
+                    // paused_at postdated its own stop's 200 by ~1.5s, so an
+                    // immediate refresh raced it (stale gate -> skip, or stale
+                    // list -> the row missed and the fresh stamp wrongly
+                    // committed). Wait out the commit, then force - the forced
+                    // path reads no gate snapshot and commits no stamps, so the
+                    // race cannot suppress later refreshes; the next gated
+                    // refresh simply re-fetches once.
+                    delay(POST_STOP_REFRESH_DELAY_MS)
+                    mdbListProgressService.refreshNow(force = true)
                 }
                 return
             }

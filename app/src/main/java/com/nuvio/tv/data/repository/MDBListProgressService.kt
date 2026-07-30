@@ -139,10 +139,12 @@ class MDBListProgressService @Inject constructor(
             ) {
                 // Nothing paused or resumed since the last successful fetch -
                 // one request spent.
+                Log.d(TAG, "refresh: gate unchanged, skipping fetch")
                 hasLoadedRemoteProgress.value = true
                 return@withLock false
             }
         }
+        Log.d(TAG, "refresh: fetching (force=$force gateChanged=${gateSnapshot != null})")
 
         val response = try {
             mdbListApi.getPlaybackProgress(apiKey)
@@ -170,6 +172,7 @@ class MDBListProgressService @Inject constructor(
             Log.w(TAG, "skipped $skipped of ${items.size} playback rows (no usable IMDb id)")
         }
 
+        Log.d(TAG, "refresh: ${items.size} session(s) fetched, ${mapped.size} mapped")
         remoteProgress.value = mapped
         hasLoadedRemoteProgress.value = true
         // Commit the gate stamps only now that the fetch has succeeded. A
