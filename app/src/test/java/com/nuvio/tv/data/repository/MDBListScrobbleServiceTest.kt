@@ -33,6 +33,38 @@ class MDBListScrobbleServiceTest {
     }
 
     @Test
+    fun `progress is truncated to two decimals for the wire`() {
+        val movie = TraktScrobbleItem.Movie(
+            title = "28 Years Later: The Bone Temple",
+            year = 2026,
+            ids = TraktIdsDto(imdb = "tt32141377")
+        )
+        // The measured failing value from the 2026-07-30 device log.
+        assertEquals(3.06f, service().buildRequestBody(movie, 3.0654762f).progress)
+        // Clean values pass through unchanged.
+        assertEquals(0f, service().buildRequestBody(movie, 0f).progress)
+        assertEquals(45.0f, service().buildRequestBody(movie, 45.0f).progress)
+        assertEquals(100.0f, service().buildRequestBody(movie, 100.0f).progress)
+    }
+
+    @Test
+    fun `truncation never crosses the watched threshold`() {
+        val movie = TraktScrobbleItem.Movie(title = "T", year = 2026, ids = TraktIdsDto(imdb = "tt1"))
+        var below = 80f
+        repeat(100) {
+            below = Math.nextDown(below)
+            val wire = service().buildRequestBody(movie, below).progress
+            org.junit.Assert.assertTrue("$below must stay below 80, got $wire", wire < 80f)
+        }
+        var above = 80f
+        repeat(100) {
+            val wire = service().buildRequestBody(movie, above).progress
+            org.junit.Assert.assertTrue("$above must stay at/above 80, got $wire", wire >= 80f)
+            above = Math.nextUp(above)
+        }
+    }
+
+    @Test
     fun `episode body nests season and episode inside show`() {
         val body = service().buildRequestBody(
             TraktScrobbleItem.Episode(

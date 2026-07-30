@@ -78,15 +78,25 @@ class MDBListScrobbleService @Inject constructor(
         progressPercent: Float
     ) {
         val settings = settingsDataStore.settings.first()
-        if (!settings.enabled || !settings.trackingEnabled) return
+        if (!settings.enabled || !settings.trackingEnabled) {
+            Log.d(TAG, "skip $action: gated (enabled=${settings.enabled} tracking=${settings.trackingEnabled})")
+            return
+        }
         val apiKey = settings.apiKey.trim()
-        if (apiKey.isBlank()) return
+        if (apiKey.isBlank()) {
+            Log.d(TAG, "skip $action: no api key")
+            return
+        }
 
         val activeProfileId = profileManager.activeProfileId.value
         val clampedProgress = progressPercent.coerceIn(0f, 100f)
-        if (shouldSkip(activeProfileId, action, item.itemKey, clampedProgress)) return
+        if (shouldSkip(activeProfileId, action, item.itemKey, clampedProgress)) {
+            Log.d(TAG, "skip $action: dedup window (${item.itemKey} @ $clampedProgress)")
+            return
+        }
 
         val requestBody = buildRequestBody(item, clampedProgress)
+        Log.d(TAG, "send $action ${item.itemKey} progress=${requestBody.progress}")
 
         var lastException: Exception? = null
         val attempts = if (action == "stop") maxRetries + 1 else 1
@@ -118,6 +128,7 @@ class MDBListScrobbleService @Inject constructor(
             }
 
             if (response.isSuccessful) {
+                Log.d(TAG, "$action ok (${response.code()}) ${item.itemKey}")
                 lastScrobbleStamp = ScrobbleStamp(
                     profileId = activeProfileId,
                     action = action,
@@ -133,6 +144,14 @@ class MDBListScrobbleService @Inject constructor(
                     mdbListProgressService.refreshNow()
                 }
                 return
+            }
+
+            // The rejection body names the offending field when present; logging
+            // only the code discarded that during the 2026-07-30 investigation
+            // (this particular 400 arrives with an empty body regardless).
+            if (!response.isSuccessful) {
+                val errorBody = runCatching { response.errorBody()?.string() }.getOrNull()
+                Log.w(TAG, "$action rejected ${response.code()}: ${errorBody?.take(500) ?: "(no body)"}")
             }
 
             // Title not matched in MDBList's database - not retryable, and worth
@@ -170,10 +189,20 @@ class MDBListScrobbleService @Inject constructor(
         item: TraktScrobbleItem,
         clampedProgress: Float
     ): MDBListScrobbleRequestDto {
+        // MDBList rejects progress carrying more than two decimal places with a
+        // bare 400 (measured 2026-07-30: 3.0654762 -> 400, 3.07 -> 200 on an
+        // otherwise identical payload; the July validation only ever sent 1-2dp
+        // literals, which is why it passed). Moshi writes Float.toString - up to
+        // seven significant digits - so the wire value is truncated to two
+        // decimals. Truncated, not rounded: truncation can never push a sub-80%
+        // stop across the server's watched threshold nor a sub-1% value across
+        // its ignore floor (proven by exhaustive output-domain and ULP-boundary
+        // sweep, 2026-07-30).
+        val wireProgress = (clampedProgress * 100f).toInt() / 100f
         return when (item) {
             is TraktScrobbleItem.Movie -> MDBListScrobbleRequestDto(
                 movie = MDBListScrobbleMovieDto(ids = toIds(item.ids)),
-                progress = clampedProgress,
+                progress = wireProgress,
                 appVersion = BuildConfig.VERSION_NAME
             )
 
@@ -185,7 +214,7 @@ class MDBListScrobbleService @Inject constructor(
                         episode = MDBListScrobbleEpisodeDto(number = item.number)
                     )
                 ),
-                progress = clampedProgress,
+                progress = wireProgress,
                 appVersion = BuildConfig.VERSION_NAME
             )
         }
