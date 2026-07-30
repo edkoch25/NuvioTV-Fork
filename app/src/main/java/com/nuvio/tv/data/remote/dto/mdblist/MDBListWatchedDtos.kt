@@ -4,29 +4,17 @@ import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
 
 /**
- * Read-side shapes for `GET /sync/watched`.
+ * Shapes for `GET /sync/watched`, measured live on 2026-07-30. All four entry
+ * types have now been observed with real rows, so nothing here is inferred.
  *
- * Confidence is uneven and worth stating, because the published spec is stale
- * and cannot be trusted here either.
+ * The response is one stream ordered by `last_watched_at` descending, chunked
+ * into four arrays per page - `limit` caps the *combined* row count, not each
+ * array. Adding a newer movie was observed pushing an older show row onto the
+ * next page, so no category is complete until pagination finishes.
  *
- * **Measured** against a live account on 2026-07-30: the response is an object
- * carrying four arrays - `movies`, `shows`, `seasons`, `episodes` - plus a
- * `pagination` block of `offset`/`limit`/`has_more` and no totals, so a client
- * must page until `has_more` is false. A season entry reads
- * `{last_watched_at, season: {number, name, ids, show: {...}}}` - note the show
- * is nested *inside* the season body, and the season's own ids carry only tmdb,
- * so the IMDb id comes from the nested show. The entry timestamp is
- * `last_watched_at`, not the `season_watched_at` that appears on
- * `/sync/last_activities`.
- *
- * **Unobserved**: the movie, show and episode entry shapes. The account probed
- * had empty arrays for all three, so those types below are modelled on the
- * season entry's convention and on the playback endpoint, which shares
- * [MDBListSyncMovieDto] and [MDBListSyncShowDto] field-for-field. Every field
- * is nullable and the episode entry tolerates the show either nested or as a
- * sibling, so a wrong guess yields an unmapped row that the caller counts and
- * logs rather than a parse-time crash. Confirmation is that counter reading
- * zero against real data.
+ * One watched episode produces up to three rows: the episode, a season rollup,
+ * and a show rollup. A `shows` entry therefore means "has watched activity",
+ * NOT "series finished" - FROM appears with 40 aired episodes and one watched.
  */
 @JsonClass(generateAdapter = true)
 data class MDBListWatchedResponseDto(
@@ -37,12 +25,22 @@ data class MDBListWatchedResponseDto(
     @Json(name = "pagination") val pagination: MDBListPaginationDto? = null
 )
 
-/** No total is returned, so `has_more` is the only stop condition. */
+/**
+ * Totals appear only on the final page (when `has_more` is false); the cursor
+ * appears only while more remain. The cursor is a keyset over
+ * `{ts, type, id}` - preferred over `offset`, which also works but shifts if a
+ * scrobble lands mid-pagination.
+ */
 @JsonClass(generateAdapter = true)
 data class MDBListPaginationDto(
     @Json(name = "offset") val offset: Int? = null,
     @Json(name = "limit") val limit: Int? = null,
-    @Json(name = "has_more") val hasMore: Boolean? = null
+    @Json(name = "has_more") val hasMore: Boolean? = null,
+    @Json(name = "next_cursor") val nextCursor: String? = null,
+    @Json(name = "total_movies") val totalMovies: Int? = null,
+    @Json(name = "total_shows") val totalShows: Int? = null,
+    @Json(name = "total_seasons") val totalSeasons: Int? = null,
+    @Json(name = "total_episodes") val totalEpisodes: Int? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -54,7 +52,24 @@ data class MDBListWatchedMovieDto(
 @JsonClass(generateAdapter = true)
 data class MDBListWatchedShowDto(
     @Json(name = "last_watched_at") val lastWatchedAt: String? = null,
-    @Json(name = "show") val show: MDBListSyncShowDto? = null
+    @Json(name = "show") val show: MDBListWatchedShowBodyDto? = null
+)
+
+/**
+ * Richer than [MDBListSyncShowDto], which stays in use for the show nested
+ * inside season and episode entries - those carry only title, year and ids.
+ * `total_aired_episodes` is the useful one: it gives an episode count without
+ * a metadata round-trip per show.
+ */
+@JsonClass(generateAdapter = true)
+data class MDBListWatchedShowBodyDto(
+    @Json(name = "title") val title: String? = null,
+    @Json(name = "year") val year: Int? = null,
+    @Json(name = "ids") val ids: MDBListSyncIdsDto? = null,
+    @Json(name = "status") val status: String? = null,
+    @Json(name = "release_date") val releaseDate: String? = null,
+    @Json(name = "runtime") val runtime: Int? = null,
+    @Json(name = "total_aired_episodes") val totalAiredEpisodes: Int? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -67,7 +82,7 @@ data class MDBListWatchedSeasonDto(
 data class MDBListWatchedSeasonBodyDto(
     @Json(name = "number") val number: Int? = null,
     @Json(name = "name") val name: String? = null,
-    /** tmdb only, in the one entry observed - key on [show] instead. */
+    /** tmdb only - identity comes from [show]. */
     @Json(name = "ids") val ids: MDBListSyncIdsDto? = null,
     @Json(name = "show") val show: MDBListSyncShowDto? = null
 )
@@ -75,16 +90,21 @@ data class MDBListWatchedSeasonBodyDto(
 @JsonClass(generateAdapter = true)
 data class MDBListWatchedEpisodeDto(
     @Json(name = "last_watched_at") val lastWatchedAt: String? = null,
-    @Json(name = "episode") val episode: MDBListWatchedEpisodeBodyDto? = null,
-    /** Sibling placement, tolerated alongside the nested one. */
-    @Json(name = "show") val show: MDBListSyncShowDto? = null
+    @Json(name = "episode") val episode: MDBListWatchedEpisodeBodyDto? = null
 )
 
+/**
+ * The episode title field is `name`, not `title` - the playback endpoint uses
+ * `title` for the same concept. Episode ids carry tmdb and tvdb only, so
+ * identity is show IMDb plus season and number, taken from [show].
+ */
 @JsonClass(generateAdapter = true)
 data class MDBListWatchedEpisodeBodyDto(
     @Json(name = "season") val season: Int? = null,
     @Json(name = "number") val number: Int? = null,
-    @Json(name = "title") val title: String? = null,
+    @Json(name = "name") val name: String? = null,
+    /** Absolute TMDB URL, unlike /upnext which returns bare paths. */
+    @Json(name = "still") val still: String? = null,
     @Json(name = "ids") val ids: MDBListSyncIdsDto? = null,
     @Json(name = "show") val show: MDBListSyncShowDto? = null
 )

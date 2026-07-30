@@ -12,34 +12,35 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Every watched row MDBList holds for the account, with the pages already
- * joined up.
+ * Every watched row MDBList holds for the account, pages already joined.
  *
- * Kept as wire types rather than domain models: this class has no consumer yet,
- * and mapping onto WatchedItem belongs with the code that reads it, where the
- * identity rules and the season expansion can be decided together.
+ * Kept as wire types rather than domain models: mapping belongs with the code
+ * that reads it, where identity rules and season expansion are decided.
  */
 data class MDBListWatchedPages(
     val movies: List<MDBListWatchedMovieDto> = emptyList(),
     val shows: List<MDBListWatchedShowDto> = emptyList(),
     val seasons: List<MDBListWatchedSeasonDto> = emptyList(),
     val episodes: List<MDBListWatchedEpisodeDto> = emptyList(),
-    val pagesFetched: Int = 0
+    val pagesFetched: Int = 0,
+    /** False when the server's own totals disagreed with what was collected. */
+    val complete: Boolean = true
 ) {
     val totalRows: Int get() = movies.size + shows.size + seasons.size + episodes.size
 }
 
 /**
- * Reads watch history from MDBList.
+ * Reads watch history from MDBList, gated on the same per-profile settings as
+ * the other MDBList services so callers stay unconditional.
  *
- * Gated on the same per-profile settings as the other MDBList services, so
- * callers stay unconditional.
+ * **All-or-nothing on failure.** Any failed page abandons the fetch and returns
+ * null rather than a partial set: missing rows read as "not watched", which
+ * would clear badges and resurrect finished episodes into next-up. A caller
+ * receiving null should keep whatever it already had.
  *
- * **All-or-nothing by design.** Any failed page abandons the whole fetch and
- * returns null rather than a partial set. A partially fetched watched set is
- * worse than none: the missing rows read as "not watched", which would clear
- * badges and resurrect finished episodes into next-up. A caller that gets null
- * should keep whatever it already had.
+ * Pages by the keyset cursor the API returns, falling back to offset when no
+ * cursor is present. Both work; the cursor is stable if a scrobble lands
+ * mid-pagination, where an offset window would shift.
  */
 @Singleton
 class MDBListWatchedService @Inject constructor(
@@ -49,14 +50,15 @@ class MDBListWatchedService @Inject constructor(
     companion object {
         private const val TAG = "MDBListWatchedSvc"
 
-        /** Rows per request. */
-        internal const val PAGE_SIZE = 100
-
         /**
-         * Ceiling on requests per fetch. Guards against a server that never
-         * clears `has_more`; at [PAGE_SIZE] this still covers 5,000 rows, and
-         * the daily budget is 1,000 requests total.
+         * Rows per request. The limit caps the combined count across all four
+         * arrays, and one watched episode yields up to three rows, so this is
+         * deliberately large - a heavy history is thousands of rows against a
+         * 1,000 requests/day budget.
          */
+        internal const val PAGE_SIZE = 1000
+
+        /** Guards a server that never clears `has_more`. */
         internal const val MAX_PAGES = 50
     }
 
@@ -78,28 +80,30 @@ class MDBListWatchedService @Inject constructor(
         val shows = mutableListOf<MDBListWatchedShowDto>()
         val seasons = mutableListOf<MDBListWatchedSeasonDto>()
         val episodes = mutableListOf<MDBListWatchedEpisodeDto>()
-        var offset = 0
+        var offset: Int? = 0
+        var cursor: String? = null
         var pages = 0
+        var lastPage: com.nuvio.tv.data.remote.dto.mdblist.MDBListPaginationDto? = null
 
         while (pages < MAX_PAGES) {
             val response = try {
-                mdbListApi.getWatched(apiKey, offset = offset, limit = PAGE_SIZE)
+                mdbListApi.getWatched(apiKey, limit = PAGE_SIZE, offset = offset, cursor = cursor)
             } catch (e: Exception) {
-                Log.w(TAG, "watched fetch failed at offset " + offset, e)
+                Log.w(TAG, "watched fetch failed at page " + pages, e)
                 return null
             }
             if (!response.isSuccessful) {
                 if (response.code() == 429) {
                     Log.w(TAG, "watched fetch: MDBList daily rate limit exceeded")
                 } else {
-                    Log.w(TAG, "watched fetch failed at offset " + offset +
+                    Log.w(TAG, "watched fetch failed at page " + pages +
                         " with code " + response.code() + " body=" + errorBodyOrNull(response))
                 }
                 return null
             }
             val body = response.body()
             if (body == null) {
-                Log.w(TAG, "watched fetch: empty body at offset " + offset)
+                Log.w(TAG, "watched fetch: empty body at page " + pages)
                 return null
             }
             pages++
@@ -107,28 +111,55 @@ class MDBListWatchedService @Inject constructor(
             body.shows?.let { shows.addAll(it) }
             body.seasons?.let { seasons.addAll(it) }
             body.episodes?.let { episodes.addAll(it) }
+            lastPage = body.pagination
 
-            // A missing pagination block is treated as the last page. The
-            // alternative - assuming more - loops against a server that never
-            // says stop, and burns the daily budget doing it.
+            // A missing pagination block is the last page. Assuming otherwise
+            // loops against a server that never says stop and spends the budget.
             if (body.pagination?.hasMore != true) break
-            offset += PAGE_SIZE
+            val next = body.pagination?.nextCursor
+            if (!next.isNullOrBlank()) {
+                cursor = next
+                offset = null
+            } else {
+                cursor = null
+                offset = (offset ?: 0) + PAGE_SIZE
+            }
         }
 
+        var complete = true
         if (pages >= MAX_PAGES) {
-            Log.w(TAG, "watched fetch: stopped at the " + MAX_PAGES +
-                "-page ceiling; the set may be incomplete")
+            Log.w(TAG, "watched fetch: stopped at the " + MAX_PAGES + "-page ceiling")
+            complete = false
         }
+        // The final page reports per-category totals. Checking them turns "the
+        // loop ended" into "the server agrees we have everything".
+        val expected = lastPage
+        if (expected?.totalEpisodes != null) {
+            val mismatch = movies.size != (expected.totalMovies ?: movies.size) ||
+                shows.size != (expected.totalShows ?: shows.size) ||
+                seasons.size != (expected.totalSeasons ?: seasons.size) ||
+                episodes.size != (expected.totalEpisodes ?: episodes.size)
+            if (mismatch) {
+                complete = false
+                Log.w(TAG, "watched fetch: totals disagree - collected " +
+                    movies.size + "/" + shows.size + "/" + seasons.size + "/" + episodes.size +
+                    " but server reports " + expected.totalMovies + "/" + expected.totalShows +
+                    "/" + expected.totalSeasons + "/" + expected.totalEpisodes)
+            }
+        }
+
         val result = MDBListWatchedPages(
             movies = movies.toList(),
             shows = shows.toList(),
             seasons = seasons.toList(),
             episodes = episodes.toList(),
-            pagesFetched = pages
+            pagesFetched = pages,
+            complete = complete
         )
         Log.d(TAG, "watched fetch: " + result.totalRows + " row(s) over " + pages +
             " page(s) - movies=" + movies.size + " shows=" + shows.size +
-            " seasons=" + seasons.size + " episodes=" + episodes.size)
+            " seasons=" + seasons.size + " episodes=" + episodes.size +
+            " complete=" + complete)
         return result
     }
 

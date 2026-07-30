@@ -83,8 +83,9 @@ interface MDBListApi {
     @GET("sync/watched")
     suspend fun getWatched(
         @Query("apikey") apiKey: String,
-        @Query("offset") offset: Int,
-        @Query("limit") limit: Int
+        @Query("limit") limit: Int,
+        @Query("offset") offset: Int?,
+        @Query("cursor") cursor: String?
     ): Response<MDBListWatchedResponseDto>
 
     /** Accepts either a playback id or the scrobble payload; id is used here. */
