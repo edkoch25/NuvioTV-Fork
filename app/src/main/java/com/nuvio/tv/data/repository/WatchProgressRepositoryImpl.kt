@@ -893,6 +893,11 @@ class WatchProgressRepositoryImpl @Inject constructor(
             traktProgressService.applyOptimisticRemoval(contentId, season, episode)
             traktProgressService.removeProgress(contentId, season, episode)
         }
+        runCatching {
+            mdbListProgressService.clearSessionsFor(contentId, season, episode)
+        }.onFailure { error ->
+            Log.w(TAG, "removeProgress MDBList session clear failed", error)
+        }
         watchProgressPreferences.removeProgress(contentId, season, episode)
         if (useTraktProgress) {
             // Trakt is the primary CW source but still sync the removal to
@@ -924,6 +929,11 @@ class WatchProgressRepositoryImpl @Inject constructor(
         }
         if (hasEffectiveTraktConnection()) {
             traktProgressService.removeFromHistory(contentId, videoId, season, episode)
+        }
+        runCatching {
+            mdbListProgressService.clearSessionsFor(contentId, season, episode)
+        }.onFailure { error ->
+            Log.w(TAG, "removeFromHistory MDBList session clear failed", error)
         }
         watchProgressPreferences.removeProgress(contentId, season, episode)
         watchedItemsPreferences.unmarkAsWatched(contentId, season, episode, profileId = profileId)
@@ -969,6 +979,14 @@ class WatchProgressRepositoryImpl @Inject constructor(
             }.onFailure { error ->
                 Log.w(TAG, "Failed to batch remove from Trakt history", error)
             }
+        }
+
+        runCatching {
+            episodes.forEach { (season, episode) ->
+                mdbListProgressService.clearSessionsFor(contentId, season, episode)
+            }
+        }.onFailure { error ->
+            Log.w(TAG, "removeFromHistoryBatch MDBList session clear failed", error)
         }
 
         if (!useTraktProgress) {

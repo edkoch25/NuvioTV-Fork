@@ -202,6 +202,37 @@ class MDBListProgressService @Inject constructor(
         return true
     }
 
+    /**
+     * Clears every paused session matching the repository's removal
+     * semantics: with [season] and [episode] both present, the single
+     * session for that episode; otherwise every session for [contentId]
+     * (mirroring WatchProgressPreferences.removeProgress). Runs under the
+     * refresh mutex so an in-flight refresh cannot overwrite the
+     * optimistic removal with a pre-clear server list. No-ops unless
+     * tracking is enabled, via [clearPlaybackSession]'s key check.
+     * Returns the number of sessions cleared.
+     */
+    suspend fun clearSessionsFor(contentId: String, season: Int? = null, episode: Int? = null): Int =
+        refreshMutex.withLock {
+            val ids = remoteProgress.value
+                .filter { row ->
+                    row.contentId == contentId &&
+                        (season == null || episode == null ||
+                            (row.season == season && row.episode == episode))
+                }
+                .mapNotNull { it.mdbListPlaybackId }
+            if (ids.isEmpty()) {
+                Log.d(TAG, "clearSessionsFor $contentId s=$season e=$episode: no cached sessions")
+                return@withLock 0
+            }
+            var cleared = 0
+            for (id in ids) {
+                if (clearPlaybackSession(id)) cleared++
+            }
+            Log.d(TAG, "clearSessionsFor $contentId s=$season e=$episode: cleared $cleared of ${ids.size}")
+            cleared
+        }
+
     /** Forgets cached state on profile switch or sign-out. */
     fun reset() {
         remoteProgress.value = emptyList()

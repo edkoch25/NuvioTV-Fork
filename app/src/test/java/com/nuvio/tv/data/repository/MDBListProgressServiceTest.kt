@@ -15,6 +15,8 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.first
+import okhttp3.ResponseBody.Companion.toResponseBody
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -221,5 +223,65 @@ class MDBListProgressServiceTest {
         val svc = serviceWith(api)
         assertTrue(svc.refreshNow(force = true))
         coVerify(exactly = 0) { api.getLastActivities(any()) }
+    }
+
+    // ---- session clearing (removal paths) ----
+
+    @Test
+    fun `clearSessionsFor with season and episode clears only that session`() = runTest {
+        val api = mockk<MDBListApi>()
+        val bbPilot = breakingBad.copy(
+            id = 111,
+            episode = MDBListSyncEpisodeDto(season = 1, number = 1, title = "Pilot", ids = MDBListSyncIdsDto(tmdb = 62085))
+        )
+        coEvery { api.getPlaybackProgress(any()) } returns Response.success(listOf(bbPilot, breakingBad))
+        coEvery { api.clearScrobbleSession(any(), any()) } returns Response.success(Unit)
+
+        val svc = serviceWith(api)
+        assertTrue(svc.refreshNow(force = true))
+
+        assertEquals(1, svc.clearSessionsFor("tt0903747", season = 1, episode = 1))
+        coVerify(exactly = 1) { api.clearScrobbleSession(any(), mapOf("id" to 111L)) }
+        // The optimistic filter keeps the untouched episode.
+        assertEquals(listOf(12522949L), svc.observeAllProgress().first().map { it.mdbListPlaybackId })
+    }
+
+    @Test
+    fun `clearSessionsFor without an episode clears every session for the id`() = runTest {
+        val api = mockk<MDBListApi>()
+        val bbPilot = breakingBad.copy(
+            id = 111,
+            episode = MDBListSyncEpisodeDto(season = 1, number = 1, title = "Pilot", ids = MDBListSyncIdsDto(tmdb = 62085))
+        )
+        coEvery { api.getPlaybackProgress(any()) } returns Response.success(listOf(bbPilot, breakingBad, shawshank))
+        coEvery { api.clearScrobbleSession(any(), any()) } returns Response.success(Unit)
+
+        val svc = serviceWith(api)
+        assertTrue(svc.refreshNow(force = true))
+
+        assertEquals(2, svc.clearSessionsFor("tt0903747"))
+        coVerify(exactly = 2) { api.clearScrobbleSession(any(), any()) }
+        // The movie session under a different id is untouched.
+        assertEquals(listOf(12522705L), svc.observeAllProgress().first().map { it.mdbListPlaybackId })
+    }
+
+    @Test
+    fun `clearSessionsFor is a no-op on a cache miss`() = runTest {
+        val api = mockk<MDBListApi>()
+        val svc = serviceWith(api)
+        assertEquals(0, svc.clearSessionsFor("tt0111161"))
+        coVerify(exactly = 0) { api.clearScrobbleSession(any(), any()) }
+    }
+
+    @Test
+    fun `failed clear keeps the row for the next refresh`() = runTest {
+        val api = mockk<MDBListApi>()
+        coEvery { api.getPlaybackProgress(any()) } returns Response.success(listOf(shawshank))
+        coEvery { api.clearScrobbleSession(any(), any()) } returns Response.error(500, "".toResponseBody(null))
+
+        val svc = serviceWith(api)
+        assertTrue(svc.refreshNow(force = true))
+        assertEquals(0, svc.clearSessionsFor("tt0111161"))
+        assertEquals(listOf(12522705L), svc.observeAllProgress().first().map { it.mdbListPlaybackId })
     }
 }
