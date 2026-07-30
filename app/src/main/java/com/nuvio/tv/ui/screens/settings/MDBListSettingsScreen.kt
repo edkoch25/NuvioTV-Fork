@@ -61,11 +61,17 @@ fun MDBListSettingsContent(
     var showApiKeyDialog by remember { mutableStateOf(false) }
     var showWatchProgressDialog by remember { mutableStateOf(false) }
     val notSetLabel = stringResource(R.string.mdblist_not_set)
+    // Hoisted at composable scope on purpose: the formatter below is a plain
+    // function type, so a composable-only call cannot be made from inside it.
+    // This mirrors TraktScreen, where the picker's other entry point lives.
+    val strWatchProgressTrakt = stringResource(R.string.trakt_watch_progress_source_trakt)
+    val strWatchProgressNuvio = stringResource(R.string.trakt_watch_progress_source_nuvio)
+    val strWatchProgressMdbList = stringResource(R.string.trakt_watch_progress_source_mdblist)
     val watchProgressFormatter: (WatchProgressSource) -> String = { source ->
         when (source) {
-            WatchProgressSource.TRAKT -> stringResource(R.string.trakt_watch_progress_source_trakt)
-            WatchProgressSource.NUVIO_SYNC -> stringResource(R.string.trakt_watch_progress_source_nuvio)
-            WatchProgressSource.MDBLIST -> stringResource(R.string.trakt_watch_progress_source_mdblist)
+            WatchProgressSource.TRAKT -> strWatchProgressTrakt
+            WatchProgressSource.NUVIO_SYNC -> strWatchProgressNuvio
+            WatchProgressSource.MDBLIST -> strWatchProgressMdbList
         }
     }
 
