@@ -2,6 +2,7 @@ package com.nuvio.tv.data.repository
 
 import com.nuvio.tv.core.auth.AuthManager
 import com.nuvio.tv.core.network.NetworkResult
+import com.nuvio.tv.core.sync.WatchProgressSourceResolver
 import com.nuvio.tv.core.sync.WatchProgressSyncService
 import com.nuvio.tv.core.sync.WatchedItemsSyncService
 import android.util.Log
@@ -55,6 +56,7 @@ class WatchProgressRepositoryImpl @Inject constructor(
     private val layoutPreferenceDataStore: com.nuvio.tv.data.local.LayoutPreferenceDataStore,
     private val traktProgressService: TraktProgressService,
     private val watchProgressSyncService: WatchProgressSyncService,
+    private val watchProgressSourceResolver: WatchProgressSourceResolver,
     private val watchedItemsPreferences: WatchedItemsPreferences,
     private val watchedItemsSyncService: WatchedItemsSyncService,
     private val authManager: AuthManager,
@@ -268,16 +270,14 @@ class WatchProgressRepositoryImpl @Inject constructor(
 
     @OptIn(FlowPreview::class)
     private fun useTraktProgressFlow(): Flow<Boolean> {
-        return combine(
-            traktAuthDataStore.isEffectivelyAuthenticated,
-            traktSettingsDataStore.watchProgressSource
-        ) { isEffectivelyAuthenticated, source ->
-            source == WatchProgressSource.TRAKT && isEffectivelyAuthenticated
-        }.debounce { useTrakt ->
-            // Debounce only the false -> transition to avoid reacting to transient
-            // auth unavailability during profile switches.  true→ is immediate.
-            if (useTrakt) 0L else 300L
-        }.distinctUntilChanged()
+        return watchProgressSourceResolver.effectiveSource()
+            .map { effectiveSource -> effectiveSource == WatchProgressSource.TRAKT }
+            .debounce { useTrakt ->
+                // Debounce only the false -> transition to avoid reacting to transient
+                // auth unavailability during profile switches.  true→ is immediate.
+                if (useTrakt) 0L else 300L
+            }
+            .distinctUntilChanged()
     }
 
     private suspend fun shouldUseTraktProgress(): Boolean = useTraktProgressFlow().first()

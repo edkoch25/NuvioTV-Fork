@@ -3,8 +3,6 @@ package com.nuvio.tv.core.sync
 import android.util.Log
 import com.nuvio.tv.core.auth.AuthManager
 import com.nuvio.tv.core.profile.ProfileManager
-import com.nuvio.tv.data.local.TraktAuthDataStore
-import com.nuvio.tv.data.local.TraktSettingsDataStore
 import com.nuvio.tv.data.local.WatchProgressSource
 import com.nuvio.tv.data.local.WatchedItemsPreferences
 import com.nuvio.tv.data.remote.supabase.SupabaseWatchedItem
@@ -13,7 +11,6 @@ import com.nuvio.tv.domain.model.WatchedItem
 import io.github.jan.supabase.postgrest.Postgrest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -44,8 +41,7 @@ class WatchedItemsSyncService @Inject constructor(
     private val authManager: AuthManager,
     private val postgrest: Postgrest,
     private val watchedItemsPreferences: WatchedItemsPreferences,
-    private val traktAuthDataStore: TraktAuthDataStore,
-    private val traktSettingsDataStore: TraktSettingsDataStore,
+    private val watchProgressSourceResolver: WatchProgressSourceResolver,
     private val profileManager: ProfileManager,
     private val syncClientIdentity: SyncClientIdentity
 ) {
@@ -82,10 +78,9 @@ class WatchedItemsSyncService @Inject constructor(
     }
 
     private suspend fun shouldUseSupabaseWatchProgressSync(): Boolean {
-        val hasEffectiveTraktConnection = traktAuthDataStore.isEffectivelyAuthenticated.first()
-        val source = traktSettingsDataStore.watchProgressSource.first()
-        val shouldUseSupabase = !(hasEffectiveTraktConnection && source == WatchProgressSource.TRAKT)
-        Log.d(TAG, "shouldUseSupabaseWatchProgressSync: traktConnected=$hasEffectiveTraktConnection source=$source shouldUseSupabase=$shouldUseSupabase")
+        val effectiveSource = watchProgressSourceResolver.currentEffectiveSource()
+        val shouldUseSupabase = effectiveSource != WatchProgressSource.TRAKT
+        Log.d(TAG, "shouldUseSupabaseWatchProgressSync: effectiveSource=$effectiveSource shouldUseSupabase=$shouldUseSupabase")
         return shouldUseSupabase
     }
 

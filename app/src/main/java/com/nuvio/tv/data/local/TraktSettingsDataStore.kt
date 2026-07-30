@@ -16,7 +16,8 @@ import javax.inject.Singleton
 
 enum class WatchProgressSource {
     TRAKT,
-    NUVIO_SYNC;
+    NUVIO_SYNC,
+    MDBLIST;
 
     companion object {
         fun fromStorage(value: String?): WatchProgressSource {
