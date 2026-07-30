@@ -50,6 +50,7 @@ import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.nuvio.tv.ui.components.NuvioDialog
+import com.nuvio.tv.data.local.WatchProgressSource
 
 @Composable
 fun MDBListSettingsContent(
@@ -58,6 +59,19 @@ fun MDBListSettingsContent(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showApiKeyDialog by remember { mutableStateOf(false) }
+    var showWatchProgressDialog by remember { mutableStateOf(false) }
+    val notSetLabel = stringResource(R.string.mdblist_not_set)
+    val watchProgressFormatter: (WatchProgressSource) -> String = { source ->
+        when (source) {
+            WatchProgressSource.TRAKT -> stringResource(R.string.trakt_watch_progress_source_trakt)
+            WatchProgressSource.NUVIO_SYNC -> stringResource(R.string.trakt_watch_progress_source_nuvio)
+            WatchProgressSource.MDBLIST -> stringResource(R.string.trakt_watch_progress_source_mdblist)
+        }
+    }
+
+    LaunchedEffect(uiState.enabled, uiState.apiKey) {
+        viewModel.refreshAccount()
+    }
 
     Column(
         verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -114,6 +128,57 @@ fun MDBListSettingsContent(
                         checked = uiState.trackingEnabled,
                         enabled = uiState.enabled,
                         onToggle = { viewModel.onEvent(MDBListSettingsEvent.ToggleTracking(!uiState.trackingEnabled)) }
+                    )
+                }
+
+                item(key = "mdblist_account") {
+                    SettingsActionRow(
+                        title = stringResource(R.string.mdblist_account_title),
+                        subtitle = stringResource(R.string.mdblist_account_subtitle),
+                        value = uiState.username ?: notSetLabel,
+                        onClick = { viewModel.refreshAccount() },
+                        enabled = uiState.enabled
+                    )
+                }
+
+                item(key = "mdblist_plan") {
+                    SettingsActionRow(
+                        title = stringResource(R.string.mdblist_plan_title),
+                        subtitle = stringResource(R.string.mdblist_plan_subtitle),
+                        value = uiState.plan ?: notSetLabel,
+                        onClick = { viewModel.refreshAccount() },
+                        enabled = uiState.enabled
+                    )
+                }
+
+                item(key = "mdblist_requests") {
+                    val used = uiState.requestsUsed
+                    val limit = uiState.requestsLimit
+                    SettingsActionRow(
+                        title = stringResource(R.string.mdblist_requests_title),
+                        subtitle = stringResource(R.string.mdblist_requests_subtitle),
+                        value = if (used != null && limit != null) "" + used + " / " + limit else notSetLabel,
+                        onClick = { viewModel.refreshAccount() },
+                        enabled = uiState.enabled
+                    )
+                }
+
+                item(key = "mdblist_watch_progress") {
+                    SettingsActionRow(
+                        title = stringResource(R.string.trakt_watch_progress_title),
+                        subtitle = stringResource(R.string.trakt_watch_progress_subtitle),
+                        value = watchProgressFormatter(uiState.watchProgressSource),
+                        onClick = { showWatchProgressDialog = true },
+                        enabled = uiState.enabled
+                    )
+                }
+
+                item(key = "mdblist_ratings_heading") {
+                    Text(
+                        text = stringResource(R.string.mdblist_ratings_heading),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = NuvioTheme.colors.TextTertiary,
+                        modifier = Modifier.padding(top = NuvioTheme.spacing.sm)
                     )
                 }
 
@@ -200,6 +265,30 @@ fun MDBListSettingsContent(
             SettingsVerticalScrollIndicators(state = mdbListState)
             }
         }
+    }
+
+    if (showWatchProgressDialog) {
+        SettingsSingleChoiceDialog(
+            title = stringResource(R.string.trakt_watch_progress_dialog_title),
+            subtitle = stringResource(R.string.trakt_watch_progress_dialog_subtitle),
+            options = listOfNotNull(
+                SettingsPickerOption(WatchProgressSource.TRAKT, stringResource(R.string.trakt_watch_progress_source_trakt)),
+                SettingsPickerOption(WatchProgressSource.NUVIO_SYNC, stringResource(R.string.trakt_watch_progress_source_nuvio)),
+                if (uiState.trackingReady || uiState.watchProgressSource == WatchProgressSource.MDBLIST) {
+                    SettingsPickerOption(WatchProgressSource.MDBLIST, stringResource(R.string.trakt_watch_progress_source_mdblist))
+                } else {
+                    null
+                }
+            ),
+            selectedValue = uiState.watchProgressSource,
+            onOptionSelected = { source ->
+                viewModel.onWatchProgressSourceSelected(source)
+                showWatchProgressDialog = false
+            },
+            onDismiss = { showWatchProgressDialog = false },
+            width = 620.dp,
+            maxHeight = 320.dp
+        )
     }
 
     if (showApiKeyDialog) {
