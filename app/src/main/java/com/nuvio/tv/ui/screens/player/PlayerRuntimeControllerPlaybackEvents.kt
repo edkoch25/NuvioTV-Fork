@@ -13,6 +13,7 @@ import com.nuvio.tv.data.repository.PlaybackIssuePlaybackSettingsInput
 import com.nuvio.tv.data.repository.PlaybackIssueReportInput
 import com.nuvio.tv.data.repository.SkipInterval
 import com.nuvio.tv.data.repository.TraktScrobbleItem
+import com.nuvio.tv.data.repository.WatchScrobbleSink
 import com.nuvio.tv.data.repository.extractYear
 import com.nuvio.tv.data.repository.parseContentIds
 import com.nuvio.tv.data.repository.resolveEffectiveContentId
@@ -703,6 +704,16 @@ internal fun PlayerRuntimeController.buildScrobbleItem(): TraktScrobbleItem? {
     return item
 }
 
+/**
+ * The sinks playback events fan out to, in a fixed order.
+ *
+ * A plain list rather than Hilt multibinding: it keeps the wiring visible
+ * at the point of use and avoids a DI change inside a refactor that has to
+ * stay behaviourally inert.
+ */
+private val PlayerRuntimeController.scrobbleSinks: List<WatchScrobbleSink>
+    get() = listOf(traktScrobbleService, mdbListScrobbleService)
+
 internal fun PlayerRuntimeController.emitScrobbleStart() {
     if (isShortPlaceholderStream()) return
     if (hasRequestedScrobbleStartForCurrentItem) return
@@ -728,15 +739,14 @@ internal fun PlayerRuntimeController.emitScrobbleStart() {
         // (including non-IO throws such as a malformed response body) must
         // neither skip the other sink nor propagate into the player scope.
         kotlinx.coroutines.coroutineScope {
-            launch {
-                runCatching {
-                    traktScrobbleService.scrobbleStart(item = item, progressPercent = progressPercent)
-                }.onFailure { Log.w(PlayerRuntimeController.TAG, "Trakt scrobble start failed", it) }
-            }
-            launch {
-                runCatching {
-                    mdbListScrobbleService.scrobbleStart(item = item, progressPercent = progressPercent)
-                }.onFailure { Log.w(PlayerRuntimeController.TAG, "MDBList scrobble start failed", it) }
+            scrobbleSinks.forEach { sink ->
+                launch {
+                    runCatching {
+                        sink.scrobbleStart(item = item, progressPercent = progressPercent)
+                    }.onFailure {
+                        Log.w(PlayerRuntimeController.TAG, sink.sinkName + " scrobble start failed", it)
+                    }
+                }
             }
         }
         if (requestGeneration != scrobbleStartRequestGeneration || !hasRequestedScrobbleStartForCurrentItem) return@launch
@@ -755,15 +765,14 @@ internal fun PlayerRuntimeController.emitScrobbleStop(progressPercent: Float? = 
     val percent = provided ?: currentPlaybackProgressPercent()
     // Separate NonCancellable launches: parallel, and isolated so one sink's
     // retry ladder or failure cannot delay or skip the other during teardown.
-    scope.launch(kotlinx.coroutines.NonCancellable) {
-        runCatching {
-            traktScrobbleService.scrobbleStop(item = item, progressPercent = percent)
-        }.onFailure { Log.w(PlayerRuntimeController.TAG, "Trakt scrobble stop failed", it) }
-    }
-    scope.launch(kotlinx.coroutines.NonCancellable) {
-        runCatching {
-            mdbListScrobbleService.scrobbleStop(item = item, progressPercent = percent)
-        }.onFailure { Log.w(PlayerRuntimeController.TAG, "MDBList scrobble stop failed", it) }
+    scrobbleSinks.forEach { sink ->
+        scope.launch(kotlinx.coroutines.NonCancellable) {
+            runCatching {
+                sink.scrobbleStop(item = item, progressPercent = percent)
+            }.onFailure {
+                Log.w(PlayerRuntimeController.TAG, sink.sinkName + " scrobble stop failed", it)
+            }
+        }
     }
     scrobbleStartRequestGeneration++
     hasRequestedScrobbleStartForCurrentItem = false
@@ -777,15 +786,14 @@ internal fun PlayerRuntimeController.emitPauseScrobbleStop(progressPercent: Floa
     if (item == null) return
     if (!hasRequestedScrobbleStartForCurrentItem) return
 
-    scope.launch(kotlinx.coroutines.NonCancellable) {
-        runCatching {
-            traktScrobbleService.scrobbleStop(item = item, progressPercent = progressPercent)
-        }.onFailure { Log.w(PlayerRuntimeController.TAG, "Trakt scrobble stop failed", it) }
-    }
-    scope.launch(kotlinx.coroutines.NonCancellable) {
-        runCatching {
-            mdbListScrobbleService.scrobbleStop(item = item, progressPercent = progressPercent)
-        }.onFailure { Log.w(PlayerRuntimeController.TAG, "MDBList scrobble stop failed", it) }
+    scrobbleSinks.forEach { sink ->
+        scope.launch(kotlinx.coroutines.NonCancellable) {
+            runCatching {
+                sink.scrobbleStop(item = item, progressPercent = progressPercent)
+            }.onFailure {
+                Log.w(PlayerRuntimeController.TAG, sink.sinkName + " scrobble stop failed", it)
+            }
+        }
     }
     scrobbleStartRequestGeneration++
     hasRequestedScrobbleStartForCurrentItem = false

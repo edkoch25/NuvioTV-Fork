@@ -46,7 +46,7 @@ class TraktScrobbleService @Inject constructor(
     private val traktAuthService: TraktAuthService,
     private val traktProgressService: TraktProgressService,
     private val profileManager: ProfileManager
-) {
+) : WatchScrobbleSink {
     companion object {
         private const val TAG = "TraktScrobbleSvc"
     }
@@ -66,11 +66,13 @@ class TraktScrobbleService @Inject constructor(
     private val retryDelayMs = 1_500L
     private val serverOverloadedRetryDelayMs = 5_000L
 
-    suspend fun scrobbleStart(item: TraktScrobbleItem, progressPercent: Float) {
+    override val sinkName: String = "Trakt"
+
+    override suspend fun scrobbleStart(item: TraktScrobbleItem, progressPercent: Float) {
         sendScrobble(action = "start", item = item, progressPercent = progressPercent)
     }
 
-    suspend fun scrobbleStop(item: TraktScrobbleItem, progressPercent: Float) {
+    override suspend fun scrobbleStop(item: TraktScrobbleItem, progressPercent: Float) {
         sendScrobble(action = "stop", item = item, progressPercent = progressPercent)
     }
 

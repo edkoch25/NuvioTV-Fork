@@ -44,7 +44,7 @@ class MDBListScrobbleService @Inject constructor(
     private val settingsDataStore: MDBListSettingsDataStore,
     private val mdbListProgressService: MDBListProgressService,
     private val profileManager: ProfileManager
-) {
+) : WatchScrobbleSink {
     companion object {
         private const val TAG = "MDBListScrobbleSvc"
 
@@ -67,11 +67,13 @@ class MDBListScrobbleService @Inject constructor(
     private val retryDelayMs = 1_500L
     private val serverOverloadedRetryDelayMs = 5_000L
 
-    suspend fun scrobbleStart(item: TraktScrobbleItem, progressPercent: Float) {
+    override val sinkName: String = "MDBList"
+
+    override suspend fun scrobbleStart(item: TraktScrobbleItem, progressPercent: Float) {
         sendScrobble(action = "start", item = item, progressPercent = progressPercent)
     }
 
-    suspend fun scrobbleStop(item: TraktScrobbleItem, progressPercent: Float) {
+    override suspend fun scrobbleStop(item: TraktScrobbleItem, progressPercent: Float) {
         sendScrobble(action = "stop", item = item, progressPercent = progressPercent)
     }
 
