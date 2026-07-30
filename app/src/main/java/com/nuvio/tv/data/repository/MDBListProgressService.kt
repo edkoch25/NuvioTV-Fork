@@ -2,11 +2,16 @@ package com.nuvio.tv.data.repository
 
 import android.os.SystemClock
 import android.util.Log
+import com.nuvio.tv.core.profile.ProfileManager
 import com.nuvio.tv.data.local.MDBListSettingsDataStore
 import com.nuvio.tv.data.remote.api.MDBListApi
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListPlaybackItemDto
 import com.nuvio.tv.domain.model.WatchProgress
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -14,6 +19,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.text.SimpleDateFormat
@@ -41,7 +47,8 @@ import javax.inject.Singleton
 @Singleton
 class MDBListProgressService @Inject constructor(
     private val mdbListApi: MDBListApi,
-    private val settingsDataStore: MDBListSettingsDataStore
+    private val settingsDataStore: MDBListSettingsDataStore,
+    profileManager: ProfileManager
 ) {
     companion object {
         private const val TAG = "MDBListProgressSvc"
@@ -58,6 +65,26 @@ class MDBListProgressService @Inject constructor(
     /** Last seen pause-category timestamps, used to skip redundant fetches. */
     private var lastPausedAt: String? = null
     private var lastEpisodePausedAt: String? = null
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        // Singleton service, per-profile state: forget everything on profile
+        // switch so one profile's paused sessions never surface in another's
+        // Continue Watching. Mirrors TraktProgressService's profile handling,
+        // including skipping the initial emission on cold start.
+        scope.launch {
+            var isInitialEmission = true
+            profileManager.activeProfileId.collectLatest {
+                if (isInitialEmission) {
+                    isInitialEmission = false
+                    return@collectLatest
+                }
+                reset()
+                refreshNow(force = true)
+            }
+        }
+    }
 
     /**
      * Continue Watching feed. Mirrors [TraktProgressService.observeAllProgress]'s

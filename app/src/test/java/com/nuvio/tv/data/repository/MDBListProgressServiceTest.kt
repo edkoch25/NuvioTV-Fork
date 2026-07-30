@@ -33,7 +33,8 @@ class MDBListProgressServiceTest {
 
     private fun service() = MDBListProgressService(
         mdbListApi = mockk(relaxed = true),
-        settingsDataStore = mockk(relaxed = true)
+        settingsDataStore = mockk(relaxed = true),
+        profileManager = mockk(relaxed = true)
     )
 
     private val shawshank = MDBListPlaybackItemDto(
@@ -167,7 +168,11 @@ class MDBListProgressServiceTest {
         every { settings.settings } returns flowOf(
             MDBListSettings(enabled = true, apiKey = "k", trackingEnabled = true)
         )
-        return MDBListProgressService(mdbListApi = api, settingsDataStore = settings)
+        return MDBListProgressService(
+            mdbListApi = api,
+            settingsDataStore = settings,
+            profileManager = mockk(relaxed = true)
+        )
     }
 
     @Test

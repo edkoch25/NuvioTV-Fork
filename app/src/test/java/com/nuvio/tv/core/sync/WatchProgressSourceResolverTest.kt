@@ -9,58 +9,73 @@ class WatchProgressSourceResolverTest {
 
     private val resolver = WatchProgressSourceResolver(
         traktSettingsDataStore = mockk(relaxed = true),
-        traktAuthDataStore = mockk(relaxed = true)
+        traktAuthDataStore = mockk(relaxed = true),
+        mdbListSettingsDataStore = mockk(relaxed = true)
     )
 
     @Test
     fun `trakt is honoured only when authenticated`() {
-        assertEquals(
-            WatchProgressSource.TRAKT,
-            resolver.resolve(WatchProgressSource.TRAKT, traktAuthenticated = true)
-        )
-        assertEquals(
-            WatchProgressSource.NUVIO_SYNC,
-            resolver.resolve(WatchProgressSource.TRAKT, traktAuthenticated = false)
-        )
+        for (mdbReady in listOf(true, false)) {
+            assertEquals(
+                WatchProgressSource.TRAKT,
+                resolver.resolve(WatchProgressSource.TRAKT, traktAuthenticated = true, mdbListTrackingReady = mdbReady)
+            )
+            assertEquals(
+                WatchProgressSource.NUVIO_SYNC,
+                resolver.resolve(WatchProgressSource.TRAKT, traktAuthenticated = false, mdbListTrackingReady = mdbReady)
+            )
+        }
     }
 
     @Test
-    fun `nuvio sync resolves to itself regardless of trakt auth`() {
-        assertEquals(
-            WatchProgressSource.NUVIO_SYNC,
-            resolver.resolve(WatchProgressSource.NUVIO_SYNC, traktAuthenticated = true)
-        )
-        assertEquals(
-            WatchProgressSource.NUVIO_SYNC,
-            resolver.resolve(WatchProgressSource.NUVIO_SYNC, traktAuthenticated = false)
-        )
+    fun `nuvio sync resolves to itself regardless of other backends`() {
+        for (auth in listOf(true, false)) for (mdbReady in listOf(true, false)) {
+            assertEquals(
+                WatchProgressSource.NUVIO_SYNC,
+                resolver.resolve(WatchProgressSource.NUVIO_SYNC, auth, mdbReady)
+            )
+        }
     }
 
     @Test
-    fun `mdblist falls back until a progress read client exists`() {
-        assertEquals(
-            WatchProgressSource.NUVIO_SYNC,
-            resolver.resolve(WatchProgressSource.MDBLIST, traktAuthenticated = true)
-        )
-        assertEquals(
-            WatchProgressSource.NUVIO_SYNC,
-            resolver.resolve(WatchProgressSource.MDBLIST, traktAuthenticated = false)
-        )
+    fun `mdblist is honoured when tracking is configured`() {
+        for (auth in listOf(true, false)) {
+            assertEquals(
+                WatchProgressSource.MDBLIST,
+                resolver.resolve(WatchProgressSource.MDBLIST, traktAuthenticated = auth, mdbListTrackingReady = true)
+            )
+        }
+    }
+
+    @Test
+    fun `mdblist falls back when tracking is not configured`() {
+        for (auth in listOf(true, false)) {
+            assertEquals(
+                WatchProgressSource.NUVIO_SYNC,
+                resolver.resolve(WatchProgressSource.MDBLIST, traktAuthenticated = auth, mdbListTrackingReady = false)
+            )
+        }
     }
 
     /**
-     * The refactor's no-op guarantee: for every input pair, resolving to TRAKT must
-     * agree exactly with the predicate the three call sites used before the resolver
-     * existed. If a future source changes this, it is a behaviour change and this
-     * test is the place it should surface.
+     * The original refactor's no-op guarantee, preserved through the MDBLIST
+     * extension: for every input triple, resolving to TRAKT must agree exactly
+     * with the predicate the resolver replaced.
      */
     @Test
     fun `resolving to trakt matches the legacy predicate for every input`() {
         for (stored in WatchProgressSource.entries) {
             for (authenticated in listOf(true, false)) {
-                val legacy = stored == WatchProgressSource.TRAKT && authenticated
-                val resolved = resolver.resolve(stored, authenticated) == WatchProgressSource.TRAKT
-                assertEquals("stored=$stored authenticated=$authenticated", legacy, resolved)
+                for (mdbReady in listOf(true, false)) {
+                    val legacy = stored == WatchProgressSource.TRAKT && authenticated
+                    val resolved =
+                        resolver.resolve(stored, authenticated, mdbReady) == WatchProgressSource.TRAKT
+                    assertEquals(
+                        "stored=$stored authenticated=$authenticated mdbReady=$mdbReady",
+                        legacy,
+                        resolved
+                    )
+                }
             }
         }
     }

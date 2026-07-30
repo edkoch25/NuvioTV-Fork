@@ -57,6 +57,7 @@ class WatchProgressRepositoryImpl @Inject constructor(
     private val traktProgressService: TraktProgressService,
     private val watchProgressSyncService: WatchProgressSyncService,
     private val watchProgressSourceResolver: WatchProgressSourceResolver,
+    private val mdbListProgressService: MDBListProgressService,
     private val watchedItemsPreferences: WatchedItemsPreferences,
     private val watchedItemsSyncService: WatchedItemsSyncService,
     private val authManager: AuthManager,
@@ -282,6 +283,39 @@ class WatchProgressRepositoryImpl @Inject constructor(
 
     private suspend fun shouldUseTraktProgress(): Boolean = useTraktProgressFlow().first()
 
+    private fun useMdbListProgressFlow(): Flow<Boolean> {
+        return watchProgressSourceResolver.effectiveSource()
+            .map { it == WatchProgressSource.MDBLIST }
+            .distinctUntilChanged()
+    }
+
+    /**
+     * Three-way read selector. TRAKT keeps [useTraktProgressFlow]'s debounce
+     * semantics (transient auth loss during profile switches must not flap the
+     * CW source); MDBLIST derives straight from the resolver, whose inputs are
+     * per-profile settings with no transient-unavailable state to ride out.
+     * Mutually exclusive by construction: both legs derive from the same
+     * effective source.
+     */
+    private enum class ProgressReadSource { TRAKT, MDBLIST, LOCAL }
+
+    private fun progressReadSourceFlow(): Flow<ProgressReadSource> = combine(
+        useTraktProgressFlow(),
+        useMdbListProgressFlow()
+    ) { useTrakt, useMdbList ->
+        when {
+            useTrakt -> ProgressReadSource.TRAKT
+            useMdbList -> ProgressReadSource.MDBLIST
+            else -> ProgressReadSource.LOCAL
+        }
+    }.distinctUntilChanged()
+
+    private fun mdbListAllProgressFlow(): Flow<List<WatchProgress>> {
+        return mdbListProgressService.observeAllProgress()
+            .onStart { emit(emptyList()) }
+            .distinctUntilChanged()
+    }
+
     private suspend fun hasEffectiveTraktConnection(): Boolean =
         traktAuthDataStore.isEffectivelyAuthenticated.first()
 
@@ -294,19 +328,20 @@ class WatchProgressRepositoryImpl @Inject constructor(
     }
 
     override fun observeRemoteProgressLoaded(): Flow<Boolean> {
-        return useTraktProgressFlow().flatMapLatest { useTrakt ->
-            if (useTrakt) {
-                traktProgressService.observeRemoteProgressLoaded()
-            } else {
-                kotlinx.coroutines.flow.flowOf(true)
+        return progressReadSourceFlow().flatMapLatest { source ->
+            when (source) {
+                ProgressReadSource.TRAKT -> traktProgressService.observeRemoteProgressLoaded()
+                ProgressReadSource.MDBLIST -> mdbListProgressService.observeRemoteProgressLoaded()
+                ProgressReadSource.LOCAL -> kotlinx.coroutines.flow.flowOf(true)
             }
         }.distinctUntilChanged()
     }
 
     override val allProgress: Flow<List<WatchProgress>>
-        get() = useTraktProgressFlow()
-            .flatMapLatest { useTraktProgress ->
-                if (useTraktProgress) {
+        get() = progressReadSourceFlow()
+            .flatMapLatest { source ->
+                when (source) {
+                    ProgressReadSource.TRAKT -> {
                     // Capture the profile ID at subscription time so any stale Trakt
                     // emissions that arrive during the 300ms debounce on profile switch
                     // are dropped instead of leaking into the new profile's CW list.
@@ -342,7 +377,51 @@ class WatchProgressRepositoryImpl @Inject constructor(
                                 }
                             }
                         }
-                } else {
+                    }
+                    ProgressReadSource.MDBLIST -> {
+                    // MDBList playback sessions carry no artwork and matching is
+                    // ids-only, so enrich each remote row from the local copy of
+                    // the same item (poster, names, addon base URL) and fill
+                    // duration from local when MDBList had no runtime. Local-only
+                    // rows whose IDs an external tracker can never return
+                    // (kitsu:, mal:, ...) merge in, exactly as the Trakt branch
+                    // does. Genuinely cross-device items with no local copy render
+                    // without artwork until metadata hydration catches up - a
+                    // documented v1 limitation.
+                    combine(
+                        mdbListAllProgressFlow(),
+                        watchProgressPreferences.allProgress
+                    ) { remoteItems, localItems ->
+                        val localByKey = localItems.associateBy { progressKey(it) }
+                        val enriched = remoteItems.map { remote ->
+                            val local = localByKey[progressKey(remote)] ?: return@map remote
+                            val duration = if (remote.duration > 0) remote.duration else local.duration
+                            val position = if (remote.duration > 0) {
+                                remote.position
+                            } else {
+                                val fraction = (remote.progressPercent ?: 0f) / 100f
+                                (duration * fraction).toLong()
+                            }
+                            remote.copy(
+                                name = remote.name.ifBlank { local.name },
+                                poster = remote.poster ?: local.poster,
+                                backdrop = remote.backdrop ?: local.backdrop,
+                                logo = remote.logo ?: local.logo,
+                                episodeTitle = remote.episodeTitle ?: local.episodeTitle,
+                                addonBaseUrl = remote.addonBaseUrl ?: local.addonBaseUrl,
+                                duration = duration,
+                                position = position
+                            )
+                        }
+                        val remoteKeys = remoteItems.map { progressKey(it) }.toSet()
+                        val localOnlyExternallyInvisible = localItems.filter {
+                            !isTraktCompatibleId(it.contentId) && progressKey(it) !in remoteKeys
+                        }
+                        (enriched + localOnlyExternallyInvisible)
+                            .sortedByDescending { it.lastWatched }
+                    }
+                    }
+                    ProgressReadSource.LOCAL -> {
                     watchProgressPreferences.allProgress
                         .onEach { items ->
                             val needsArtwork = items.filter {
@@ -352,6 +431,7 @@ class WatchProgressRepositoryImpl @Inject constructor(
                                 syncScope.launch { hydrateProgressArtwork(needsArtwork) }
                             }
                         }
+                    }
                 }
             }
 
@@ -359,40 +439,48 @@ class WatchProgressRepositoryImpl @Inject constructor(
         get() = allProgress.map { list -> list.filter { it.isInProgress() } }
 
     override fun getProgress(contentId: String): Flow<WatchProgress?> {
-        return useTraktProgressFlow()
-            .flatMapLatest { useTraktProgress ->
-                if (useTraktProgress) {
-                    traktProgressService.observeAllProgress().map { items ->
+        return progressReadSourceFlow()
+            .flatMapLatest { source ->
+                when (source) {
+                    ProgressReadSource.TRAKT -> traktProgressService.observeAllProgress().map { items ->
                         items
                             .filter { it.contentId == contentId }
                             .maxByOrNull { it.lastWatched }
                     }
-                } else {
-                    watchProgressPreferences.getProgress(contentId)
+                    ProgressReadSource.MDBLIST -> mdbListProgressService.observeAllProgress().map { items ->
+                        items
+                            .filter { it.contentId == contentId }
+                            .maxByOrNull { it.lastWatched }
+                    }
+                    ProgressReadSource.LOCAL -> watchProgressPreferences.getProgress(contentId)
                 }
             }
     }
 
     override fun getEpisodeProgress(contentId: String, season: Int, episode: Int): Flow<WatchProgress?> {
-        return useTraktProgressFlow()
-            .flatMapLatest { useTraktProgress ->
-                if (useTraktProgress) {
-                    traktProgressService.observeAllProgress().map { items ->
+        return progressReadSourceFlow()
+            .flatMapLatest { source ->
+                when (source) {
+                    ProgressReadSource.TRAKT -> traktProgressService.observeAllProgress().map { items ->
                         items.firstOrNull {
                             it.contentId == contentId && it.season == season && it.episode == episode
                         }
                     }
-                } else {
-                    watchProgressPreferences.getEpisodeProgress(contentId, season, episode)
+                    ProgressReadSource.MDBLIST -> mdbListProgressService.observeAllProgress().map { items ->
+                        items.firstOrNull {
+                            it.contentId == contentId && it.season == season && it.episode == episode
+                        }
+                    }
+                    ProgressReadSource.LOCAL -> watchProgressPreferences.getEpisodeProgress(contentId, season, episode)
                 }
             }
     }
 
     override fun getAllEpisodeProgress(contentId: String): Flow<Map<Pair<Int, Int>, WatchProgress>> {
-        return useTraktProgressFlow()
-            .flatMapLatest { useTraktProgress ->
-                if (useTraktProgress) {
-                    combine(
+        return progressReadSourceFlow()
+            .flatMapLatest { source ->
+                when (source) {
+                    ProgressReadSource.TRAKT -> combine(
                         traktProgressService.observeEpisodeProgress(contentId)
                             .onStart { emit(emptyMap()) },
                         allProgress.map { items ->
@@ -407,8 +495,12 @@ class WatchProgressRepositoryImpl @Inject constructor(
                         }
                         merged
                     }.distinctUntilChanged()
-                } else {
-                    watchProgressPreferences.getAllEpisodeProgress(contentId)
+                    ProgressReadSource.MDBLIST -> mdbListProgressService.observeAllProgress().map { items ->
+                        items
+                            .filter { it.contentId == contentId && it.season != null && it.episode != null }
+                            .associateBy { (it.season ?: 0) to (it.episode ?: 0) }
+                    }.distinctUntilChanged()
+                    ProgressReadSource.LOCAL -> watchProgressPreferences.getAllEpisodeProgress(contentId)
                 }
             }
     }

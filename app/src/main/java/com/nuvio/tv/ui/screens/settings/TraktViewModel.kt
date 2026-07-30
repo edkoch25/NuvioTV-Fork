@@ -24,6 +24,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import com.nuvio.tv.data.local.MDBListSettingsDataStore
+import com.nuvio.tv.data.repository.MDBListProgressService
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -50,6 +52,7 @@ data class TraktUiState(
     val continueWatchingDaysCap: Int = TraktSettingsDataStore.DEFAULT_CONTINUE_WATCHING_DAYS_CAP,
     val showMetaComments: Boolean = TraktSettingsDataStore.DEFAULT_SHOW_META_COMMENTS,
     val watchProgressSource: WatchProgressSource = TraktSettingsDataStore.DEFAULT_WATCH_PROGRESS_SOURCE,
+    val mdbListTrackingAvailable: Boolean = false,
     val librarySourceMode: LibrarySourceMode = TraktSettingsDataStore.DEFAULT_LIBRARY_SOURCE_MODE,
     val connectedStats: TraktProgressService.TraktCachedStats? = null,
     val statusMessage: String? = null,
@@ -69,6 +72,8 @@ class TraktViewModel @Inject constructor(
     private val watchedItemsSyncService: WatchedItemsSyncService,
     private val watchedSeriesStateHolder: WatchedSeriesStateHolder,
     private val cwEnrichmentCache: com.nuvio.tv.data.local.ContinueWatchingEnrichmentCache,
+    private val mdbListSettingsDataStore: MDBListSettingsDataStore,
+    private val mdbListProgressService: MDBListProgressService,
     @dagger.hilt.android.qualifiers.ApplicationContext private val context: Context
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(TraktUiState())
@@ -128,24 +133,41 @@ class TraktViewModel @Inject constructor(
             // Clear CW cache so stale items from the previous source don't flash on screen.
             cwEnrichmentCache.saveInProgressSnapshot(emptyList(), force = true)
             cwEnrichmentCache.saveNextUpSnapshot(emptyList(), force = true)
-            watchProgressPreferences.clearAllPreservingNonTraktIds { contentId ->
-                !com.nuvio.tv.data.repository.isTraktCompatibleId(contentId)
-            }
-            if (source == WatchProgressSource.TRAKT) {
-                watchedItemsPreferences.clearAll()
-                watchedSeriesStateHolder.update(emptySet())
-                traktProgressService.refreshNow()
-            } else {
-                repopulateWatchedItemsFromNuvioSync()
-                startupSyncService.requestSyncNow()
+            when (source) {
+                WatchProgressSource.TRAKT -> {
+                    watchProgressPreferences.clearAllPreservingNonTraktIds { contentId ->
+                        !com.nuvio.tv.data.repository.isTraktCompatibleId(contentId)
+                    }
+                    watchedItemsPreferences.clearAll()
+                    watchedSeriesStateHolder.update(emptySet())
+                    traktProgressService.refreshNow()
+                }
+                WatchProgressSource.NUVIO_SYNC -> {
+                    watchProgressPreferences.clearAllPreservingNonTraktIds { contentId ->
+                        !com.nuvio.tv.data.repository.isTraktCompatibleId(contentId)
+                    }
+                    repopulateWatchedItemsFromNuvioSync()
+                    startupSyncService.requestSyncNow()
+                }
+                WatchProgressSource.MDBLIST -> {
+                    // Deliberately no local-progress wipe: the MDBList read path
+                    // enriches its artwork-less rows from the local copies, and
+                    // local remains the offline fallback.
+                    repopulateWatchedItemsFromNuvioSync()
+                    startupSyncService.requestSyncNow()
+                    mdbListProgressService.refreshNow(force = true)
+                }
             }
             _uiState.update {
                 it.copy(
                     watchProgressSource = source,
-                    statusMessage = if (source == WatchProgressSource.TRAKT) {
-                        context.getString(R.string.trakt_watch_progress_trakt_selected)
-                    } else {
-                        context.getString(R.string.trakt_watch_progress_nuvio_selected)
+                    statusMessage = when (source) {
+                        WatchProgressSource.TRAKT ->
+                            context.getString(R.string.trakt_watch_progress_trakt_selected)
+                        WatchProgressSource.NUVIO_SYNC ->
+                            context.getString(R.string.trakt_watch_progress_nuvio_selected)
+                        WatchProgressSource.MDBLIST ->
+                            context.getString(R.string.trakt_watch_progress_mdblist_selected)
                     }
                 )
             }
@@ -310,6 +332,11 @@ class TraktViewModel @Inject constructor(
                         moreLikeThisSource = snapshot.moreLikeThisSource
                     )
                 }
+            }
+        }
+        viewModelScope.launch {
+            mdbListSettingsDataStore.settings.collectLatest { settings ->
+                _uiState.update { it.copy(mdbListTrackingAvailable = settings.trackingReady) }
             }
         }
     }

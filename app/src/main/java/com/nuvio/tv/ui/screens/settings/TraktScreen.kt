@@ -396,9 +396,18 @@ fun TraktScreen(
         SettingsSingleChoiceDialog(
             title = stringResource(R.string.trakt_watch_progress_dialog_title),
             subtitle = stringResource(R.string.trakt_watch_progress_dialog_subtitle),
-            options = listOf(
+            options = listOfNotNull(
                 SettingsPickerOption(WatchProgressSource.TRAKT, stringResource(R.string.trakt_watch_progress_source_trakt)),
-                SettingsPickerOption(WatchProgressSource.NUVIO_SYNC, stringResource(R.string.trakt_watch_progress_source_nuvio))
+                SettingsPickerOption(WatchProgressSource.NUVIO_SYNC, stringResource(R.string.trakt_watch_progress_source_nuvio)),
+                // Offered when MDBList tracking is configured, and kept visible
+                // while selected so it stays changeable after a key is removed.
+                // If tracking later becomes unusable the resolver degrades to
+                // Nuvio Sync rather than emptying Continue Watching.
+                if (uiState.mdbListTrackingAvailable || uiState.watchProgressSource == WatchProgressSource.MDBLIST) {
+                    SettingsPickerOption(WatchProgressSource.MDBLIST, stringResource(R.string.trakt_watch_progress_source_mdblist))
+                } else {
+                    null
+                }
             ),
             selectedValue = uiState.watchProgressSource,
             onOptionSelected = { source ->
