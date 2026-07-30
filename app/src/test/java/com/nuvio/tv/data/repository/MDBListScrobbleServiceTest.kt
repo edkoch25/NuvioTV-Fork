@@ -11,6 +11,7 @@ class MDBListScrobbleServiceTest {
     private fun service() = MDBListScrobbleService(
         mdbListApi = mockk(relaxed = true),
         settingsDataStore = mockk(relaxed = true),
+        mdbListProgressService = mockk(relaxed = true),
         profileManager = mockk(relaxed = true)
     )
 

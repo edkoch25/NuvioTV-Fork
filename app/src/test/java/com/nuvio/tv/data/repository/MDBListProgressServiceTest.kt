@@ -1,15 +1,28 @@
 package com.nuvio.tv.data.repository
 
+import com.nuvio.tv.data.local.MDBListSettingsDataStore
+import com.nuvio.tv.data.remote.api.MDBListApi
+import com.nuvio.tv.data.remote.dto.mdblist.MDBListLastActivitiesDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListPlaybackItemDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListSyncEpisodeDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListSyncIdsDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListSyncMovieDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListSyncShowDto
+import com.nuvio.tv.domain.model.MDBListSettings
 import com.nuvio.tv.domain.model.WatchProgress
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import retrofit2.Response
+import java.io.IOException
 
 /**
  * Fixtures are the exact payloads a live MDBList account returned on 2026-07-30,
@@ -145,5 +158,63 @@ class MDBListProgressServiceTest {
         val p = service().mapPlaybackToProgress(breakingBad.copy(type = null))!!
         assertEquals("series", p.contentType)
         assertEquals("tt0903747:1:2", p.videoId)
+    }
+
+    // ---- refresh gate behaviour ----
+
+    private fun serviceWith(api: MDBListApi): MDBListProgressService {
+        val settings = mockk<MDBListSettingsDataStore>()
+        every { settings.settings } returns flowOf(
+            MDBListSettings(enabled = true, apiKey = "k", trackingEnabled = true)
+        )
+        return MDBListProgressService(mdbListApi = api, settingsDataStore = settings)
+    }
+
+    @Test
+    fun `transient fetch failure does not advance the change gate`() = runTest {
+        val api = mockk<MDBListApi>()
+        coEvery { api.getLastActivities(any()) } returns Response.success(
+            MDBListLastActivitiesDto(pausedAt = "2026-07-30T00:50:56Z")
+        )
+        var playbackCalls = 0
+        coEvery { api.getPlaybackProgress(any()) } answers {
+            playbackCalls++
+            if (playbackCalls == 1) throw IOException("transient")
+            Response.success(listOf(shawshank))
+        }
+
+        val svc = serviceWith(api)
+        // Gate says changed, fetch fails: the stamp must not be committed.
+        assertFalse(svc.refreshNow())
+        // Same server timestamps. Had the stamp been committed on the failed
+        // attempt, this gate would skip and the change would be lost forever.
+        assertTrue(svc.refreshNow())
+        assertEquals(2, playbackCalls)
+    }
+
+    @Test
+    fun `unchanged gate skips the playback fetch`() = runTest {
+        val api = mockk<MDBListApi>()
+        coEvery { api.getLastActivities(any()) } returns Response.success(
+            MDBListLastActivitiesDto(pausedAt = "2026-07-30T00:50:56Z")
+        )
+        coEvery { api.getPlaybackProgress(any()) } returns Response.success(listOf(shawshank))
+
+        val svc = serviceWith(api)
+        assertTrue(svc.refreshNow())
+        // Timestamps unchanged: the second refresh costs one request, not two.
+        assertFalse(svc.refreshNow())
+        coVerify(exactly = 1) { api.getPlaybackProgress(any()) }
+        coVerify(exactly = 2) { api.getLastActivities(any()) }
+    }
+
+    @Test
+    fun `forced refresh skips the gate entirely`() = runTest {
+        val api = mockk<MDBListApi>()
+        coEvery { api.getPlaybackProgress(any()) } returns Response.success(listOf(shawshank))
+
+        val svc = serviceWith(api)
+        assertTrue(svc.refreshNow(force = true))
+        coVerify(exactly = 0) { api.getLastActivities(any()) }
     }
 }

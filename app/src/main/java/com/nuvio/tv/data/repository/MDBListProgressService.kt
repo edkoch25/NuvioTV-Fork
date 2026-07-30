@@ -48,8 +48,6 @@ class MDBListProgressService @Inject constructor(
 
         /** Matches TraktProgressService's window, so the CW pipeline behaves alike. */
         private const val INITIAL_LOAD_GRACE_PERIOD_MS = 8_000L
-
-        internal const val SOURCE_MDBLIST_PLAYBACK = WatchProgress.SOURCE_MDBLIST_PLAYBACK
     }
 
     private val remoteProgress = MutableStateFlow<List<WatchProgress>>(emptyList())
@@ -101,10 +99,22 @@ class MDBListProgressService @Inject constructor(
     suspend fun refreshNow(force: Boolean = false): Boolean = refreshMutex.withLock {
         val apiKey = activeApiKeyOrNull() ?: return@withLock false
 
-        if (!force && !pauseCategoryChanged(apiKey)) {
-            // Nothing paused or resumed since the last fetch - one request spent.
-            hasLoadedRemoteProgress.value = true
-            return@withLock false
+        // Read the change gate without committing it: the stamps advance only
+        // after a successful playback fetch, so a transient failure between
+        // "changed" and "fetched" can never permanently skip a change. A null
+        // snapshot (gate unreadable) degrades to fetching.
+        var gateSnapshot: PauseActivitySnapshot? = null
+        if (!force) {
+            gateSnapshot = fetchPauseActivities(apiKey)
+            if (gateSnapshot != null &&
+                gateSnapshot.pausedAt == lastPausedAt &&
+                gateSnapshot.episodePausedAt == lastEpisodePausedAt
+            ) {
+                // Nothing paused or resumed since the last successful fetch -
+                // one request spent.
+                hasLoadedRemoteProgress.value = true
+                return@withLock false
+            }
         }
 
         val response = try {
@@ -135,6 +145,13 @@ class MDBListProgressService @Inject constructor(
 
         remoteProgress.value = mapped
         hasLoadedRemoteProgress.value = true
+        // Commit the gate stamps only now that the fetch has succeeded. A
+        // forced refresh carries no snapshot; leaving the stamps stale just
+        // means the next gated refresh re-fetches once.
+        gateSnapshot?.let {
+            lastPausedAt = it.pausedAt
+            lastEpisodePausedAt = it.episodePausedAt
+        }
         return@withLock true
     }
 
@@ -169,26 +186,30 @@ class MDBListProgressService @Inject constructor(
         return settings.apiKey.trim().takeIf { it.isNotBlank() }
     }
 
+    /** The pause-category timestamps as read from the gate, uncommitted. */
+    private class PauseActivitySnapshot(
+        val pausedAt: String?,
+        val episodePausedAt: String?
+    )
+
     /**
-     * One cheap request that answers "is a fetch worth making?". Treats an
-     * unreadable response as changed, so a transient failure degrades to
-     * fetching rather than to showing stale progress.
+     * One cheap request that answers "is a fetch worth making?". Returns null
+     * when the gate is unreadable, which callers treat as changed so a
+     * transient failure degrades to fetching rather than to stale progress.
      */
-    private suspend fun pauseCategoryChanged(apiKey: String): Boolean {
+    private suspend fun fetchPauseActivities(apiKey: String): PauseActivitySnapshot? {
         val response = try {
             mdbListApi.getLastActivities(apiKey)
         } catch (e: Exception) {
             Log.w(TAG, "last_activities failed; assuming changed", e)
-            return true
+            return null
         }
-        if (!response.isSuccessful) return true
-        val body = response.body() ?: return true
-
-        val changed = body.pausedAt != lastPausedAt ||
-            body.episodePausedAt != lastEpisodePausedAt
-        lastPausedAt = body.pausedAt
-        lastEpisodePausedAt = body.episodePausedAt
-        return changed
+        if (!response.isSuccessful) return null
+        val body = response.body() ?: return null
+        return PauseActivitySnapshot(
+            pausedAt = body.pausedAt,
+            episodePausedAt = body.episodePausedAt
+        )
     }
 
     /**
@@ -238,7 +259,7 @@ class MDBListProgressService @Inject constructor(
             duration = durationMs,
             lastWatched = resolveLastWatchedMs(dto),
             progressPercent = percent,
-            source = SOURCE_MDBLIST_PLAYBACK,
+            source = WatchProgress.SOURCE_MDBLIST_PLAYBACK,
             mdbListPlaybackId = dto.id
         )
     }

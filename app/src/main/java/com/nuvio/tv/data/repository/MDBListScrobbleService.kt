@@ -42,6 +42,7 @@ import kotlin.math.abs
 class MDBListScrobbleService @Inject constructor(
     private val mdbListApi: MDBListApi,
     private val settingsDataStore: MDBListSettingsDataStore,
+    private val mdbListProgressService: MDBListProgressService,
     private val profileManager: ProfileManager
 ) {
     companion object {
@@ -124,6 +125,13 @@ class MDBListScrobbleService @Inject constructor(
                     progress = clampedProgress,
                     timestampMs = System.currentTimeMillis()
                 )
+                if (action == "stop") {
+                    // Mirror the Trakt path: a stop changes the paused-session
+                    // set server-side, so refresh the read model immediately
+                    // rather than waiting for the next app-level trigger.
+                    // Gated, not forced, so the change-gate stamps advance.
+                    mdbListProgressService.refreshNow()
+                }
                 return
             }
 
