@@ -84,6 +84,7 @@ fun TraktScreen(
     val strDaysFormat = stringResource(R.string.trakt_days_format)
     val strWatchProgressTrakt = stringResource(R.string.trakt_watch_progress_source_trakt)
     val strWatchProgressNuvio = stringResource(R.string.trakt_watch_progress_source_nuvio)
+    val strWatchProgressMdbList = stringResource(R.string.trakt_watch_progress_source_mdblist)
     val strSettingOn = stringResource(R.string.trakt_setting_on)
     val strSettingOff = stringResource(R.string.trakt_setting_off)
     val cwWindowFormatter: (Int) -> String = { days ->
@@ -93,6 +94,9 @@ fun TraktScreen(
         when (source) {
             WatchProgressSource.TRAKT -> strWatchProgressTrakt
             WatchProgressSource.NUVIO_SYNC -> strWatchProgressNuvio
+            // Not offered in the picker below until a progress-read client
+            // exists, but the formatter must still handle every enum value.
+            WatchProgressSource.MDBLIST -> strWatchProgressMdbList
         }
     }
     val strLibrarySourceTrakt = stringResource(R.string.trakt_library_source_trakt)
