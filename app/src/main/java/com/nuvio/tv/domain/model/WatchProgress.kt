@@ -26,13 +26,16 @@ data class WatchProgress(
     val traktPlaybackId: Long? = null,
     val traktMovieId: Int? = null,
     val traktShowId: Int? = null,
-    val traktEpisodeId: Int? = null
+    val traktEpisodeId: Int? = null,
+    /** MDBList paused-session id, used to clear the session server-side. */
+    val mdbListPlaybackId: Long? = null
 ) {
     companion object {
         const val SOURCE_LOCAL = "local"
         const val SOURCE_TRAKT_PLAYBACK = "trakt_playback"
         const val SOURCE_TRAKT_HISTORY = "trakt_history"
         const val SOURCE_TRAKT_SHOW_PROGRESS = "trakt_show_progress"
+        const val SOURCE_MDBLIST_PLAYBACK = "mdblist_playback"
         const val STARTED_THRESHOLD = 0.02f
         const val COMPLETED_THRESHOLD = 0.90f
     }
