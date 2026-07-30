@@ -12,11 +12,13 @@ import com.nuvio.tv.data.remote.dto.mdblist.MDBListWatchedMovieDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListWatchedResponseDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListWatchedShowBodyDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListWatchedShowDto
+import com.nuvio.tv.core.profile.ProfileManager
 import com.nuvio.tv.domain.model.MDBListSettings
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import okhttp3.ResponseBody.Companion.toResponseBody
@@ -75,7 +77,13 @@ class MDBListWatchedServiceTest {
         every { settings.settings } returns flowOf(
             MDBListSettings(enabled = enabled, apiKey = "k", trackingEnabled = tracking)
         )
-        return MDBListWatchedService(mdbListApi = api, settingsDataStore = settings)
+        val profiles = mockk<ProfileManager>()
+        every { profiles.activeProfileId } returns MutableStateFlow(1)
+        return MDBListWatchedService(
+            mdbListApi = api,
+            settingsDataStore = settings,
+            profileManager = profiles
+        )
     }
 
     private fun lastPage(
@@ -219,5 +227,83 @@ class MDBListWatchedServiceTest {
         assertNull(serviceWith(api, tracking = false).fetchAllWatched())
         assertNull(serviceWith(api, enabled = false).fetchAllWatched())
         coVerify(exactly = 0) { api.getWatched(any(), any(), any(), any()) }
+    }
+
+    // ----- derivation (7a) -----
+    // deriveState is pure, so these need no network stub. Fixtures are the same
+    // live payloads the paging tests use.
+
+    @Test
+    fun `derivation keys episodes by show imdb, not by episode ids`() {
+        val state = serviceWith(mockk()).deriveState(
+            MDBListWatchedPages(episodes = listOf(fromEpisode))
+        )
+        assertEquals(setOf(1 to 1), state.watchedEpisodes["tt9813792"])
+        assertEquals(1, state.watchedEpisodes.size)
+    }
+
+    @Test
+    fun `derivation collects watched movie ids by imdb`() {
+        val state = serviceWith(mockk()).deriveState(
+            MDBListWatchedPages(movies = listOf(michaelMovie))
+        )
+        assertEquals(setOf("tt11378946"), state.watchedMovieIds)
+    }
+
+    @Test
+    fun `derivation takes aired totals from the show rows without a metadata call`() {
+        val state = serviceWith(mockk()).deriveState(
+            MDBListWatchedPages(shows = listOf(fromShow))
+        )
+        assertEquals(40, state.showAiredEpisodeTotals["tt9813792"])
+    }
+
+    @Test
+    fun `derivation drops rows carrying no imdb id rather than keying on tmdb`() {
+        val noImdb = MDBListWatchedEpisodeDto(
+            lastWatchedAt = "2026-07-30T21:19:57.000Z",
+            episode = MDBListWatchedEpisodeBodyDto(
+                season = 2, number = 3,
+                ids = MDBListSyncIdsDto(tmdb = 1, tvdb = 2),
+                show = MDBListSyncShowDto(title = "No Imdb", year = 2020, ids = MDBListSyncIdsDto(tmdb = 9))
+            )
+        )
+        val state = serviceWith(mockk()).deriveState(
+            MDBListWatchedPages(episodes = listOf(fromEpisode, noImdb))
+        )
+        assertEquals(1, state.watchedEpisodes.size)
+        assertTrue(state.watchedEpisodes.containsKey("tt9813792"))
+    }
+
+    @Test
+    fun `derivation keeps season zero because specials are genuinely watched`() {
+        val special = MDBListWatchedEpisodeDto(
+            lastWatchedAt = "2026-07-30T21:19:57.000Z",
+            episode = MDBListWatchedEpisodeBodyDto(
+                season = 0, number = 1,
+                ids = MDBListSyncIdsDto(tmdb = 5),
+                show = MDBListSyncShowDto(title = "FROM", year = 2022, ids = MDBListSyncIdsDto(imdb = "tt9813792"))
+            )
+        )
+        val state = serviceWith(mockk()).deriveState(
+            MDBListWatchedPages(episodes = listOf(special))
+        )
+        assertEquals(setOf(0 to 1), state.watchedEpisodes["tt9813792"])
+    }
+
+    @Test
+    fun `derivation merges episodes of one show across pages into a single key`() {
+        val second = MDBListWatchedEpisodeDto(
+            lastWatchedAt = "2026-07-30T22:19:57.000Z",
+            episode = MDBListWatchedEpisodeBodyDto(
+                season = 1, number = 2,
+                ids = MDBListSyncIdsDto(tmdb = 7),
+                show = MDBListSyncShowDto(title = "FROM", year = 2022, ids = MDBListSyncIdsDto(imdb = "tt9813792"))
+            )
+        )
+        val state = serviceWith(mockk()).deriveState(
+            MDBListWatchedPages(episodes = listOf(fromEpisode, second))
+        )
+        assertEquals(setOf(1 to 1, 1 to 2), state.watchedEpisodes["tt9813792"])
     }
 }
