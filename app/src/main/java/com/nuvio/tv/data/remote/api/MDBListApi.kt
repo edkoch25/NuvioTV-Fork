@@ -9,6 +9,7 @@ import com.nuvio.tv.data.remote.dto.mdblist.MDBListScrobbleResponseDto
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.Headers
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
@@ -39,12 +40,24 @@ interface MDBListApi {
         @Body body: MDBListScrobbleRequestDto
     ): Response<MDBListScrobbleResponseDto>
 
-    /** Returns a bare JSON array of paused sessions. */
+    /**
+     * Returns a bare JSON array of paused sessions.
+     *
+     * no-cache is load-bearing: the shared OkHttpClient carries a 50 MB disk
+     * cache honouring server TTLs, and MDBList's responses are cacheable -
+     * measured 2026-07-30, a forced refresh 2.5s after a successful scrobble
+     * stop completed in 11ms and returned the pre-stop session list. Sync
+     * state must always revalidate with the origin.
+     */
+    @Headers("Cache-Control: no-cache")
     @GET("sync/playback")
     suspend fun getPlaybackProgress(
         @Query("apikey") apiKey: String
     ): Response<List<MDBListPlaybackItemDto>>
 
+    /** no-cache for the same reason as [getPlaybackProgress]: a cached gate
+     *  read reports "nothing changed" against a stale timestamp. */
+    @Headers("Cache-Control: no-cache")
     @GET("sync/last_activities")
     suspend fun getLastActivities(
         @Query("apikey") apiKey: String

@@ -144,7 +144,7 @@ class MDBListProgressService @Inject constructor(
                 return@withLock false
             }
         }
-        Log.d(TAG, "refresh: fetching (force=$force gateChanged=${gateSnapshot != null})")
+        Log.d(TAG, "refresh: fetching (force=$force)")
 
         val response = try {
             mdbListApi.getPlaybackProgress(apiKey)
