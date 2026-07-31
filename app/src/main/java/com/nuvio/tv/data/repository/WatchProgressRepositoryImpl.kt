@@ -819,7 +819,7 @@ class WatchProgressRepositoryImpl @Inject constructor(
                             mdbListWatchedService.observeWatchedMovieIds()
                                 .map { ids -> ids.contains(contentId) }
                         },
-                        watchedItemsPreferences.isWatched(contentId, season, episode)
+                        localIsWatchedFlow(contentId, season, episode)
                     ) { fromMdbList, fromLocal -> fromMdbList || fromLocal }
                         .distinctUntilChanged()
                     ProgressReadSource.TRAKT -> if (season != null && episode != null) {
