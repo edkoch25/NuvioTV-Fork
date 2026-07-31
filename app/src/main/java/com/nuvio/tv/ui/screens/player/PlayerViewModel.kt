@@ -333,7 +333,7 @@ class PlayerViewModel @Inject constructor(
         val scraperFileName = controller.currentFilename?.takeIf { it.isNotBlank() }
         (scraperFileName ?: urlFileName ?: controller.uiState.value.currentStreamName)
             ?.takeIf { it.isNotBlank() }
-            ?.let { rows += StatsRow("File", it.take(48)) }
+            ?.let { rows += StatsRow("File", it.replace("\n", " \u00b7 "), marquee = true) }
 
         // File size, whenever the source declared a content length at open(). It also
         // yields the exact average mux rate — size / duration — which needs no

@@ -7,6 +7,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
@@ -37,7 +39,8 @@ enum class StatsDot { NONE, GOOD, WARN, BAD }
 data class StatsRow(
     val label: String,
     val value: String,
-    val dot: StatsDot = StatsDot.NONE
+    val dot: StatsDot = StatsDot.NONE,
+    val marquee: Boolean = false
 )
 
 /**
@@ -251,11 +254,29 @@ fun PlaybackStatsOverlay(
                                 fontSize = 10.sp,
                                 modifier = Modifier.width(72.dp)
                             )
-                            Text(
-                                text = row.value,
-                                color = Color.White,
-                                fontSize = 10.sp
-                            )
+                            if (row.marquee) {
+                                Text(
+                                    text = row.value,
+                                    color = Color.White,
+                                    fontSize = 10.sp,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Clip,
+                                    modifier = Modifier
+                                        .width(220.dp)
+                                        .basicMarquee(
+                                            iterations = Int.MAX_VALUE,
+                                            velocity = 20.dp,
+                                            initialDelayMillis = 2000
+                                        )
+                                )
+                            } else {
+                                Text(
+                                    text = row.value,
+                                    color = Color.White,
+                                    fontSize = 10.sp
+                                )
+                            }
                         }
                     }
                 }
