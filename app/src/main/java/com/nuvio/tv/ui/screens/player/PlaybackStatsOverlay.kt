@@ -11,6 +11,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -46,8 +49,46 @@ data class StatsRow(
 data class PlaybackStatsSample(
     val isExoPlayer: Boolean,
     val engineLabel: String,
+    val sections: List<StatsSection>
+)
+
+/** Section a stats row belongs to; declaration order is display order in the HUD. */
+enum class StatsGroup(val header: String) {
+    SOURCE("Source"),
+    VIDEO("Video"),
+    AUDIO("Audio"),
+    NETWORK("Network"),
+    SYSTEM("System")
+}
+
+/** A titled group of stats rows, rendered under an eyebrow header + hairline rule. */
+data class StatsSection(
+    val group: StatsGroup,
     val rows: List<StatsRow>
 )
+
+private val STATS_GROUP_BY_LABEL: Map<String, StatsGroup> = buildMap {
+    listOf("Add-on", "Provider", "Server", "File", "Size")
+        .forEach { put(it, StatsGroup.SOURCE) }
+    listOf("Video", "HDR", "V bitrate", "DV", "Decoder", "Dropped", "Frame lead", "Display")
+        .forEach { put(it, StatsGroup.VIDEO) }
+    listOf("Audio", "A bitrate", "Underruns", "Route", "A jitter")
+        .forEach { put(it, StatsGroup.AUDIO) }
+    listOf("Buffer", "Speed", "Ping", "Request", "Clamp", "Load errors", "Loaded", "Stalls")
+        .forEach { put(it, StatsGroup.NETWORK) }
+    listOf("App CPU", "Memory", "SoC temp", "CPU clock")
+        .forEach { put(it, StatsGroup.SYSTEM) }
+}
+
+/**
+ * Buckets a flat, emission-ordered row list into display sections. Order within a
+ * section is preserved from emission; an unmapped label falls to SYSTEM so a newly
+ * added row can never silently vanish. Empty sections are dropped (no bare header).
+ */
+internal fun buildStatsSections(rows: List<StatsRow>): List<StatsSection> {
+    val byGroup = rows.groupBy { STATS_GROUP_BY_LABEL[it.label] ?: StatsGroup.SYSTEM }
+    return StatsGroup.values().mapNotNull { g -> byGroup[g]?.let { StatsSection(g, it) } }
+}
 
 /**
  * All quality thresholds for the HUD dots in one place so retuning is a
@@ -154,12 +195,13 @@ fun PlaybackStatsOverlay(
                     color = Color.Black.copy(alpha = 0.7f),
                     shape = RoundedCornerShape(NuvioTheme.radii.sm)
                 )
+                .width(IntrinsicSize.Max)
                 .padding(horizontal = NuvioTheme.spacing.md, vertical = NuvioTheme.spacing.sm),
             verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.xxs)
         ) {
             Text(
                 text = "STATS \u00b7 ${sample?.engineLabel.orEmpty()}",
-                color = DotGood,
+                color = Color.White.copy(alpha = 0.6f),
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold
             )
@@ -170,35 +212,51 @@ fun PlaybackStatsOverlay(
                     fontSize = 10.sp
                 )
             } else {
-                sample?.rows?.forEach { row ->
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.sm),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .background(
-                                    color = when (row.dot) {
-                                        StatsDot.GOOD -> DotGood
-                                        StatsDot.WARN -> DotWarn
-                                        StatsDot.BAD -> DotBad
-                                        StatsDot.NONE -> Color.Transparent
-                                    },
-                                    shape = CircleShape
-                                )
-                        )
-                        Text(
-                            text = row.label,
-                            color = Color.White.copy(alpha = 0.6f),
-                            fontSize = 10.sp,
-                            modifier = Modifier.width(72.dp)
-                        )
-                        Text(
-                            text = row.value,
-                            color = Color.White,
-                            fontSize = 10.sp
-                        )
+                sample?.sections?.forEach { section ->
+                    Text(
+                        text = section.group.header.uppercase(),
+                        color = Color.White.copy(alpha = 0.5f),
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 1.5.sp,
+                        modifier = Modifier.padding(top = NuvioTheme.spacing.xs, bottom = 2.dp)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(Color.White.copy(alpha = 0.12f))
+                    )
+                    section.rows.forEach { row ->
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.sm),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .background(
+                                        color = when (row.dot) {
+                                            StatsDot.GOOD -> DotGood
+                                            StatsDot.WARN -> DotWarn
+                                            StatsDot.BAD -> DotBad
+                                            StatsDot.NONE -> Color.Transparent
+                                        },
+                                        shape = CircleShape
+                                    )
+                            )
+                            Text(
+                                text = row.label,
+                                color = Color.White.copy(alpha = 0.6f),
+                                fontSize = 10.sp,
+                                modifier = Modifier.width(72.dp)
+                            )
+                            Text(
+                                text = row.value,
+                                color = Color.White,
+                                fontSize = 10.sp
+                            )
+                        }
                     }
                 }
             }

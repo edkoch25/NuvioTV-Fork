@@ -218,7 +218,7 @@ class PlayerViewModel @Inject constructor(
         val mpvActive = controller.isUsingMpvEngine() ||
             (engine == InternalPlayerEngine.AUTO && controller.mpvView != null)
         if (mpvActive) {
-            return PlaybackStatsSample(isExoPlayer = false, engineLabel = "libmpv", rows = emptyList())
+            return PlaybackStatsSample(isExoPlayer = false, engineLabel = "libmpv", sections = emptyList())
         }
         val t = PlaybackStatsThresholds
         val nowMs = android.os.SystemClock.elapsedRealtime()
@@ -793,7 +793,7 @@ class PlayerViewModel @Inject constructor(
                 dot
             )
         }
-        return PlaybackStatsSample(isExoPlayer = true, engineLabel = "ExoPlayer", rows = rows)
+        return PlaybackStatsSample(isExoPlayer = true, engineLabel = "ExoPlayer", sections = buildStatsSections(rows))
     }
 
     /**
