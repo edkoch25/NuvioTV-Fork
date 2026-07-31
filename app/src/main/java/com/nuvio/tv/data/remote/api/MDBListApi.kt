@@ -6,7 +6,10 @@ import com.nuvio.tv.data.remote.dto.mdblist.MDBListLastActivitiesDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListPlaybackItemDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListScrobbleRequestDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListScrobbleResponseDto
+import com.nuvio.tv.data.remote.dto.mdblist.MDBListWatchedAddResponseDto
+import com.nuvio.tv.data.remote.dto.mdblist.MDBListWatchedRemoveResponseDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListWatchedResponseDto
+import com.nuvio.tv.data.remote.dto.mdblist.MDBListWatchedWriteDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListUserDto
 import retrofit2.Response
 import retrofit2.http.Body
@@ -79,6 +82,28 @@ interface MDBListApi {
      *
      * No total is returned - page until `has_more` is false.
      */
+    /**
+     * Marks items watched. Body and behaviour measured 2026-07-31: a
+     * two-episode body returns `updated.episodes: 2`, so a season mark is
+     * one request rather than one per episode.
+     */
+    @POST("sync/watched")
+    suspend fun addWatched(
+        @Query("apikey") apiKey: String,
+        @Body body: MDBListWatchedWriteDto
+    ): Response<MDBListWatchedAddResponseDto>
+
+    /**
+     * Unmarks items. Takes the identical body to [addWatched], but answers
+     * with `removed` only and no `not_found`. The count is not a reliable
+     * success signal - verify by re-reading.
+     */
+    @POST("sync/watched/remove")
+    suspend fun removeWatched(
+        @Query("apikey") apiKey: String,
+        @Body body: MDBListWatchedWriteDto
+    ): Response<MDBListWatchedRemoveResponseDto>
+
     @Headers("Cache-Control: no-cache")
     @GET("sync/watched")
     suspend fun getWatched(

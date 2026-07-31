@@ -563,9 +563,9 @@ class WatchProgressRepositoryImpl @Inject constructor(
     }
 
     override fun observeNextUpSeeds(): Flow<List<WatchProgress>> {
-        return useTraktProgressFlow()
-            .flatMapLatest { useTraktProgress ->
-                if (useTraktProgress) {
+        return progressReadSourceFlow()
+            .flatMapLatest { source ->
+                if (source == ProgressReadSource.TRAKT) {
                     combine(
                         traktProgressService.observeWatchedShowSeeds(),
                         traktProgressService.observeAllProgress()
@@ -581,6 +581,58 @@ class WatchProgressRepositoryImpl @Inject constructor(
                     ) { canonicalSeeds, optimisticSeeds, useFurthest ->
                         mergeNextUpSeeds(canonicalSeeds, optimisticSeeds, useFurthest)
                     }
+                } else if (source == ProgressReadSource.MDBLIST) {
+                    // Mirrors the local branch exactly, from MDBList's watched
+                    // history instead of the local store. A seed is the furthest
+                    // (or most recently) watched episode of a show; the next
+                    // episode itself is computed downstream, where the season-0,
+                    // unaired and availability guards already live and are
+                    // source-agnostic.
+                    //
+                    // source is left at its default, as the local branch leaves it:
+                    // nextUpSeedSourceRank maps unknown sources to the worst rank,
+                    // so tagging these would silently deprioritise them wherever
+                    // seeds from different sources meet.
+                    combine(
+                        mdbListWatchedService.observeWatchedEpisodes(),
+                        mdbListWatchedService.observeShowTitles(),
+                        mdbListWatchedService.observeEpisodeWatchedAt(),
+                        layoutPreferenceDataStore.nextUpFromFurthestEpisode
+                    ) { byShow, titles, watchedAt, useFurthest ->
+                        byShow.mapNotNull { (showId, episodes) ->
+                            if (isMalformedNextUpSeedContentId(showId)) return@mapNotNull null
+                            val candidates = episodes.filter { it.first != 0 }
+                            if (candidates.isEmpty()) return@mapNotNull null
+                            val times = watchedAt[showId].orEmpty()
+                            val latest = candidates.maxWithOrNull(
+                                if (useFurthest) {
+                                    compareBy<Pair<Int, Int>> { it.first }
+                                        .thenBy { it.second }
+                                        .thenBy { times[it] ?: 0L }
+                                } else {
+                                    compareBy<Pair<Int, Int>> { times[it] ?: 0L }
+                                        .thenBy { it.first }
+                                        .thenBy { it.second }
+                                }
+                            ) ?: return@mapNotNull null
+                            WatchProgress(
+                                contentId = showId,
+                                contentType = "series",
+                                name = titles[showId].orEmpty(),
+                                poster = null,
+                                backdrop = null,
+                                logo = null,
+                                videoId = showId,
+                                season = latest.first,
+                                episode = latest.second,
+                                episodeTitle = null,
+                                position = 1L,
+                                duration = 1L,
+                                lastWatched = times[latest] ?: 0L,
+                                progressPercent = 100f
+                            )
+                        }
+                    }.flowOn(Dispatchers.Default)
                 } else {
                     // Use watched items (fully synced with pagination) to build seeds
                     // instead of watch progress (limited to 1000 entries).
@@ -1036,6 +1088,13 @@ class WatchProgressRepositoryImpl @Inject constructor(
         }.onFailure { error ->
             Log.w(TAG, "removeFromHistory MDBList session clear failed", error)
         }
+        runCatching {
+            mdbListWatchedService.unmarkWatched(
+                listOf(MDBListWatchedWriteItem(contentId, season, episode))
+            )
+        }.onFailure { error ->
+            Log.w(TAG, "removeFromHistory MDBList watched removal failed", error)
+        }
         watchProgressPreferences.removeProgress(contentId, season, episode)
         watchedItemsPreferences.unmarkAsWatched(contentId, season, episode, profileId = profileId)
         if (useTraktProgress) {
@@ -1089,6 +1148,15 @@ class WatchProgressRepositoryImpl @Inject constructor(
         }.onFailure { error ->
             Log.w(TAG, "removeFromHistoryBatch MDBList session clear failed", error)
         }
+        runCatching {
+            mdbListWatchedService.unmarkWatched(
+                episodes.map { (season, episode) ->
+                    MDBListWatchedWriteItem(contentId, season, episode)
+                }
+            )
+        }.onFailure { error ->
+            Log.w(TAG, "removeFromHistoryBatch MDBList watched removal failed", error)
+        }
 
         if (!useTraktProgress) {
             val remoteDeleteKeys = episodes.flatMap { (season, episode) ->
@@ -1121,6 +1189,23 @@ class WatchProgressRepositoryImpl @Inject constructor(
         if (progress.contentType.equals("series", ignoreCase = true) ||
             progress.contentType.equals("tv", ignoreCase = true)) {
             traktSettingsDataStore.removeDismissedNextUpKeysForContent(progress.contentId)
+        }
+        // Unconditional, like the session clear: watch state is written
+        // whenever tracking is on, so gating this on the read source would
+        // leave a Trakt-source user's MDBList history permanently stale.
+        // Must sit above the Trakt branch, which returns early.
+        runCatching {
+            mdbListWatchedService.markWatched(
+                listOf(
+                    MDBListWatchedWriteItem(
+                        imdbId = progress.contentId,
+                        season = progress.season,
+                        episode = progress.episode
+                    )
+                )
+            )
+        }.onFailure { error ->
+            Log.w(TAG, "markAsCompleted MDBList write-back failed", error)
         }
         val useTraktProgress = shouldUseTraktProgress()
         val hasEffectiveTraktConnection = hasEffectiveTraktConnection()
@@ -1213,6 +1298,23 @@ class WatchProgressRepositoryImpl @Inject constructor(
             )
         }
 
+        // Unconditional, like the session clear: watch state is written
+        // whenever tracking is on, so gating this on the read source would
+        // leave a Trakt-source user's MDBList history permanently stale.
+        // Must sit above the Trakt branch, which returns early.
+        runCatching {
+            mdbListWatchedService.markWatched(
+                progressList.map { progress ->
+                    MDBListWatchedWriteItem(
+                        imdbId = progress.contentId,
+                        season = progress.season,
+                        episode = progress.episode
+                    )
+                }
+            )
+        }.onFailure { error ->
+            Log.w(TAG, "markAsCompletedBatch MDBList write-back failed", error)
+        }
         if (useTraktProgress && hasEffectiveTraktConnection) {
             // Trakt is primary — optimistic update + batch Trakt call + local save
             completedList.forEach {

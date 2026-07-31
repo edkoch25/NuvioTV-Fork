@@ -4,10 +4,17 @@ import android.util.Log
 import com.nuvio.tv.core.profile.ProfileManager
 import com.nuvio.tv.data.local.MDBListSettingsDataStore
 import com.nuvio.tv.data.remote.api.MDBListApi
+import com.nuvio.tv.data.remote.dto.mdblist.MDBListWatchedAddResponseDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListWatchedEpisodeDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListWatchedMovieDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListWatchedSeasonDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListWatchedShowDto
+import com.nuvio.tv.data.remote.dto.mdblist.MDBListWatchedWriteDto
+import com.nuvio.tv.data.remote.dto.mdblist.MDBListWriteEpisodeDto
+import com.nuvio.tv.data.remote.dto.mdblist.MDBListWriteIdsDto
+import com.nuvio.tv.data.remote.dto.mdblist.MDBListWriteMovieDto
+import com.nuvio.tv.data.remote.dto.mdblist.MDBListWriteSeasonDto
+import com.nuvio.tv.data.remote.dto.mdblist.MDBListWriteShowDto
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -40,10 +47,20 @@ import javax.inject.Singleton
  * Season 0 is **kept** here. Specials are genuinely watched and `isWatched`
  * must say so; excluding them is a next-up concern, not a state concern.
  */
+/** One thing to mark or unmark. Movies leave season and episode null. */
+data class MDBListWatchedWriteItem(
+    val imdbId: String,
+    val season: Int? = null,
+    val episode: Int? = null
+)
+
 data class MDBListWatchedState(
     val watchedMovieIds: Set<String> = emptySet(),
     val watchedEpisodes: Map<String, Set<Pair<Int, Int>>> = emptyMap(),
-    val showAiredEpisodeTotals: Map<String, Int> = emptyMap()
+    /** Show IMDb id to title, for seeds that must render a row label. */
+    val showTitles: Map<String, String> = emptyMap(),
+    /** Per-show, per-episode watch timestamps in epoch ms; 0 when unparseable. */
+    val episodeWatchedAtMs: Map<String, Map<Pair<Int, Int>, Long>> = emptyMap()
 )
 
 data class MDBListWatchedPages(
@@ -234,9 +251,13 @@ class MDBListWatchedService @Inject constructor(
     fun observeWatchedEpisodes(): Flow<Map<String, Set<Pair<Int, Int>>>> =
         watchedState.map { it.watchedEpisodes }.distinctUntilChanged()
 
-    /** Aired-episode totals per show, free with the show rows. */
-    fun observeShowAiredTotals(): Flow<Map<String, Int>> =
-        watchedState.map { it.showAiredEpisodeTotals }.distinctUntilChanged()
+    /** Show titles by IMDb id. */
+    fun observeShowTitles(): Flow<Map<String, String>> =
+        watchedState.map { it.showTitles }.distinctUntilChanged()
+
+    /** Per-episode watch timestamps, for seed ordering by recency. */
+    fun observeEpisodeWatchedAt(): Flow<Map<String, Map<Pair<Int, Int>, Long>>> =
+        watchedState.map { it.episodeWatchedAtMs }.distinctUntilChanged()
 
     /** False until the first successful fetch resolves. */
     fun observeWatchedLoaded(): Flow<Boolean> = hasLoadedWatched
@@ -291,7 +312,7 @@ class MDBListWatchedService @Inject constructor(
         Log.d(TAG, "watched refresh: movies=" + derived.watchedMovieIds.size +
             " shows=" + derived.watchedEpisodes.size +
             " episodes=" + derived.watchedEpisodes.values.sumOf { it.size } +
-            " totals=" + derived.showAiredEpisodeTotals.size +
+            " titles=" + derived.showTitles.size +
             " (force=" + force + ")")
         return@withLock true
     }
@@ -342,6 +363,7 @@ class MDBListWatchedService @Inject constructor(
         }
 
         val episodes = mutableMapOf<String, MutableSet<Pair<Int, Int>>>()
+        val watchedAt = mutableMapOf<String, MutableMap<Pair<Int, Int>, Long>>()
         for (entry in pages.episodes) {
             val body = entry.episode ?: continue
             val showImdb = body.show?.ids?.imdb?.trim()
@@ -349,21 +371,34 @@ class MDBListWatchedService @Inject constructor(
             val season = body.season ?: continue
             val number = body.number ?: continue
             episodes.getOrPut(showImdb) { mutableSetOf() }.add(season to number)
+            watchedAt.getOrPut(showImdb) { mutableMapOf() }[season to number] =
+                parseIsoUtcOrNull(entry.lastWatchedAt) ?: 0L
         }
 
-        val totals = mutableMapOf<String, Int>()
+        // Titles come from both row kinds: the show rows carry one, and the
+        // show nested inside each episode row carries the same. Either is
+        // enough, and a show with watched episodes always has the latter.
+        val titles = mutableMapOf<String, String>()
         for (entry in pages.shows) {
             val body = entry.show ?: continue
             val showImdb = body.ids?.imdb?.trim()
             if (showImdb.isNullOrEmpty()) continue
-            val aired = body.totalAiredEpisodes ?: continue
-            totals[showImdb] = aired
+            val title = body.title?.trim()
+            if (!title.isNullOrEmpty()) titles[showImdb] = title
+        }
+        for (entry in pages.episodes) {
+            val show = entry.episode?.show ?: continue
+            val showImdb = show.ids?.imdb?.trim()
+            if (showImdb.isNullOrEmpty()) continue
+            val title = show.title?.trim()
+            if (!title.isNullOrEmpty()) titles.putIfAbsent(showImdb, title)
         }
 
         return MDBListWatchedState(
             watchedMovieIds = movieIds.toSet(),
             watchedEpisodes = episodes.mapValues { it.value.toSet() },
-            showAiredEpisodeTotals = totals.toMap()
+            showTitles = titles.toMap(),
+            episodeWatchedAtMs = watchedAt.mapValues { it.value.toMap() }
         )
     }
 
@@ -373,6 +408,148 @@ class MDBListWatchedService @Inject constructor(
         val seasonWatchedAt: String?,
         val episodeWatchedAt: String?
     )
+
+
+    /**
+     * Marks items watched. Shapes measured 2026-07-31: movies and episodes ride
+     * one Trakt-shaped body, and a multi-episode body is honoured in full, so a
+     * season mark costs one request.
+     *
+     * Called unconditionally by the repository, like
+     * [MDBListProgressService.clearSessionsFor]: watch state is written whenever
+     * tracking is on, so gating on the read source would leave a Trakt-source
+     * user's MDBList history silently stale. Self-gates on the api key.
+     *
+     * Returns true when the server reported at least one update. Refreshes the
+     * holder on success so the next read reflects the write rather than the
+     * pre-write cache.
+     */
+    suspend fun markWatched(items: List<MDBListWatchedWriteItem>): Boolean {
+        val body = buildWriteBody(items) ?: return false
+        val apiKey = activeApiKeyOrNull() ?: return false
+        Log.d(TAG, "markWatched: " + describe(items))
+        val response = try {
+            mdbListApi.addWatched(apiKey, body)
+        } catch (e: Exception) {
+            Log.w(TAG, "markWatched failed", e)
+            return false
+        }
+        if (!response.isSuccessful) {
+            Log.w(TAG, "markWatched failed with code " + response.code() +
+                " body=" + errorBodyOrNull(response))
+            return false
+        }
+        val updated = response.body()?.updated
+        val notFound = response.body()?.notFound
+        val count = (updated?.movies ?: 0) + (updated?.shows ?: 0) +
+            (updated?.seasons ?: 0) + (updated?.episodes ?: 0)
+        val missing = (notFound?.movies?.size ?: 0) + (notFound?.shows?.size ?: 0) +
+            (notFound?.seasons?.size ?: 0) + (notFound?.episodes?.size ?: 0)
+        Log.d(TAG, "markWatched: updated=" + count + " not_found=" + missing)
+        if (count > 0) refreshNow(force = true)
+        return count > 0
+    }
+
+    /**
+     * Unmarks items. Takes the same body as [markWatched].
+     *
+     * **The server's `removed` count is deliberately not returned or logged as a
+     * result.** A removal reporting zero was observed to have succeeded, so the
+     * count is unreliable in both directions; this reports only whether the
+     * request itself was accepted, and forces a refresh so the next read is the
+     * verification.
+     */
+    suspend fun unmarkWatched(items: List<MDBListWatchedWriteItem>): Boolean {
+        val body = buildWriteBody(items) ?: return false
+        val apiKey = activeApiKeyOrNull() ?: return false
+        Log.d(TAG, "unmarkWatched: " + describe(items))
+        val response = try {
+            mdbListApi.removeWatched(apiKey, body)
+        } catch (e: Exception) {
+            Log.w(TAG, "unmarkWatched failed", e)
+            return false
+        }
+        if (!response.isSuccessful) {
+            Log.w(TAG, "unmarkWatched failed with code " + response.code() +
+                " body=" + errorBodyOrNull(response))
+            return false
+        }
+        Log.d(TAG, "unmarkWatched: accepted; re-reading to verify")
+        refreshNow(force = true)
+        return true
+    }
+
+    /**
+     * Groups items into the measured body. Returns null when nothing is
+     * writable: identity is IMDb because that is what was measured, so ids the
+     * app carries for other trackers (kitsu:, mal:, tmdb:) are dropped rather
+     * than guessed at.
+     */
+    internal fun buildWriteBody(items: List<MDBListWatchedWriteItem>): MDBListWatchedWriteDto? {
+        val usable = items.filter { it.imdbId.startsWith("tt") }
+        val skipped = items.size - usable.size
+        if (skipped > 0) Log.d(TAG, "write: skipped " + skipped + " item(s) with no IMDb id")
+        if (usable.isEmpty()) return null
+
+        val movies = usable
+            .filter { it.season == null || it.episode == null }
+            .map { it.imdbId }
+            .distinct()
+            .map { MDBListWriteMovieDto(ids = MDBListWriteIdsDto(imdb = it)) }
+
+        val shows = usable
+            .filter { it.season != null && it.episode != null }
+            .groupBy { it.imdbId }
+            .map { (imdb, forShow) ->
+                val seasons = forShow
+                    .groupBy { it.season!! }
+                    .toSortedMap()
+                    .map { (season, forSeason) ->
+                        MDBListWriteSeasonDto(
+                            number = season,
+                            episodes = forSeason
+                                .map { it.episode!! }
+                                .distinct()
+                                .sorted()
+                                .map { MDBListWriteEpisodeDto(number = it) }
+                        )
+                    }
+                MDBListWriteShowDto(ids = MDBListWriteIdsDto(imdb = imdb), seasons = seasons)
+            }
+
+        if (movies.isEmpty() && shows.isEmpty()) return null
+        return MDBListWatchedWriteDto(
+            movies = movies.takeIf { it.isNotEmpty() },
+            shows = shows.takeIf { it.isNotEmpty() }
+        )
+    }
+
+    private fun describe(items: List<MDBListWatchedWriteItem>): String =
+        items.size.toString() + " item(s): " + items.take(5).joinToString(", ") {
+            if (it.season != null && it.episode != null) {
+                it.imdbId + " s" + it.season + "e" + it.episode
+            } else {
+                it.imdbId
+            }
+        }
+
+    /** Mirrors MDBListProgressService's parser; the watched rows use the same format. */
+    private fun parseIsoUtcOrNull(value: String?): Long? {
+        if (value.isNullOrBlank()) return null
+        val patterns = listOf(
+            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss'Z'"
+        )
+        for (pattern in patterns) {
+            runCatching {
+                val formatter = java.text.SimpleDateFormat(pattern, java.util.Locale.US).apply {
+                    timeZone = java.util.TimeZone.getTimeZone("UTC")
+                }
+                return formatter.parse(value)?.time
+            }
+        }
+        return null
+    }
 
     private fun errorBodyOrNull(response: retrofit2.Response<*>): String? =
         try {

@@ -251,14 +251,6 @@ class MDBListWatchedServiceTest {
     }
 
     @Test
-    fun `derivation takes aired totals from the show rows without a metadata call`() {
-        val state = serviceWith(mockk()).deriveState(
-            MDBListWatchedPages(shows = listOf(fromShow))
-        )
-        assertEquals(40, state.showAiredEpisodeTotals["tt9813792"])
-    }
-
-    @Test
     fun `derivation drops rows carrying no imdb id rather than keying on tmdb`() {
         val noImdb = MDBListWatchedEpisodeDto(
             lastWatchedAt = "2026-07-30T21:19:57.000Z",
@@ -305,5 +297,85 @@ class MDBListWatchedServiceTest {
             MDBListWatchedPages(episodes = listOf(fromEpisode, second))
         )
         assertEquals(setOf(1 to 1, 1 to 2), state.watchedEpisodes["tt9813792"])
+    }
+
+    // ----- titles and timestamps (needed by next-up seeds) -----
+
+    @Test
+    fun `derivation keeps the show title from the show rows`() {
+        val state = serviceWith(mockk()).deriveState(
+            MDBListWatchedPages(shows = listOf(fromShow))
+        )
+        assertEquals("FROM", state.showTitles["tt9813792"])
+    }
+
+    @Test
+    fun `derivation falls back to the title nested in an episode row`() {
+        val state = serviceWith(mockk()).deriveState(
+            MDBListWatchedPages(episodes = listOf(fromEpisode))
+        )
+        assertEquals("FROM", state.showTitles["tt9813792"])
+    }
+
+    @Test
+    fun `derivation parses the episode watch timestamp`() {
+        val state = serviceWith(mockk()).deriveState(
+            MDBListWatchedPages(episodes = listOf(fromEpisode))
+        )
+        val ms = state.episodeWatchedAtMs["tt9813792"]?.get(1 to 1)
+        assertEquals(1785446397000L, ms)
+    }
+
+    // ----- write body, against the shapes measured 2026-07-31 -----
+
+    @Test
+    fun `write body nests episodes under show and season`() {
+        val body = serviceWith(mockk()).buildWriteBody(
+            listOf(MDBListWatchedWriteItem("tt9813792", 1, 2))
+        )
+        assertNull(body?.movies)
+        val show = body?.shows?.single()
+        assertEquals("tt9813792", show?.ids?.imdb)
+        assertEquals(1, show?.seasons?.single()?.number)
+        assertEquals(listOf(2), show?.seasons?.single()?.episodes?.map { it.number })
+    }
+
+    @Test
+    fun `write body groups several episodes of one season into a single request`() {
+        val body = serviceWith(mockk()).buildWriteBody(
+            listOf(
+                MDBListWatchedWriteItem("tt9813792", 1, 3),
+                MDBListWatchedWriteItem("tt9813792", 1, 2)
+            )
+        )
+        val season = body?.shows?.single()?.seasons?.single()
+        assertEquals(listOf(2, 3), season?.episodes?.map { it.number })
+    }
+
+    @Test
+    fun `write body puts an item with no season or episode in movies`() {
+        val body = serviceWith(mockk()).buildWriteBody(
+            listOf(MDBListWatchedWriteItem("tt11378946"))
+        )
+        assertNull(body?.shows)
+        assertEquals("tt11378946", body?.movies?.single()?.ids?.imdb)
+    }
+
+    @Test
+    fun `write body drops ids that are not imdb rather than guessing a mapping`() {
+        val svc = serviceWith(mockk())
+        assertNull(svc.buildWriteBody(listOf(MDBListWatchedWriteItem("kitsu:123", 1, 1))))
+        val mixed = svc.buildWriteBody(
+            listOf(
+                MDBListWatchedWriteItem("kitsu:123", 1, 1),
+                MDBListWatchedWriteItem("tt9813792", 1, 1)
+            )
+        )
+        assertEquals(1, mixed?.shows?.size)
+    }
+
+    @Test
+    fun `write body is null when there is nothing writable`() {
+        assertNull(serviceWith(mockk()).buildWriteBody(emptyList()))
     }
 }
