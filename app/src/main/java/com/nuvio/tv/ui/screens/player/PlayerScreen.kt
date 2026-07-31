@@ -744,6 +744,18 @@ fun PlayerScreen(
             logoUrl = uiState.logo,
             title = uiState.title,
             message = uiState.loadingMessage.takeIf { uiState.showPlayerLoadingStatus || uiState.isTorrentStream },
+            sourceLine = run {
+                val provider = resolveStreamProvider(
+                    streamName = uiState.currentStreamName,
+                    streamDescription = null,
+                    addonName = uiState.currentStreamAddonName,
+                    host = null
+                )
+                listOfNotNull(uiState.currentStreamAddonName?.takeIf { it.isNotBlank() }, provider)
+                    .distinct()
+                    .joinToString(" \u00b7 ")
+                    .takeIf { it.isNotBlank() }
+            },
             progress = uiState.loadingProgress,
             modifier = Modifier
                 .fillMaxSize()

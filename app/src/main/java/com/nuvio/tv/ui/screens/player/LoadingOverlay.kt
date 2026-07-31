@@ -59,6 +59,7 @@ fun LoadingOverlay(
     logoUrl: String?,
     title: String? = null,
     message: String? = null,
+    sourceLine: String? = null,
     progress: Float? = null,
     modifier: Modifier = Modifier
 ) {
@@ -228,7 +229,7 @@ fun LoadingOverlay(
                 // The horizontal progress bar is suppressed when the show logo
                 // is acting as the fill indicator. The text message stays visible.
                 val showHorizontalBar = progress != null && !showLogo
-                if (!message.isNullOrBlank() || showHorizontalBar) {
+                if (!sourceLine.isNullOrBlank() || !message.isNullOrBlank() || showHorizontalBar) {
                     val messageOffset = if (showLogo || !title.isNullOrBlank()) 94.dp else 86.dp
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -237,6 +238,17 @@ fun LoadingOverlay(
                             .offset(y = messageOffset)
                             .padding(horizontal = NuvioTheme.spacing.xl)
                     ) {
+                        if (!sourceLine.isNullOrBlank()) {
+                            Text(
+                                text = sourceLine,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color.White.copy(alpha = 0.72f),
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                        }
                         Crossfade(
                             targetState = message?.takeIf { it.isNotBlank() },
                             animationSpec = tween(durationMillis = 260),
