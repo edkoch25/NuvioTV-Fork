@@ -698,7 +698,15 @@ class WatchProgressRepositoryImpl @Inject constructor(
             .flatMapLatest { source ->
                 when (source) {
                     ProgressReadSource.TRAKT -> traktProgressService.observeAllWatchedMovieIds()
-                    ProgressReadSource.MDBLIST -> mdbListWatchedService.observeWatchedMovieIds()
+                    // Union, not replacement. MDBList watch history is newly
+                    // adopted and sparse, while the local store may hold years;
+                    // taking MDBList alone would silently unmark everything the
+                    // user has ever watched the moment they pick it as a source.
+                    ProgressReadSource.MDBLIST -> combine(
+                        mdbListWatchedService.observeWatchedMovieIds(),
+                        localWatchedMovieIdsFlow()
+                    ) { fromMdbList, fromLocal -> fromMdbList + fromLocal }
+                        .distinctUntilChanged()
                     ProgressReadSource.LOCAL -> localWatchedMovieIdsFlow()
                 }
             }
@@ -762,7 +770,22 @@ class WatchProgressRepositoryImpl @Inject constructor(
                 if (!mdbListWatchedService.observeWatchedLoaded().first()) {
                     mdbListWatchedService.refreshNow()
                 }
-                mdbListWatchedService.currentState().watchedEpisodes
+                val mdbListEpisodes = mdbListWatchedService.currentState().watchedEpisodes
+                val localEpisodes = watchedItemsPreferences.allItems.first()
+                    .filter { it.season != null && it.episode != null }
+                    .filter { it.contentType.equals("series", ignoreCase = true) || it.contentType.equals("tv", ignoreCase = true) }
+                    .groupBy { it.contentId }
+                    .mapValues { (_, items) ->
+                        items.map { it.season!! to it.episode!! }.toSet()
+                    }
+                // Same union the TRAKT branch performs, for the same reason:
+                // the local store holds episodes marked here but not present
+                // upstream, and dropping them would unmark watched episodes.
+                val merged = mdbListEpisodes.toMutableMap()
+                for ((contentId, episodes) in localEpisodes) {
+                    merged[contentId] = (merged[contentId] ?: emptySet()) + episodes
+                }
+                merged
             }
             ProgressReadSource.LOCAL -> {
                 watchedItemsPreferences.allItems.first()
@@ -788,15 +811,17 @@ class WatchProgressRepositoryImpl @Inject constructor(
             .flatMapLatest { source ->
                 when (source) {
                     ProgressReadSource.LOCAL -> localIsWatchedFlow(contentId, season, episode)
-                    ProgressReadSource.MDBLIST -> if (season != null && episode != null) {
-                        mdbListWatchedService.observeWatchedEpisodes()
-                            .map { byShow -> byShow[contentId]?.contains(season to episode) == true }
-                            .distinctUntilChanged()
-                    } else {
-                        mdbListWatchedService.observeWatchedMovieIds()
-                            .map { ids -> ids.contains(contentId) }
-                            .distinctUntilChanged()
-                    }
+                    ProgressReadSource.MDBLIST -> combine(
+                        if (season != null && episode != null) {
+                            mdbListWatchedService.observeWatchedEpisodes()
+                                .map { byShow -> byShow[contentId]?.contains(season to episode) == true }
+                        } else {
+                            mdbListWatchedService.observeWatchedMovieIds()
+                                .map { ids -> ids.contains(contentId) }
+                        },
+                        watchedItemsPreferences.isWatched(contentId, season, episode)
+                    ) { fromMdbList, fromLocal -> fromMdbList || fromLocal }
+                        .distinctUntilChanged()
                     ProgressReadSource.TRAKT -> if (season != null && episode != null) {
                         traktProgressService.observeEpisodeProgress(contentId)
                             .map { progressMap ->

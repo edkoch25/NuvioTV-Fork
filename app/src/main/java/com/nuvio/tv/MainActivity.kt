@@ -137,6 +137,7 @@ import com.nuvio.tv.data.local.StartupAuthNotice
 import com.nuvio.tv.data.local.ThemeDataStore
 import com.nuvio.tv.data.remote.supabase.AvatarRepository
 import com.nuvio.tv.data.repository.MDBListProgressService
+import com.nuvio.tv.data.repository.MDBListWatchedService
 import com.nuvio.tv.data.repository.TraktProgressService
 import com.nuvio.tv.domain.model.AppFont
 import com.nuvio.tv.domain.model.AppTheme
@@ -229,6 +230,9 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var mdbListProgressService: MDBListProgressService
+
+    @Inject
+    lateinit var mdbListWatchedService: MDBListWatchedService
 
     @Inject
     lateinit var startupSyncService: StartupSyncService
@@ -911,9 +915,11 @@ class MainActivity : ComponentActivity() {
                 isFirstResumeAfterCreate = false
                 traktProgressService.invalidateAndRefresh()
                 mdbListProgressService.refreshNow(force = true)
+                mdbListWatchedService.refreshNow(force = true)
             } else {
                 traktProgressService.refreshNow()
                 mdbListProgressService.refreshNow()
+                mdbListWatchedService.refreshNow()
             }
         }
     }
