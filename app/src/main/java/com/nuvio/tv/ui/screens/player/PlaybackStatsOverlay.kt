@@ -222,7 +222,7 @@ fun PlaybackStatsOverlay(
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Medium,
                         letterSpacing = 1.5.sp,
-                        modifier = Modifier.padding(top = NuvioTheme.spacing.xs, bottom = 2.dp)
+                        modifier = Modifier.padding(top = NuvioTheme.spacing.xxs, bottom = 2.dp)
                     )
                     Box(
                         modifier = Modifier

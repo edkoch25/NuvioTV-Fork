@@ -852,7 +852,7 @@ fun PlayerScreen(
             sample = playbackStatsSample,
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(top = NuvioTheme.spacing.lg, end = NuvioTheme.spacing.lg)
+                .padding(top = NuvioTheme.spacing.sm, end = NuvioTheme.spacing.lg)
                 .zIndex(2.7f)
         )
 
