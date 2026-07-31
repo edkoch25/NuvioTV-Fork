@@ -60,6 +60,7 @@ fun LoadingOverlay(
     title: String? = null,
     message: String? = null,
     sourceLine: String? = null,
+    filename: String? = null,
     progress: Float? = null,
     modifier: Modifier = Modifier
 ) {
@@ -229,7 +230,7 @@ fun LoadingOverlay(
                 // The horizontal progress bar is suppressed when the show logo
                 // is acting as the fill indicator. The text message stays visible.
                 val showHorizontalBar = progress != null && !showLogo
-                if (!sourceLine.isNullOrBlank() || !message.isNullOrBlank() || showHorizontalBar) {
+                if (!sourceLine.isNullOrBlank() || !filename.isNullOrBlank() || !message.isNullOrBlank() || showHorizontalBar) {
                     val messageOffset = if (showLogo || !title.isNullOrBlank()) 94.dp else 86.dp
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -238,15 +239,35 @@ fun LoadingOverlay(
                             .offset(y = messageOffset)
                             .padding(horizontal = NuvioTheme.spacing.xl)
                     ) {
+                        val sourceShadow = androidx.compose.ui.graphics.Shadow(
+                            color = Color.Black.copy(alpha = 0.85f),
+                            offset = androidx.compose.ui.geometry.Offset(0f, 2f),
+                            blurRadius = 6f
+                        )
                         if (!sourceLine.isNullOrBlank()) {
                             Text(
                                 text = sourceLine,
-                                style = MaterialTheme.typography.labelMedium,
+                                style = MaterialTheme.typography.labelMedium.copy(shadow = sourceShadow),
                                 color = Color.White.copy(alpha = 0.72f),
                                 textAlign = TextAlign.Center,
                                 maxLines = 1,
                                 modifier = Modifier.fillMaxWidth()
                             )
+                        }
+                        if (!filename.isNullOrBlank()) {
+                            Text(
+                                text = filename,
+                                style = MaterialTheme.typography.labelMedium.copy(shadow = sourceShadow),
+                                color = Color.White.copy(alpha = 0.62f),
+                                textAlign = TextAlign.Center,
+                                maxLines = 2,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 2.dp)
+                            )
+                        }
+                        if (!sourceLine.isNullOrBlank() || !filename.isNullOrBlank()) {
                             Spacer(modifier = Modifier.height(6.dp))
                         }
                         Crossfade(

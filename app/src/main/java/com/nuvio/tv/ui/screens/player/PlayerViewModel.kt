@@ -136,6 +136,10 @@ class PlayerViewModel @Inject constructor(
     val exoPlayer: ExoPlayer?
         get() = controller.exoPlayer
 
+    /** Release filename for the current stream, surfaced for the loading overlay. */
+    val currentFilename: String?
+        get() = controller.currentFilename
+
     private val playbackStatsCpuSampler = ProcessCpuSampler()
     private val playbackStatsThermalSampler by lazy { PlaybackThermalSampler(context) }
     private val playbackStatsCpuClockSampler = PlaybackCpuClockSampler()

@@ -756,6 +756,7 @@ fun PlayerScreen(
                     .joinToString(" \u00b7 ")
                     .takeIf { it.isNotBlank() }
             },
+            filename = viewModel.currentFilename,
             progress = uiState.loadingProgress,
             modifier = Modifier
                 .fillMaxSize()
