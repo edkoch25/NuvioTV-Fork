@@ -64,6 +64,7 @@ class WatchProgressRepositoryImpl @Inject constructor(
     private val metaRepository: MetaRepository,
     private val tmdbService: TmdbService,
     private val profileManager: com.nuvio.tv.core.profile.ProfileManager,
+    private val mdbListWatchedService: MDBListWatchedService,
 ) : WatchProgressRepository {
     companion object {
         private const val TAG = "WatchProgressRepo"
@@ -282,6 +283,14 @@ class WatchProgressRepositoryImpl @Inject constructor(
     }
 
     private suspend fun shouldUseTraktProgress(): Boolean = useTraktProgressFlow().first()
+
+    /**
+     * Suspend counterpart to [progressReadSourceFlow], for reads that cannot
+     * collect. Mirrors what [shouldUseTraktProgress] is to
+     * [useTraktProgressFlow].
+     */
+    private suspend fun progressReadSource(): ProgressReadSource =
+        progressReadSourceFlow().first()
 
     private fun useMdbListProgressFlow(): Flow<Boolean> {
         return watchProgressSourceResolver.effectiveSource()
@@ -685,35 +694,41 @@ class WatchProgressRepositoryImpl @Inject constructor(
 
     @OptIn(FlowPreview::class)
     override fun observeWatchedMovieIds(): Flow<Set<String>> {
-        return useTraktProgressFlow()
-            .flatMapLatest { useTraktProgress ->
-                if (useTraktProgress) {
-                    traktProgressService.observeAllWatchedMovieIds()
-                } else {
-                    combine(
-                        watchProgressPreferences.allProgress,
-                        watchedItemsPreferences.allItems
-                    ) { progressList, watchedItems ->
-                        val completedIds = mutableSetOf<String>()
-                        val replayingIds = mutableSetOf<String>()
-                        for (progress in progressList) {
-                            if (progress.isCompleted()) {
-                                completedIds.add(progress.contentId)
-                            } else if (progress.position > 0L ||
-                                progress.progressPercent?.let { it > 0f } == true
-                            ) {
-                                replayingIds.add(progress.contentId)
-                            }
-                        }
-                        val watchedItemIds = watchedItems
-                            .filter { it.season == null && it.episode == null }
-                            .map { it.contentId }
-                            .toSet()
-                        (completedIds + watchedItemIds) - replayingIds
-                    }.debounce(500)
+        return progressReadSourceFlow()
+            .flatMapLatest { source ->
+                when (source) {
+                    ProgressReadSource.TRAKT -> traktProgressService.observeAllWatchedMovieIds()
+                    ProgressReadSource.MDBLIST -> mdbListWatchedService.observeWatchedMovieIds()
+                    ProgressReadSource.LOCAL -> localWatchedMovieIdsFlow()
                 }
             }
             .distinctUntilChanged()
+    }
+
+    /** The unchanged local derivation, lifted so the source split reads cleanly. */
+    @OptIn(FlowPreview::class)
+    private fun localWatchedMovieIdsFlow(): Flow<Set<String>> {
+        return combine(
+            watchProgressPreferences.allProgress,
+            watchedItemsPreferences.allItems
+        ) { progressList, watchedItems ->
+            val completedIds = mutableSetOf<String>()
+            val replayingIds = mutableSetOf<String>()
+            for (progress in progressList) {
+                if (progress.isCompleted()) {
+                    completedIds.add(progress.contentId)
+                } else if (progress.position > 0L ||
+                    progress.progressPercent?.let { it > 0f } == true
+                ) {
+                    replayingIds.add(progress.contentId)
+                }
+            }
+            val watchedItemIds = watchedItems
+                .filter { it.season == null && it.episode == null }
+                .map { it.contentId }
+                .toSet()
+            (completedIds + watchedItemIds) - replayingIds
+        }.debounce(500)
     }
 
     /**
@@ -723,28 +738,40 @@ class WatchProgressRepositoryImpl @Inject constructor(
      * For Nuvio sync: from watchedItemsPreferences.
      */
     override suspend fun getWatchedShowEpisodes(): Map<String, Set<Pair<Int, Int>>> {
-        return if (shouldUseTraktProgress()) {
-            val traktEpisodes = traktProgressService.getWatchedShowEpisodes()
-            val localEpisodes = watchedItemsPreferences.allItems.first()
-                .filter { it.season != null && it.episode != null }
-                .filter { it.contentType.equals("series", ignoreCase = true) || it.contentType.equals("tv", ignoreCase = true) }
-                .groupBy { it.contentId }
-                .mapValues { (_, items) ->
-                    items.map { it.season!! to it.episode!! }.toSet()
+        return when (progressReadSource()) {
+            ProgressReadSource.TRAKT -> {
+                val traktEpisodes = traktProgressService.getWatchedShowEpisodes()
+                val localEpisodes = watchedItemsPreferences.allItems.first()
+                    .filter { it.season != null && it.episode != null }
+                    .filter { it.contentType.equals("series", ignoreCase = true) || it.contentType.equals("tv", ignoreCase = true) }
+                    .groupBy { it.contentId }
+                    .mapValues { (_, items) ->
+                        items.map { it.season!! to it.episode!! }.toSet()
+                    }
+                // Merge: union of episodes from both sources per content ID
+                val merged = traktEpisodes.toMutableMap()
+                for ((contentId, episodes) in localEpisodes) {
+                    merged[contentId] = (merged[contentId] ?: emptySet()) + episodes
                 }
-            // Merge: union of episodes from both sources per content ID
-            val merged = traktEpisodes.toMutableMap()
-            for ((contentId, episodes) in localEpisodes) {
-                merged[contentId] = (merged[contentId] ?: emptySet()) + episodes
+                merged
             }
-            merged
-        } else {
-            watchedItemsPreferences.allItems.first()
-                .filter { it.season != null && it.episode != null }
-                .groupBy { it.contentId }
-                .mapValues { (_, items) ->
-                    items.map { it.season!! to it.episode!! }.toSet()
+            // A cold state holder would answer "nothing watched", which reads as
+            // unwatched rather than unknown, so resolve it before answering. The
+            // gate makes an already-fresh account cost one request.
+            ProgressReadSource.MDBLIST -> {
+                if (!mdbListWatchedService.observeWatchedLoaded().first()) {
+                    mdbListWatchedService.refreshNow()
                 }
+                mdbListWatchedService.currentState().watchedEpisodes
+            }
+            ProgressReadSource.LOCAL -> {
+                watchedItemsPreferences.allItems.first()
+                    .filter { it.season != null && it.episode != null }
+                    .groupBy { it.contentId }
+                    .mapValues { (_, items) ->
+                        items.map { it.season!! to it.episode!! }.toSet()
+                    }
+            }
         }
     }
 
@@ -757,41 +784,54 @@ class WatchProgressRepositoryImpl @Inject constructor(
     }
 
     override fun isWatched(contentId: String, videoId: String?, season: Int?, episode: Int?): Flow<Boolean> {
-        return useTraktProgressFlow()
-            .flatMapLatest { useTraktProgress ->
-                if (!useTraktProgress) {
-                    val progressFlow = if (season != null && episode != null) {
-                        watchProgressPreferences.getEpisodeProgress(contentId, season, episode)
+        return progressReadSourceFlow()
+            .flatMapLatest { source ->
+                when (source) {
+                    ProgressReadSource.LOCAL -> localIsWatchedFlow(contentId, season, episode)
+                    ProgressReadSource.MDBLIST -> if (season != null && episode != null) {
+                        mdbListWatchedService.observeWatchedEpisodes()
+                            .map { byShow -> byShow[contentId]?.contains(season to episode) == true }
+                            .distinctUntilChanged()
                     } else {
-                        watchProgressPreferences.getProgress(contentId)
+                        mdbListWatchedService.observeWatchedMovieIds()
+                            .map { ids -> ids.contains(contentId) }
+                            .distinctUntilChanged()
                     }
-                    return@flatMapLatest combine(
-                        progressFlow,
-                        watchedItemsPreferences.isWatched(contentId, season, episode)
-                    ) { progressEntry, itemWatched ->
-                        val hasStartedReplay = progressEntry?.let { entry ->
-                            !entry.isCompleted() &&
-                                (entry.position > 0L || entry.progressPercent?.let { it > 0f } == true)
-                        } == true
-
-                        if (hasStartedReplay) {
-                            false
-                        } else {
-                            (progressEntry?.isCompleted() == true) || itemWatched
-                        }
+                    ProgressReadSource.TRAKT -> if (season != null && episode != null) {
+                        traktProgressService.observeEpisodeProgress(contentId)
+                            .map { progressMap ->
+                                progressMap[season to episode]?.isCompleted() == true
+                            }
+                            .distinctUntilChanged()
+                    } else {
+                        traktProgressService.observeMovieWatched(contentId, videoId)
                     }
-                }
-
-                if (season != null && episode != null) {
-                    traktProgressService.observeEpisodeProgress(contentId)
-                        .map { progressMap ->
-                            progressMap[season to episode]?.isCompleted() == true
-                        }
-                        .distinctUntilChanged()
-                } else {
-                    traktProgressService.observeMovieWatched(contentId, videoId)
                 }
             }
+    }
+
+    /** The unchanged local derivation, lifted so the source split reads cleanly. */
+    private fun localIsWatchedFlow(contentId: String, season: Int?, episode: Int?): Flow<Boolean> {
+        val progressFlow = if (season != null && episode != null) {
+            watchProgressPreferences.getEpisodeProgress(contentId, season, episode)
+        } else {
+            watchProgressPreferences.getProgress(contentId)
+        }
+        return combine(
+            progressFlow,
+            watchedItemsPreferences.isWatched(contentId, season, episode)
+        ) { progressEntry, itemWatched ->
+            val hasStartedReplay = progressEntry?.let { entry ->
+                !entry.isCompleted() &&
+                    (entry.position > 0L || entry.progressPercent?.let { it > 0f } == true)
+            } == true
+
+            if (hasStartedReplay) {
+                false
+            } else {
+                (progressEntry?.isCompleted() == true) || itemWatched
+            }
+        }
     }
 
     override suspend fun saveProgress(progress: WatchProgress, syncRemote: Boolean) {
