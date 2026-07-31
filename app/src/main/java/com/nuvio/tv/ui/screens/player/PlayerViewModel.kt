@@ -324,6 +324,17 @@ class PlayerViewModel @Inject constructor(
         // string, not the file); fall back to the label when the URL doesn't
         // end in something filename-shaped.
         val host = streamUrl?.let { runCatching { URI(it).host }.getOrNull() }
+        // Add-on + provider (nt41). Add-on is retained UI state; provider is parsed
+        // from the stream's marketing label (debrid store / library / host).
+        val statsUi = controller.uiState.value
+        statsUi.currentStreamAddonName?.takeIf { it.isNotBlank() }
+            ?.let { rows += StatsRow("Add-on", it) }
+        resolveStreamProvider(
+            streamName = statsUi.currentStreamName,
+            streamDescription = controller.currentStreamDescription,
+            addonName = statsUi.currentStreamAddonName,
+            host = host
+        )?.let { rows += StatsRow("Provider", it) }
         host?.let { rows += StatsRow("Server", it) }
         val urlFileName = streamUrl
             ?.let { runCatching { URI(it).path }.getOrNull() }
