@@ -504,10 +504,46 @@ class WatchProgressRepositoryImpl @Inject constructor(
                         }
                         merged
                     }.distinctUntilChanged()
-                    ProgressReadSource.MDBLIST -> mdbListProgressService.observeAllProgress().map { items ->
-                        items
+                    // Watched history rendered as completed entries, mirroring the
+                    // Trakt snapshot: the detail screen's episode ticks, next-to-watch
+                    // and the player's next-episode state all read this map and treat
+                    // isCompleted() as "watched". Sessions alone answered only "paused",
+                    // so every finished episode read as unwatched under MDBList.
+                    // A live paused session wins over a synthesised completed entry,
+                    // so a rewatch in progress is never masked by history.
+                    ProgressReadSource.MDBLIST -> combine(
+                        mdbListProgressService.observeAllProgress(),
+                        mdbListWatchedService.observeWatchedEpisodes()
+                    ) { items, watchedByShow ->
+                        val live = items
                             .filter { it.contentId == contentId && it.season != null && it.episode != null }
                             .associateBy { (it.season ?: 0) to (it.episode ?: 0) }
+                        val merged = live.toMutableMap()
+                        watchedByShow[contentId].orEmpty().forEach { (season, episode) ->
+                            merged.getOrPut(season to episode) {
+                                WatchProgress(
+                                    contentId = contentId,
+                                    contentType = "series",
+                                    name = "",
+                                    poster = null,
+                                    backdrop = null,
+                                    logo = null,
+                                    videoId = "$contentId:$season:$episode",
+                                    season = season,
+                                    episode = episode,
+                                    episodeTitle = null,
+                                    position = 0L,
+                                    duration = 0L,
+                                    // The watched read reduces to (season, episode) sets and
+                                    // keeps no timestamps, so 0 is honest; next-to-watch under
+                                    // the furthest-episode preference orders by number, not time.
+                                    lastWatched = 0L,
+                                    progressPercent = 100f,
+                                    source = WatchProgress.SOURCE_MDBLIST_HISTORY
+                                )
+                            }
+                        }
+                        merged.toMap()
                     }.distinctUntilChanged()
                     ProgressReadSource.LOCAL -> watchProgressPreferences.getAllEpisodeProgress(contentId)
                 }
