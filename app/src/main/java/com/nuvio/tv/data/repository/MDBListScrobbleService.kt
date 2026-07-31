@@ -52,7 +52,7 @@ class MDBListScrobbleService @Inject constructor(
         private const val POST_STOP_REFRESH_DELAY_MS = 2_500L
     }
 
-    private data class ScrobbleStamp(
+    internal data class ScrobbleStamp(
         val profileId: Int,
         val action: String,
         val itemKey: String,
@@ -61,6 +61,16 @@ class MDBListScrobbleService @Inject constructor(
     )
 
     private var lastScrobbleStamp: ScrobbleStamp? = null
+
+    /**
+     * The last action actually dispatched, stamped before the request goes out.
+     *
+     * [lastScrobbleStamp] commits only on a successful response, so for the
+     * duration of a start's round trip it still names the action that preceded
+     * it. Without this second stamp a stop evaluated inside that window has no
+     * way to see the in-flight start.
+     */
+    private var lastIssuedStamp: ScrobbleStamp? = null
     private val minSendIntervalMs = 8_000L
     private val progressWindow = 1.5f
     private val maxRetries = 2
@@ -102,6 +112,16 @@ class MDBListScrobbleService @Inject constructor(
 
         val requestBody = buildRequestBody(item, clampedProgress)
         Log.d(TAG, "send $action ${item.itemKey} progress=${requestBody.progress}")
+
+        // Stamped before dispatch, not on success: shouldSkip has to be able to
+        // see a start that has been sent but not yet acknowledged.
+        lastIssuedStamp = ScrobbleStamp(
+            profileId = activeProfileId,
+            action = action,
+            itemKey = item.itemKey,
+            progress = clampedProgress,
+            timestampMs = System.currentTimeMillis()
+        )
 
         var lastException: Exception? = null
         val attempts = if (action == "stop") maxRetries + 1 else 1
@@ -238,10 +258,45 @@ class MDBListScrobbleService @Inject constructor(
             trakt = ids.trakt
         )
 
-    private fun shouldSkip(profileId: Int, action: String, itemKey: String, progress: Float): Boolean {
-        val last = lastScrobbleStamp ?: return false
-        val now = System.currentTimeMillis()
-        val isSameWindow = now - last.timestampMs < minSendIntervalMs
+    private fun shouldSkip(profileId: Int, action: String, itemKey: String, progress: Float): Boolean =
+        shouldSkipDecision(
+            last = lastScrobbleStamp,
+            issued = lastIssuedStamp,
+            nowMs = System.currentTimeMillis(),
+            profileId = profileId,
+            action = action,
+            itemKey = itemKey,
+            progress = progress
+        )
+
+    /**
+     * The dedup decision, split out from the mutable stamps so it can be tested
+     * directly instead of through a full request round trip. [nowMs] is passed in
+     * for the same reason.
+     */
+    internal fun shouldSkipDecision(
+        last: ScrobbleStamp?,
+        issued: ScrobbleStamp?,
+        nowMs: Long,
+        profileId: Int,
+        action: String,
+        itemKey: String,
+        progress: Float
+    ): Boolean {
+        // Never skip a stop while a start for the same item is still in flight.
+        // Measured 2026-07-31: stop 200 at 21:28:22.832, start dispatched at
+        // 21:28:23.986, stop evaluated and skipped at 21:28:24.156, start 201 at
+        // 21:28:24.303. The skipped stop was the last of the play, so MDBList kept
+        // the item marked playing, its paused session stayed hidden, and the title
+        // dropped out of Continue Watching having lost its resume position.
+        if (action == "stop" && issued != null && issued.action == "start" &&
+            issued.itemKey == itemKey && issued.profileId == profileId
+        ) {
+            return false
+        }
+
+        if (last == null) return false
+        val isSameWindow = nowMs - last.timestampMs < minSendIntervalMs
         val isSameProfile = last.profileId == profileId
         val isSameAction = last.action == action
         val isSameItem = last.itemKey == itemKey

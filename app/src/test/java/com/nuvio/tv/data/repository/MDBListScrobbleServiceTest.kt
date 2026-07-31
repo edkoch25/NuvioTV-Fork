@@ -3,7 +3,9 @@ package com.nuvio.tv.data.repository
 import com.nuvio.tv.data.remote.dto.trakt.TraktIdsDto
 import io.mockk.mockk
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MDBListScrobbleServiceTest {
@@ -82,5 +84,84 @@ class MDBListScrobbleServiceTest {
         assertEquals(2, body.show?.season?.number)
         assertEquals(7, body.show?.season?.episode?.number)
         assertEquals(81.0f, body.progress)
+    }
+
+    private fun stamp(
+        action: String,
+        itemKey: String = BRAVEHEART,
+        progress: Float = 45.59f,
+        timestampMs: Long = 1_000_000L,
+        profileId: Int = 1
+    ) = MDBListScrobbleService.ScrobbleStamp(
+        profileId = profileId,
+        action = action,
+        itemKey = itemKey,
+        progress = progress,
+        timestampMs = timestampMs
+    )
+
+    @Test
+    fun `stop is not skipped while a start for the same item is still in flight`() {
+        // The measured 2026-07-31 sequence: a stop returned 200, a start was
+        // dispatched 1.15s later and had not yet been acknowledged, and the
+        // closing stop arrived 0.17s after that at effectively the same position.
+        // Before the fix the stop compared against the earlier stop, matched the
+        // dedup window and was dropped, so MDBList kept the item marked playing.
+        val skip = service().shouldSkipDecision(
+            last = stamp(action = "stop", timestampMs = 1_000_000L),
+            issued = stamp(action = "start", timestampMs = 1_001_150L),
+            nowMs = 1_001_320L,
+            profileId = 1,
+            action = "stop",
+            itemKey = BRAVEHEART,
+            progress = 45.597f
+        )
+        assertFalse(skip)
+    }
+
+    @Test
+    fun `a genuine repeat stop inside the window is still skipped`() {
+        val skip = service().shouldSkipDecision(
+            last = stamp(action = "stop", timestampMs = 1_000_000L),
+            issued = stamp(action = "stop", timestampMs = 1_000_000L),
+            nowMs = 1_001_300L,
+            profileId = 1,
+            action = "stop",
+            itemKey = BRAVEHEART,
+            progress = 45.597f
+        )
+        assertTrue(skip)
+    }
+
+    @Test
+    fun `an in-flight start for another item does not rescue a duplicate stop`() {
+        val skip = service().shouldSkipDecision(
+            last = stamp(action = "stop"),
+            issued = stamp(action = "start", itemKey = "movie:tt0111161:0"),
+            nowMs = 1_001_300L,
+            profileId = 1,
+            action = "stop",
+            itemKey = BRAVEHEART,
+            progress = 45.597f
+        )
+        assertTrue(skip)
+    }
+
+    @Test
+    fun `a repeat stop past the send interval is sent`() {
+        val skip = service().shouldSkipDecision(
+            last = stamp(action = "stop", timestampMs = 1_000_000L),
+            issued = stamp(action = "stop", timestampMs = 1_000_000L),
+            nowMs = 1_009_000L,
+            profileId = 1,
+            action = "stop",
+            itemKey = BRAVEHEART,
+            progress = 45.597f
+        )
+        assertFalse(skip)
+    }
+
+    private companion object {
+        const val BRAVEHEART = "movie:tt0112573:0"
     }
 }
