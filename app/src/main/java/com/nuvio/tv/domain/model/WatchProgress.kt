@@ -36,6 +36,8 @@ data class WatchProgress(
         const val SOURCE_TRAKT_HISTORY = "trakt_history"
         const val SOURCE_TRAKT_SHOW_PROGRESS = "trakt_show_progress"
         const val SOURCE_MDBLIST_PLAYBACK = "mdblist_playback"
+        /** Watched history synthesised as a completed entry, not a live session. */
+        const val SOURCE_MDBLIST_HISTORY = "mdblist_history"
         const val STARTED_THRESHOLD = 0.02f
         const val COMPLETED_THRESHOLD = 0.90f
     }
