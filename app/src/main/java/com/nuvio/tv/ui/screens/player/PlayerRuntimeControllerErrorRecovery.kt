@@ -449,8 +449,48 @@ internal fun PlayerRuntimeController.tryDv7HevcFallback(
     return true
 }
 
+/**
+ * Gives the next generic retry a different parsing strategy: first clear a wrong
+ * cached mimeType override so the extractor auto-sniffs, and only once no
+ * override is steering it, fall back to forcing HLS (upstream's recovery for
+ * playlists served with a missing or bogus MIME type).
+ */
+internal fun PlayerRuntimeController.handleParsingErrorFallback(error: PlaybackException) {
+    if (error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED ||
+        error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED ||
+        error.errorCode == PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED ||
+        error.errorCode == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED
+    ) {
+        // Dead-classified URLs (non-media body behind HTTP 200, 404/410) belong to
+        // attemptDeadSourceFailover, which owns its own one-shot override-clear
+        // retry. Mutating the mimeType here would either hand it a phantom
+        // override (the HLS value set below) or steal its recoverable sub-case
+        // (override already cleared), so leave dead sources untouched.
+        if (isDeadSourcePlaybackError(error)) return
+        if (currentStreamMimeType != null &&
+            currentStreamMimeType != androidx.media3.common.MimeTypes.APPLICATION_M3U8
+        ) {
+            Log.w(
+                PlayerRuntimeController.TAG,
+                "Parsing error [${error.errorCode}] detected with mimeType=$currentStreamMimeType. " +
+                        "Clearing mimeType override for auto-sniff retry."
+            )
+            currentStreamMimeType = null
+            currentStreamResponseHeaders = emptyMap()
+            return
+        }
+        Log.w(
+            PlayerRuntimeController.TAG,
+            "Parsing error [${error.errorCode}] detected with previous mimeType=$currentStreamMimeType. " +
+                    "Setting mimeType to HLS (APPLICATION_M3U8) for retry fallback."
+        )
+        currentStreamMimeType = androidx.media3.common.MimeTypes.APPLICATION_M3U8
+        currentStreamResponseHeaders = emptyMap()
+    }
+}
+
 /** @return true if a mimeType override was present and has been cleared. */
-private fun PlayerRuntimeController.handleParsingErrorFallback(error: PlaybackException): Boolean {
+private fun PlayerRuntimeController.clearMimeOverrideForParsingError(error: PlaybackException): Boolean {
     if (error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED ||
         error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED ||
         error.errorCode == PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED ||
@@ -505,7 +545,7 @@ internal fun PlayerRuntimeController.attemptDeadSourceFailover(
     // The override is baked into the MediaItem, so only a FULL re-init applies the
     // clear - a bare prepare() retry cannot (which is why the old auto-retry's first
     // attempt never fixed this case). One full retry, then the URL is treated as dead.
-    if (handleParsingErrorFallback(error) && !hasRetriedAfterMimeOverrideClear) {
+    if (clearMimeOverrideForParsingError(error) && !hasRetriedAfterMimeOverrideClear) {
         hasRetriedAfterMimeOverrideClear = true
         val paused = userPausedManually
         val savedPosition = _exoPlayer?.currentPosition?.takeIf { it > 0L } ?: 0L

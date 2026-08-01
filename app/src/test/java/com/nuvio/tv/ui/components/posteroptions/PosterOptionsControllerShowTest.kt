@@ -22,7 +22,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -56,7 +56,7 @@ class PosterOptionsControllerShowTest {
         controller.bind(bindScope)
 
         controller.show(samplePreview(), addonBaseUrl = null)
-        advanceUntilIdle()
+        runCurrent()
 
         val state = controller.state.value
         assertEquals(true, state.isInLibrary)
@@ -76,7 +76,7 @@ class PosterOptionsControllerShowTest {
         controller.bind(bindScope)
 
         controller.show(samplePreview(), addonBaseUrl = null)
-        advanceUntilIdle()
+        runCurrent()
 
         val state = controller.state.value
         assertEquals(false, state.isInLibrary)
@@ -95,7 +95,7 @@ class PosterOptionsControllerShowTest {
         controller.bind(bindScope)
 
         controller.show(samplePreview(), addonBaseUrl = null)
-        advanceUntilIdle()
+        runCurrent()
 
         val state = controller.state.value
         assertEquals(true, state.isWatched)
@@ -108,6 +108,7 @@ class PosterOptionsControllerShowTest {
         val libraryRepository = mockk<LibraryRepository>(relaxed = true) {
             every { sourceMode } returns flowOf(LibrarySourceMode.LOCAL)
             every { listTabs } returns flowOf(emptyList())
+            every { membershipListTabs } returns flowOf(emptyList())
             every { isInLibrary(any(), any()) } returns flowOf(false)
         }
         val watchProgressRepository = mockk<WatchProgressRepository>(relaxed = true) {
@@ -137,7 +138,7 @@ class PosterOptionsControllerShowTest {
 
         controller.show(samplePreview(id = "tmdb:111"), addonBaseUrl = null)
         controller.show(samplePreview(id = "tmdb:222"), addonBaseUrl = null)
-        advanceUntilIdle()
+        runCurrent()
 
         val state = controller.state.value
         assertEquals("tt0000002", state.target?.id)
@@ -152,6 +153,7 @@ class PosterOptionsControllerShowTest {
         val libraryRepository = mockk<LibraryRepository>(relaxed = true) {
             every { sourceMode } returns flowOf(LibrarySourceMode.LOCAL)
             every { listTabs } returns flowOf(emptyList())
+            every { membershipListTabs } returns flowOf(emptyList())
             // The item is stored under the canonical IMDB id; a query under the
             // raw TMDB id would miss.
             every { isInLibrary(tmdbId, any()) } returns flowOf(false)
@@ -179,7 +181,7 @@ class PosterOptionsControllerShowTest {
         controller.bind(bindScope)
 
         controller.show(samplePreview(id = tmdbId), addonBaseUrl = null)
-        advanceUntilIdle()
+        runCurrent()
 
         val state = controller.state.value
         assertEquals(true, state.isInLibrary)
@@ -192,6 +194,7 @@ class PosterOptionsControllerShowTest {
         val libraryRepository = mockk<LibraryRepository>(relaxed = true) {
             every { sourceMode } returns flowOf(LibrarySourceMode.LOCAL)
             every { listTabs } returns flowOf(emptyList())
+            every { membershipListTabs } returns flowOf(emptyList())
             every { isInLibrary(any(), any()) } returns flowOf(isInLibrary)
         }
         val watchProgressRepository = mockk<WatchProgressRepository>(relaxed = true) {

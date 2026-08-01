@@ -3,6 +3,9 @@ package com.nuvio.tv.core.sync
 import android.util.Log
 import com.nuvio.tv.core.auth.AuthManager
 import com.nuvio.tv.core.profile.ProfileManager
+import com.nuvio.tv.core.tracking.TrackingProgressProviderRegistry
+import com.nuvio.tv.core.tracking.providerId
+import com.nuvio.tv.data.local.TraktSettingsDataStore
 import com.nuvio.tv.data.local.WatchProgressSource
 import com.nuvio.tv.data.local.WatchedItemsPreferences
 import com.nuvio.tv.data.remote.supabase.SupabaseWatchedItem
@@ -11,6 +14,7 @@ import com.nuvio.tv.domain.model.WatchedItem
 import io.github.jan.supabase.postgrest.Postgrest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -41,7 +45,8 @@ class WatchedItemsSyncService @Inject constructor(
     private val authManager: AuthManager,
     private val postgrest: Postgrest,
     private val watchedItemsPreferences: WatchedItemsPreferences,
-    private val watchProgressSourceResolver: WatchProgressSourceResolver,
+    private val trackingProviderRegistry: TrackingProgressProviderRegistry,
+    private val traktSettingsDataStore: TraktSettingsDataStore,
     private val profileManager: ProfileManager,
     private val syncClientIdentity: SyncClientIdentity
 ) {
@@ -78,10 +83,13 @@ class WatchedItemsSyncService @Inject constructor(
     }
 
     private suspend fun shouldUseSupabaseWatchProgressSync(): Boolean {
-        val effectiveSource = watchProgressSourceResolver.currentEffectiveSource()
-        val shouldUseSupabase = effectiveSource != WatchProgressSource.TRAKT
-        Log.d(TAG, "shouldUseSupabaseWatchProgressSync: effectiveSource=$effectiveSource shouldUseSupabase=$shouldUseSupabase")
-        return shouldUseSupabase
+        val source = traktSettingsDataStore.watchProgressSource.first()
+        // 0.8.0 merge: NuvioSync remains the backing store under MDBList (the
+        // fork's union model reads MDBList and local/Supabase together); only
+        // Trakt/Simkl take exclusive ownership of watch progress.
+        if (source == WatchProgressSource.MDBLIST) return true
+        val providerId = source.providerId ?: return true
+        return trackingProviderRegistry.provider(providerId)?.isAuthenticated?.first() != true
     }
 
     private suspend fun fetchDeltaCursor(profileId: Int): Long {
@@ -172,7 +180,7 @@ class WatchedItemsSyncService @Inject constructor(
         try {
             Log.d(TAG, "pullFromRemote: starting full watched items snapshot for profile $profileId")
             if (!shouldUseSupabaseWatchProgressSync()) {
-                Log.d(TAG, "Using Trakt watch progress, skipping watched items pull")
+                Log.d(TAG, "Using tracking provider watch progress, skipping watched items pull")
                 return@withContext Result.success(emptyList())
             }
             val allItems = mutableListOf<WatchedItem>()
@@ -235,7 +243,7 @@ class WatchedItemsSyncService @Inject constructor(
     ): Result<WatchedItemsRemoteSyncResult> {
         return try {
             if (!shouldUseSupabaseWatchProgressSync()) {
-                Log.d(TAG, "Using Trakt watch progress, skipping watched items snapshot pull")
+                Log.d(TAG, "Using tracking provider watch progress, skipping watched items snapshot pull")
                 return Result.success(WatchedItemsRemoteSyncResult(0, 0, usedSnapshot = false, preservedLocalItems = false))
             }
             val cursorBeforeSnapshot = try {
@@ -267,7 +275,7 @@ class WatchedItemsSyncService @Inject constructor(
                 "syncDeltaFromRemote: start profile=$profileId localCount=$localCount deltaInitialized=$deltaInitialized cursor=$deltaCursor lastPush=$lastSuccessfulPushMs"
             )
             if (!shouldUseSupabaseWatchProgressSync()) {
-                Log.d(TAG, "Using Trakt watch progress, skipping watched items delta pull")
+                Log.d(TAG, "Using tracking provider watch progress, skipping watched items delta pull")
                 return Result.success(WatchedItemsRemoteSyncResult(0, 0, usedSnapshot = false, preservedLocalItems = false))
             }
 

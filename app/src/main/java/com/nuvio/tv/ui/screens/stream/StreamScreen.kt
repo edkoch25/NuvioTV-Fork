@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -1035,8 +1036,14 @@ private fun StreamsList(
     val firstCardFocusRequester = remember { FocusRequester() }
     val lastKeyRepeatDispatchRef = remember { java.util.concurrent.atomic.AtomicLong(0L) }
     val restoreFocusRequester = remember { FocusRequester() }
+    val streamListState = rememberLazyListState()
     val firstStreamKey = streams.firstOrNull()?.let { first ->
         "${first.addonName}_${first.url ?: first.infoHash ?: first.ytId ?: "unknown"}"
+    }
+
+    // Reset scroll position to the top when the addon filter changes (#2538).
+    LaunchedEffect(selectedAddonFilter) {
+        streamListState.scrollToItem(0)
     }
 
     LaunchedEffect(requestInitialFocus, firstStreamKey) {
@@ -1064,6 +1071,7 @@ private fun StreamsList(
     }
 
     LazyColumn(
+        state = streamListState,
         modifier = Modifier
             .fillMaxSize()
             .padding(NuvioTheme.spacing.lg)

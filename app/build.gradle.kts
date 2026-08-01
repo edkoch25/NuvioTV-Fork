@@ -56,29 +56,7 @@ val doviExtractorHookReady = parseBooleanProperty(
 val doviEnableRealLink = parseBooleanProperty(
     resolveProperty(devProperties, localProperties, "DOVI_ENABLE_REAL_LINK")
 )
-// Upstream's experimental realtime sync (NuvioMedia/NuvioTV, "feat: experimental
-// realtime sync", 2026-07-02) has no live backend. Kong on api.nuvio.tv answers
-// /realtime/v1/* with 503 {"message":"name resolution failed"} at
-// X-Kong-Response-Latency: 0 — the realtime upstream's hostname does not resolve, so
-// the container is not deployed. The anon key is accepted (key-auth passes) and
-// /rest/v1/ answers 401 normally, so the gateway and project are healthy; only the
-// realtime service is absent.
-//
-// Upstream's release builds ship this off via their CI-injected local.properties
-// (LOCAL_PROPERTIES_BASE64, beta-release.yml), so only source builds inherit the
-// "true" default. Left on, it opens two nested infinite reconnect loops against a
-// dead route: supabase-kt's socket retry (reconnectDelay = 7s) inside
-// RealtimeSyncInvalidationService's own 1s..10s subscribe ladder, forever, for any
-// signed-in full account.
-//
-// Default flipped to off. The switch remains two-way: set
-// NUVIO_REALTIME_SYNC_ENABLED=true in local.properties to opt back in if the backend
-// is ever deployed. Startup/pull sync (Postgrest) is untouched and still backs up
-// settings; only live cross-device invalidation is affected, and that is already
-// non-functional for every client.
-val realtimeSyncEnabled = parseBooleanProperty(
-    resolveProperty(devProperties, localProperties, "NUVIO_REALTIME_SYNC_ENABLED", "false")
-)
+
 val selfHosted = parseBooleanProperty(
     providers.gradleProperty("SELF_HOSTED").orNull
         ?: providers.environmentVariable("SELF_HOSTED").orNull
@@ -134,11 +112,12 @@ android {
         buildConfigField("String", "TRAKT_CLIENT_SECRET", "\"${localProperties.getProperty("TRAKT_CLIENT_SECRET", "")}\"")
         buildConfigField("String", "TRAKT_API_URL", "\"${localProperties.getProperty("TRAKT_API_URL", "https://api.trakt.tv/")}\"")
         buildConfigField("String", "TRAKT_REDIRECT_URI", "\"${localProperties.getProperty("TRAKT_REDIRECT_URI", "urn:ietf:wg:oauth:2.0:oob")}\"")
+        buildConfigField("String", "SIMKL_CLIENT_ID", buildConfigString(resolveProperty(devProperties, localProperties, "SIMKL_CLIENT_ID")))
+        buildConfigField("String", "SIMKL_APP_NAME", buildConfigString(resolveProperty(devProperties, localProperties, "SIMKL_APP_NAME", "nuvio")))
         buildConfigField("String", "TMDB_API_KEY", "\"${localProperties.getProperty("TMDB_API_KEY", "")}\"")
         buildConfigField("String", "TV_LOGIN_WEB_BASE_URL", "\"${localProperties.getProperty("TV_LOGIN_WEB_BASE_URL", "https://nuvio.tv/tv-login")}\"")
         buildConfigField("boolean", "DOVI_NATIVE_ENABLED", enableDoviNative.toString())
         buildConfigField("boolean", "DOVI_EXTRACTOR_HOOK_READY", doviExtractorHookReady.toString())
-        buildConfigField("boolean", "REALTIME_SYNC_ENABLED", realtimeSyncEnabled.toString())
         buildConfigField("boolean", "SELF_HOSTED", selfHosted.toString())
         if (enableDoviNative) {
             externalNativeBuild {
@@ -179,7 +158,9 @@ android {
             buildConfigField("boolean", "FEATURE_IN_APP_UPDATES_ENABLED", "true")
             buildConfigField("boolean", "FEATURE_IN_APP_TRAILERS_ENABLED", "true")
             buildConfigField("boolean", "FEATURE_EXTERNAL_TRAILERS_ENABLED", "true")
+            buildConfigField("boolean", "FEATURE_EXTERNAL_PLAYBACK_KEEP_ALIVE_ENABLED", "true")
         }
+
     }
 
     if (enableDoviNative) {
@@ -503,7 +484,6 @@ dependencies {
     implementation(platform(libs.supabase.bom))
     implementation(libs.supabase.auth)
     implementation(libs.supabase.postgrest)
-    implementation(libs.supabase.realtime)
     implementation(libs.ktor.client.okhttp)
 
     // Kotlinx Serialization
@@ -517,6 +497,8 @@ dependencies {
 
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
     testImplementation("io.mockk:mockk:1.13.12")

@@ -671,13 +671,17 @@ internal suspend fun HomeViewModel.updateCatalogRowsPipeline() {
 
         val computedDisplayRows = orderedRows.map { row ->
             val shouldKeepFullRowInModern = currentLayout == HomeLayout.MODERN
-            if (row.items.size > 25 && !shouldKeepFullRowInModern) {
+            val gridTruncateLimit = 24
+            if (row.items.size > gridTruncateLimit && !shouldKeepFullRowInModern) {
                 val key = row.legacyKey()
                 val cachedEntry = getTruncatedRowCacheEntry(key)
                 if (cachedEntry != null && cachedEntry.sourceRow === row) {
                     cachedEntry.truncatedRow
                 } else {
-                    val truncatedRow = row.copy(items = row.items.take(25))
+                    val truncatedRow = row.copy(
+                        items = row.items.take(gridTruncateLimit),
+                        hasMore = true
+                    )
                     putTruncatedRowCacheEntry(
                         key,
                         HomeViewModel.TruncatedRowCacheEntry(
@@ -791,9 +795,7 @@ internal suspend fun HomeViewModel.updateCatalogRowsPipeline() {
         // based on the actual column count from GridCells.Adaptive layout info.
         // We use 8 as safe max columns (widest known config) to avoid cutting too early.
         val safeMaxColumns = 8
-        val seeAllThreshold = safeMaxColumns * rowCount + 2
-        val maxWithSeeAll = safeMaxColumns * rowCount - 1
-        val maxWithoutSeeAll = safeMaxColumns * rowCount
+        val maxDisplaySlots = safeMaxColumns * rowCount
         buildList {
             if (heroSectionEnabled && baseHeroItems.isNotEmpty()) {
                 add(GridItem.Hero(baseHeroItems))
@@ -812,8 +814,10 @@ internal suspend fun HomeViewModel.updateCatalogRowsPipeline() {
                                 addonId = row.addonId,
                                 type = row.apiType
                             ))
-                            val hasEnoughForSeeAll = row.hasMore || row.items.size >= seeAllThreshold
-                            val rawMax = if (hasEnoughForSeeAll) maxWithSeeAll else maxWithoutSeeAll
+                            // Show "See All" if there are more items than fit in the
+                            // displayed rows, or the API indicates more pages exist.
+                            val showSeeAll = row.hasMore || row.items.size > maxDisplaySlots
+                            val rawMax = if (showSeeAll) maxDisplaySlots - 1 else maxDisplaySlots
                             val displayItems = row.items.take(rawMax)
                             displayItems.forEach { item ->
                                 add(GridItem.Content(
@@ -823,7 +827,7 @@ internal suspend fun HomeViewModel.updateCatalogRowsPipeline() {
                                     catalogName = row.catalogName
                                 ))
                             }
-                            if (hasEnoughForSeeAll) {
+                            if (showSeeAll) {
                                 add(GridItem.SeeAll(
                                     catalogId = row.catalogId,
                                     addonId = row.addonId,
@@ -1002,11 +1006,13 @@ internal fun HomeViewModel.reconcilePosterStatusObserversPipeline(rows: List<Cat
         seriesWatchedObserverJob = viewModelScope.launch {
             combine(
                 fullyWatchedSeriesIds.fullyWatchedSeriesIds,
-                watchedItemsPreferences.allItems
+                watchProgressRepository.watchedItems
             ) { fullyWatched, watchedItems ->
                 fullyWatched to watchedItems
             }.collectLatest { (fullyWatched, watchedItems) ->
-                val effectiveFullyWatched = if (watchProgressRepository.isTraktProgressActive()) {
+                val effectiveFullyWatched = if (
+                    watchProgressRepository.activeProviderOwnsCompletedHistoryProjection()
+                ) {
                     fullyWatched
                 } else {
                     reconcileFullyWatchedFromLocalItems(

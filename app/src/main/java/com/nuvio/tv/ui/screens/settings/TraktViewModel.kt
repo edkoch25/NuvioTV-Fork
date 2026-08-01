@@ -4,19 +4,13 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nuvio.tv.R
-import com.nuvio.tv.core.sync.StartupSyncService
-import com.nuvio.tv.core.sync.WatchedItemsSyncService
 import com.nuvio.tv.data.local.TraktAuthDataStore
 import com.nuvio.tv.data.local.TraktAuthState
 import com.nuvio.tv.data.local.TraktSettingsDataStore
 import com.nuvio.tv.data.local.MoreLikeThisSourcePreference
-import com.nuvio.tv.data.local.WatchProgressSource
-import com.nuvio.tv.data.local.WatchedItemsPreferences
-import com.nuvio.tv.data.local.WatchedSeriesStateHolder
 import com.nuvio.tv.data.repository.TraktAuthService
 import com.nuvio.tv.data.repository.TraktProgressService
 import com.nuvio.tv.data.repository.TraktTokenPollResult
-import com.nuvio.tv.domain.model.LibrarySourceMode
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -24,8 +18,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import com.nuvio.tv.data.local.MDBListSettingsDataStore
-import com.nuvio.tv.data.repository.MDBListProgressService
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -51,9 +43,6 @@ data class TraktUiState(
     val deviceCodeExpiresAtMillis: Long? = null,
     val continueWatchingDaysCap: Int = TraktSettingsDataStore.DEFAULT_CONTINUE_WATCHING_DAYS_CAP,
     val showMetaComments: Boolean = TraktSettingsDataStore.DEFAULT_SHOW_META_COMMENTS,
-    val watchProgressSource: WatchProgressSource = TraktSettingsDataStore.DEFAULT_WATCH_PROGRESS_SOURCE,
-    val mdbListTrackingAvailable: Boolean = false,
-    val librarySourceMode: LibrarySourceMode = TraktSettingsDataStore.DEFAULT_LIBRARY_SOURCE_MODE,
     val connectedStats: TraktProgressService.TraktCachedStats? = null,
     val statusMessage: String? = null,
     val errorMessage: String? = null,
@@ -66,19 +55,12 @@ class TraktViewModel @Inject constructor(
     private val traktAuthDataStore: TraktAuthDataStore,
     private val traktProgressService: TraktProgressService,
     private val traktSettingsDataStore: TraktSettingsDataStore,
-    private val startupSyncService: StartupSyncService,
-    private val watchedItemsPreferences: WatchedItemsPreferences,
-    private val watchProgressPreferences: com.nuvio.tv.data.local.WatchProgressPreferences,
-    private val watchedItemsSyncService: WatchedItemsSyncService,
-    private val watchedSeriesStateHolder: WatchedSeriesStateHolder,
-    private val cwEnrichmentCache: com.nuvio.tv.data.local.ContinueWatchingEnrichmentCache,
-    private val mdbListSettingsDataStore: MDBListSettingsDataStore,
-    private val mdbListProgressService: MDBListProgressService,
     @dagger.hilt.android.qualifiers.ApplicationContext private val context: Context
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(TraktUiState())
     val uiState: StateFlow<TraktUiState> = _uiState.asStateFlow()
 
+    private var connectJob: Job? = null
     private var pollJob: Job? = null
     private var lastMode: TraktConnectionMode? = null
     private var lastAutoSyncAtMs: Long = 0L
@@ -127,69 +109,6 @@ class TraktViewModel @Inject constructor(
         }
     }
 
-    fun onWatchProgressSourceSelected(source: WatchProgressSource) {
-        viewModelScope.launch {
-            traktSettingsDataStore.setWatchProgressSource(source)
-            // Clear CW cache so stale items from the previous source don't flash on screen.
-            cwEnrichmentCache.saveInProgressSnapshot(emptyList(), force = true)
-            cwEnrichmentCache.saveNextUpSnapshot(emptyList(), force = true)
-            when (source) {
-                WatchProgressSource.TRAKT -> {
-                    watchProgressPreferences.clearAllPreservingNonTraktIds { contentId ->
-                        !com.nuvio.tv.data.repository.isTraktCompatibleId(contentId)
-                    }
-                    watchedItemsPreferences.clearAll()
-                    watchedSeriesStateHolder.update(emptySet())
-                    traktProgressService.refreshNow()
-                }
-                WatchProgressSource.NUVIO_SYNC -> {
-                    watchProgressPreferences.clearAllPreservingNonTraktIds { contentId ->
-                        !com.nuvio.tv.data.repository.isTraktCompatibleId(contentId)
-                    }
-                    repopulateWatchedItemsFromNuvioSync()
-                    startupSyncService.requestSyncNow()
-                }
-                WatchProgressSource.MDBLIST -> {
-                    // Deliberately no local-progress wipe: the MDBList read path
-                    // enriches its artwork-less rows from the local copies, and
-                    // local remains the offline fallback.
-                    repopulateWatchedItemsFromNuvioSync()
-                    startupSyncService.requestSyncNow()
-                    mdbListProgressService.refreshNow(force = true)
-                }
-            }
-            _uiState.update {
-                it.copy(
-                    watchProgressSource = source,
-                    statusMessage = when (source) {
-                        WatchProgressSource.TRAKT ->
-                            context.getString(R.string.trakt_watch_progress_trakt_selected)
-                        WatchProgressSource.NUVIO_SYNC ->
-                            context.getString(R.string.trakt_watch_progress_nuvio_selected)
-                        WatchProgressSource.MDBLIST ->
-                            context.getString(R.string.trakt_watch_progress_mdblist_selected)
-                    }
-                )
-            }
-        }
-    }
-
-    fun onLibrarySourceModeSelected(mode: LibrarySourceMode) {
-        viewModelScope.launch {
-            traktSettingsDataStore.setLibrarySourceMode(mode)
-            _uiState.update {
-                it.copy(
-                    librarySourceMode = mode,
-                    statusMessage = if (mode == LibrarySourceMode.TRAKT) {
-                        context.getString(R.string.trakt_library_source_trakt_selected)
-                    } else {
-                        context.getString(R.string.trakt_library_source_nuvio_selected)
-                    }
-                )
-            }
-        }
-    }
-
     fun onConnectClick() {
         if (!traktAuthService.hasRequiredCredentials()) {
             _uiState.update {
@@ -206,23 +125,30 @@ class TraktViewModel @Inject constructor(
         // Flip isLoading synchronously here, before the launch, so two main-thread
         // clicks can't both observe isLoading == false and start parallel
         // coroutines (thanks Copilot).
-        if (_uiState.value.isLoading) return
+        if (connectJob?.isActive == true || _uiState.value.isLoading) return
         _uiState.update { it.copy(isLoading = true, errorMessage = null, statusMessage = null) }
 
-        viewModelScope.launch {
-            val result = traktAuthService.startDeviceAuth()
-            _uiState.update { state ->
-                if (result.isSuccess) {
-                    state.copy(
-                        isLoading = false,
-                        statusMessage = context.getString(R.string.trakt_status_enter_activation_code)
-                    )
-                } else {
-                    state.copy(
-                        isLoading = false,
-                        errorMessage = result.exceptionOrNull()?.message
-                            ?: context.getString(R.string.trakt_error_failed_start)
-                    )
+        connectJob = viewModelScope.launch {
+            try {
+                val result = traktAuthService.startDeviceAuth()
+                _uiState.update { state ->
+                    if (result.isSuccess) {
+                        state.copy(
+                            isLoading = false,
+                            statusMessage = context.getString(R.string.trakt_status_enter_activation_code)
+                        )
+                    } else {
+                        state.copy(
+                            isLoading = false,
+                            errorMessage = result.exceptionOrNull()?.message
+                                ?: context.getString(R.string.trakt_error_failed_start)
+                        )
+                    }
+                }
+            } finally {
+                connectJob = null
+                _uiState.update { state ->
+                    if (state.isLoading) state.copy(isLoading = false) else state
                 }
             }
         }
@@ -233,12 +159,15 @@ class TraktViewModel @Inject constructor(
     }
 
     fun onCancelDeviceFlow() {
+        connectJob?.cancel()
+        connectJob = null
         viewModelScope.launch {
             pollJob?.cancel()
             traktAuthDataStore.clearDeviceFlow()
             _uiState.update {
                 it.copy(
                     mode = TraktConnectionMode.DISCONNECTED,
+                    isLoading = false,
                     isPolling = false,
                     statusMessage = null,
                     errorMessage = null
@@ -252,16 +181,6 @@ class TraktViewModel @Inject constructor(
             pollJob?.cancel()
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             traktAuthService.revokeAndLogout()
-            // Clear CW cache so stale Trakt items don't flash on next launch.
-            cwEnrichmentCache.saveInProgressSnapshot(emptyList(), force = true)
-            cwEnrichmentCache.saveNextUpSnapshot(emptyList(), force = true)
-            watchProgressPreferences.clearAllPreservingNonTraktIds { contentId ->
-                !com.nuvio.tv.data.repository.isTraktCompatibleId(contentId)
-            }
-            watchedSeriesStateHolder.update(emptySet())
-            // Repopulate from Nuvio sync.
-            repopulateWatchedItemsFromNuvioSync()
-            startupSyncService.requestSyncNow()
             _uiState.update {
                 it.copy(
                     isLoading = false,
@@ -311,15 +230,11 @@ class TraktViewModel @Inject constructor(
             combine(
                 traktSettingsDataStore.continueWatchingDaysCap,
                 traktSettingsDataStore.showMetaComments,
-                traktSettingsDataStore.watchProgressSource,
-                traktSettingsDataStore.librarySourceMode,
                 traktSettingsDataStore.moreLikeThisSource
-            ) { daysCap, showMetaComments, watchProgressSource, librarySourceMode, moreLikeThisSource ->
+            ) { daysCap, showMetaComments, moreLikeThisSource ->
                 SettingsSnapshot(
                     continueWatchingDaysCap = daysCap,
                     showMetaComments = showMetaComments,
-                    watchProgressSource = watchProgressSource,
-                    librarySourceMode = librarySourceMode,
                     moreLikeThisSource = moreLikeThisSource
                 )
             }.collectLatest { snapshot ->
@@ -327,16 +242,9 @@ class TraktViewModel @Inject constructor(
                     it.copy(
                         continueWatchingDaysCap = snapshot.continueWatchingDaysCap,
                         showMetaComments = snapshot.showMetaComments,
-                        watchProgressSource = snapshot.watchProgressSource,
-                        librarySourceMode = snapshot.librarySourceMode,
                         moreLikeThisSource = snapshot.moreLikeThisSource
                     )
                 }
-            }
-        }
-        viewModelScope.launch {
-            mdbListSettingsDataStore.settings.collectLatest { settings ->
-                _uiState.update { it.copy(mdbListTrackingAvailable = settings.trackingReady) }
             }
         }
     }
@@ -344,8 +252,6 @@ class TraktViewModel @Inject constructor(
     private data class SettingsSnapshot(
         val continueWatchingDaysCap: Int,
         val showMetaComments: Boolean,
-        val watchProgressSource: WatchProgressSource,
-        val librarySourceMode: LibrarySourceMode,
         val moreLikeThisSource: MoreLikeThisSourcePreference
     )
 
@@ -445,15 +351,6 @@ class TraktViewModel @Inject constructor(
         }
     }
 
-    private suspend fun repopulateWatchedItemsFromNuvioSync() {
-        runCatching {
-            val remoteItems = watchedItemsSyncService.pullFromRemote().getOrElse { return }
-            if (remoteItems.isNotEmpty()) {
-                watchedItemsPreferences.replaceWithRemoteItems(remoteItems)
-            }
-        }
-    }
-
     private fun startPollingIfNeeded(force: Boolean) {
         if (pollJob?.isActive == true && !force) return
         pollJob?.cancel()
@@ -529,8 +426,6 @@ class TraktViewModel @Inject constructor(
                     }
 
                     is TraktTokenPollResult.Approved -> {
-                        watchedItemsPreferences.clearAll()
-                        watchedSeriesStateHolder.update(emptySet())
                         traktProgressService.refreshNow()
                         _uiState.update {
                             it.copy(

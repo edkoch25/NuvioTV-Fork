@@ -3,6 +3,9 @@ package com.nuvio.tv.core.sync
 import android.util.Log
 import com.nuvio.tv.core.auth.AuthManager
 import com.nuvio.tv.core.profile.ProfileManager
+import com.nuvio.tv.core.tracking.TrackingProgressProviderRegistry
+import com.nuvio.tv.core.tracking.providerId
+import com.nuvio.tv.data.local.TraktSettingsDataStore
 import com.nuvio.tv.data.local.WatchProgressSource
 import com.nuvio.tv.data.local.WatchProgressPreferences
 import com.nuvio.tv.data.remote.supabase.SupabaseWatchProgress
@@ -11,6 +14,7 @@ import com.nuvio.tv.domain.model.WatchProgress
 import io.github.jan.supabase.postgrest.Postgrest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -41,7 +45,8 @@ class WatchProgressSyncService @Inject constructor(
     private val authManager: AuthManager,
     private val postgrest: Postgrest,
     private val watchProgressPreferences: WatchProgressPreferences,
-    private val watchProgressSourceResolver: WatchProgressSourceResolver,
+    private val trackingProviderRegistry: TrackingProgressProviderRegistry,
+    private val traktSettingsDataStore: TraktSettingsDataStore,
     private val profileManager: ProfileManager,
     private val syncClientIdentity: SyncClientIdentity
 ) {
@@ -82,8 +87,13 @@ class WatchProgressSyncService @Inject constructor(
     }
 
     suspend fun shouldUseSupabaseWatchProgressSync(): Boolean {
-        // Supabase owns watch progress unless an external tracker does.
-        return watchProgressSourceResolver.currentEffectiveSource() != WatchProgressSource.TRAKT
+        val source = traktSettingsDataStore.watchProgressSource.first()
+        // 0.8.0 merge: NuvioSync remains the backing store under MDBList (the
+        // fork's union model reads MDBList and local/Supabase together); only
+        // Trakt/Simkl take exclusive ownership of watch progress.
+        if (source == WatchProgressSource.MDBLIST) return true
+        val providerId = source.providerId ?: return true
+        return trackingProviderRegistry.provider(providerId)?.isAuthenticated?.first() != true
     }
 
     private suspend fun fetchDeltaCursor(profileId: Int): Long {
@@ -259,7 +269,7 @@ class WatchProgressSyncService @Inject constructor(
     ): Result<List<Pair<String, WatchProgress>>> = withContext(Dispatchers.IO) {
         try {
             if (!shouldUseSupabaseWatchProgressSync()) {
-                Log.d(TAG, "Using Trakt watch progress, skipping watch progress pull")
+                Log.d(TAG, "Using tracking provider watch progress, skipping watch progress pull")
                 return@withContext Result.success(emptyList())
             }
 
@@ -329,7 +339,7 @@ class WatchProgressSyncService @Inject constructor(
         deltaSyncMutex.withLock {
             try {
                 if (!shouldUseSupabaseWatchProgressSync()) {
-                    Log.d(TAG, "Using Trakt watch progress, skipping watch progress snapshot pull")
+                    Log.d(TAG, "Using tracking provider watch progress, skipping watch progress snapshot pull")
                     return@withLock Result.success(WatchProgressRemoteSyncResult(0, 0, usedSnapshot = false, preservedLocalItems = false))
                 }
                 val cursorBeforeSnapshot = try {
@@ -362,7 +372,7 @@ class WatchProgressSyncService @Inject constructor(
                 "syncDeltaFromRemote: start profile=$profileId localCount=$localCount deltaInitialized=$deltaInitialized cursor=$deltaCursor lastPush=$lastSuccessfulPushMs"
             )
             if (!shouldUseSupabaseWatchProgressSync()) {
-                Log.d(TAG, "Using Trakt watch progress, skipping watch progress delta pull")
+                Log.d(TAG, "Using tracking provider watch progress, skipping watch progress delta pull")
                 return Result.success(WatchProgressRemoteSyncResult(0, 0, usedSnapshot = false, preservedLocalItems = false))
             }
 

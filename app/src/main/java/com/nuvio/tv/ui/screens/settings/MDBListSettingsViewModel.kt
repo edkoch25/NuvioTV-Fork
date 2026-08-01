@@ -17,12 +17,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import com.nuvio.tv.core.tracking.TrackingSourceController
 import javax.inject.Inject
 
 @HiltViewModel
 class MDBListSettingsViewModel @Inject constructor(
     private val dataStore: MDBListSettingsDataStore,
     private val traktSettingsDataStore: TraktSettingsDataStore,
+    private val trackingSourceController: TrackingSourceController,
     private val mdbListApi: MDBListApi
 ) : ViewModel() {
 
@@ -79,7 +81,12 @@ class MDBListSettingsViewModel @Inject constructor(
     }
 
     fun onWatchProgressSourceSelected(source: WatchProgressSource) {
-        viewModelScope.launch { traktSettingsDataStore.setWatchProgressSource(source) }
+        // Routed through the shared controller so this mirror of the picker is
+        // behaviourally identical to the one on the Tracking screen: the CW
+        // enrichment caches are cleared and the newly selected source is
+        // refreshed. Writing the datastore directly (as this screen did before
+        // the 0.8.0 merge) skipped every one of those side effects.
+        viewModelScope.launch { trackingSourceController.selectWatchProgressSource(source) }
     }
 
     fun onEvent(event: MDBListSettingsEvent) {

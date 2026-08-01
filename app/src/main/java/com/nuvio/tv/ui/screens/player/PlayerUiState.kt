@@ -259,6 +259,7 @@ data class NextEpisodeInfo(
 
 data class SubtitleSyncCue(
     val startTimeMs: Long,
+    val endTimeMs: Long,
     val text: String
 )
 
