@@ -45,13 +45,16 @@ fun TrackingSettingsScreen(
     traktViewModel: TraktViewModel = hiltViewModel(),
     simklViewModel: SimklSettingsViewModel = hiltViewModel(),
     trackingViewModel: TrackingSettingsViewModel = hiltViewModel(),
+    mdbListViewModel: MDBListSettingsViewModel = hiltViewModel(),
     onBackPress: () -> Unit
 ) {
     val traktState by traktViewModel.uiState.collectAsStateWithLifecycle()
     val simklState by simklViewModel.uiState.collectAsStateWithLifecycle()
     val trackingState by trackingViewModel.uiState.collectAsStateWithLifecycle()
+    val mdbListState by mdbListViewModel.uiState.collectAsStateWithLifecycle()
     val traktFocusRequester = remember { FocusRequester() }
     val simklFocusRequester = remember { FocusRequester() }
+    val mdbListFocusRequester = remember { FocusRequester() }
     val libraryFocusRequester = remember { FocusRequester() }
     val watchProgressFocusRequester = remember { FocusRequester() }
     val continueWatchingFocusRequester = remember { FocusRequester() }
@@ -66,6 +69,7 @@ fun TrackingSettingsScreen(
     var showDaysCapDialog by remember { mutableStateOf(false) }
     var showMoreLikeThisSourceDialog by remember { mutableStateOf(false) }
     var showAnimeIdDialog by remember { mutableStateOf(false) }
+    var showMdbListApiKeyDialog by remember { mutableStateOf(false) }
 
     val hasOverlay = activeProvider != null ||
         disconnectProvider != null ||
@@ -73,7 +77,8 @@ fun TrackingSettingsScreen(
         showWatchProgressDialog ||
         showDaysCapDialog ||
         showMoreLikeThisSourceDialog ||
-        showAnimeIdDialog
+        showAnimeIdDialog ||
+        showMdbListApiKeyDialog
 
     BackHandler(enabled = !hasOverlay) {
         onBackPress()
@@ -112,6 +117,7 @@ fun TrackingSettingsScreen(
             when (target) {
                 TrackingFocusTarget.TRAKT -> traktFocusRequester.requestFocus()
                 TrackingFocusTarget.SIMKL -> simklFocusRequester.requestFocus()
+                TrackingFocusTarget.MDBLIST -> mdbListFocusRequester.requestFocus()
                 TrackingFocusTarget.LIBRARY -> libraryFocusRequester.requestFocus()
                 TrackingFocusTarget.WATCH_PROGRESS -> watchProgressFocusRequester.requestFocus()
                 TrackingFocusTarget.CONTINUE_WATCHING -> continueWatchingFocusRequester.requestFocus()
@@ -125,7 +131,7 @@ fun TrackingSettingsScreen(
         restoreFocusTarget = when (provider) {
             TrackingProviderId.TRAKT -> TrackingFocusTarget.TRAKT
             TrackingProviderId.SIMKL -> TrackingFocusTarget.SIMKL
-            TrackingProviderId.MDBLIST -> null
+            TrackingProviderId.MDBLIST -> TrackingFocusTarget.MDBLIST
         }
         activeProvider = provider
         disconnectProvider = null
@@ -150,7 +156,13 @@ fun TrackingSettingsScreen(
                     }
                 }
             }
-            TrackingProviderId.MDBLIST -> Unit
+            TrackingProviderId.MDBLIST -> {
+                // No connection flow: MDBList authenticates with an API key entered
+                // under Integrations. Opening the dialog just refreshes the account
+                // figures it displays.
+                dismissOnConnected = null
+                mdbListViewModel.refreshAccount()
+            }
         }
     }
 
@@ -158,14 +170,17 @@ fun TrackingSettingsScreen(
         traktState = traktState,
         simklState = simklState,
         trackingState = trackingState,
+        mdbListState = mdbListState,
         traktFocusRequester = traktFocusRequester,
         simklFocusRequester = simklFocusRequester,
+        mdbListFocusRequester = mdbListFocusRequester,
         libraryFocusRequester = libraryFocusRequester,
         watchProgressFocusRequester = watchProgressFocusRequester,
         continueWatchingFocusRequester = continueWatchingFocusRequester,
         moreLikeThisFocusRequester = moreLikeThisFocusRequester,
         onTraktClick = { openProvider(TrackingProviderId.TRAKT) },
         onSimklClick = { openProvider(TrackingProviderId.SIMKL) },
+        onMdbListClick = { openProvider(TrackingProviderId.MDBLIST) },
         onLibrarySourceClick = {
             restoreFocusTarget = TrackingFocusTarget.LIBRARY
             showLibrarySourceDialog = true
@@ -228,7 +243,31 @@ fun TrackingSettingsScreen(
                 }
             )
         }
-        TrackingProviderId.MDBLIST -> Unit
+        TrackingProviderId.MDBLIST -> {
+            MDBListTrackingAccountDialog(
+                state = mdbListState,
+                onToggleEnabled = {
+                    mdbListViewModel.onEvent(
+                        MDBListSettingsEvent.ToggleEnabled(!mdbListState.enabled)
+                    )
+                },
+                onToggleTracking = {
+                    mdbListViewModel.onEvent(
+                        MDBListSettingsEvent.ToggleTracking(!mdbListState.trackingEnabled)
+                    )
+                },
+                onEditApiKey = {
+                    // One dialog at a time: close this one, open the key entry,
+                    // and come back here when it finishes.
+                    activeProvider = null
+                    showMdbListApiKeyDialog = true
+                },
+                onDismiss = {
+                    activeProvider = null
+                    dismissOnConnected = null
+                }
+            )
+        }
         null -> Unit
     }
 
@@ -270,6 +309,26 @@ fun TrackingSettingsScreen(
                 )
             }
         }
+    }
+
+    if (showMdbListApiKeyDialog) {
+        MDBListApiKeyDialog(
+            currentValue = mdbListState.apiKey,
+            viewModel = mdbListViewModel,
+            onSaved = {
+                showMdbListApiKeyDialog = false
+                openProvider(TrackingProviderId.MDBLIST)
+            },
+            onClear = {
+                mdbListViewModel.validateAndSaveApiKey("") {}
+                showMdbListApiKeyDialog = false
+                openProvider(TrackingProviderId.MDBLIST)
+            },
+            onDismiss = {
+                showMdbListApiKeyDialog = false
+                openProvider(TrackingProviderId.MDBLIST)
+            }
+        )
     }
 
     if (showLibrarySourceDialog) {
@@ -397,14 +456,19 @@ internal fun TrackingSettingsOverview(
     traktState: TraktUiState,
     simklState: SimklSettingsUiState,
     trackingState: TrackingSettingsUiState,
+    // Defaulted so existing call sites (including the instrumented fixture test)
+    // compile unchanged.
+    mdbListState: MDBListSettingsUiState = MDBListSettingsUiState(),
     traktFocusRequester: FocusRequester,
     simklFocusRequester: FocusRequester,
+    mdbListFocusRequester: FocusRequester? = null,
     libraryFocusRequester: FocusRequester,
     watchProgressFocusRequester: FocusRequester,
     continueWatchingFocusRequester: FocusRequester,
     moreLikeThisFocusRequester: FocusRequester,
     onTraktClick: () -> Unit,
     onSimklClick: () -> Unit,
+    onMdbListClick: () -> Unit = {},
     onLibrarySourceClick: () -> Unit,
     onWatchProgressClick: () -> Unit,
     onContinueWatchingWindowClick: () -> Unit,
@@ -415,6 +479,9 @@ internal fun TrackingSettingsOverview(
     val listState = rememberLazyListState()
     val traktPresentation = traktConnectionPresentation(traktState)
     val simklPresentation = simklConnectionPresentation(simklState)
+    val mdbListPresentation = mdbListConnectionPresentation(mdbListState)
+    val fallbackMdbListFocusRequester = remember { FocusRequester() }
+    val mdbListRowFocusRequester = mdbListFocusRequester ?: fallbackMdbListFocusRequester
     val traktConnected = traktState.mode == TraktConnectionMode.CONNECTED
     val traktProgressActive = trackingState.watchProgressSource == WatchProgressSource.TRAKT
 
@@ -468,6 +535,16 @@ internal fun TrackingSettingsOverview(
                                 modifier = Modifier
                                     .focusRequester(simklFocusRequester)
                                     .testTag(TrackingSettingsTestTags.SIMKL_PROVIDER)
+                            )
+                            SettingsActionRow(
+                                title = stringResource(R.string.mdblist_title),
+                                subtitle = mdbListPresentation.subtitle,
+                                value = mdbListPresentation.value,
+                                valueColor = mdbListPresentation.color,
+                                onClick = onMdbListClick,
+                                modifier = Modifier
+                                    .focusRequester(mdbListRowFocusRequester)
+                                    .testTag(TrackingSettingsTestTags.MDBLIST_PROVIDER)
                             )
                         }
                     }
@@ -629,6 +706,115 @@ private fun simklConnectionPresentation(state: SimklSettingsUiState): TrackingCo
 }
 
 @Composable
+private fun mdbListConnectionPresentation(state: MDBListSettingsUiState): TrackingConnectionPresentation {
+    return when {
+        !state.enabled -> TrackingConnectionPresentation(
+            subtitle = stringResource(R.string.tracking_mdblist_integration_off),
+            value = stringResource(R.string.tracking_status_disconnected),
+            color = NuvioTheme.colors.TextSecondary
+        )
+        state.apiKey.isBlank() -> TrackingConnectionPresentation(
+            subtitle = stringResource(R.string.tracking_mdblist_key_required),
+            value = stringResource(R.string.tracking_status_disconnected),
+            color = NuvioTheme.colors.TextSecondary
+        )
+        !state.trackingEnabled -> TrackingConnectionPresentation(
+            subtitle = stringResource(R.string.tracking_mdblist_tracking_off),
+            value = stringResource(R.string.tracking_status_disconnected),
+            color = NuvioTheme.colors.Warning
+        )
+        else -> TrackingConnectionPresentation(
+            subtitle = state.username?.let { name ->
+                stringResource(R.string.tracking_mdblist_tracking_as, name)
+            } ?: stringResource(R.string.tracking_mdblist_tracking_on),
+            value = stringResource(R.string.tracking_status_connected),
+            color = NuvioTheme.colors.Success
+        )
+    }
+}
+
+/**
+ * MDBList has no device-code connection flow — it authenticates with an API key
+ * entered under Integrations — so this is a compact status-and-toggle dialog
+ * rather than the branded connect dialogs Trakt and Simkl use.
+ */
+@Composable
+private fun MDBListTrackingAccountDialog(
+    state: MDBListSettingsUiState,
+    onToggleEnabled: () -> Unit,
+    onToggleTracking: () -> Unit,
+    onEditApiKey: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val notSet = stringResource(R.string.mdblist_not_set)
+    val canTrack = state.enabled && state.apiKey.isNotBlank()
+    NuvioDialog(
+        onDismiss = onDismiss,
+        title = stringResource(R.string.mdblist_title),
+        subtitle = stringResource(R.string.tracking_mdblist_dialog_subtitle),
+        width = 620.dp
+    ) {
+        SettingsToggleRow(
+            title = stringResource(R.string.mdblist_enable_title),
+            subtitle = stringResource(R.string.mdblist_enable_subtitle),
+            checked = state.enabled,
+            onToggle = onToggleEnabled
+        )
+        SettingsActionRow(
+            title = stringResource(R.string.mdblist_api_key_title),
+            subtitle = stringResource(R.string.mdblist_api_key_subtitle),
+            value = maskApiKey(state.apiKey, notSet),
+            onClick = onEditApiKey,
+            enabled = state.enabled
+        )
+        SettingsToggleRow(
+            title = stringResource(R.string.mdblist_tracking_title),
+            subtitle = if (canTrack) {
+                stringResource(R.string.mdblist_tracking_subtitle)
+            } else {
+                stringResource(R.string.tracking_mdblist_key_required)
+            },
+            checked = state.trackingEnabled && canTrack,
+            onToggle = onToggleTracking,
+            enabled = canTrack
+        )
+        SettingsActionRow(
+            title = stringResource(R.string.mdblist_account_title),
+            subtitle = null,
+            value = state.username ?: notSet,
+            onClick = {},
+            enabled = state.enabled,
+            trailingIcon = null
+        )
+        SettingsActionRow(
+            title = stringResource(R.string.mdblist_plan_title),
+            subtitle = null,
+            value = state.plan ?: notSet,
+            onClick = {},
+            enabled = state.enabled,
+            trailingIcon = null
+        )
+        SettingsActionRow(
+            title = stringResource(R.string.mdblist_requests_title),
+            subtitle = stringResource(R.string.mdblist_requests_subtitle),
+            value = state.requestsUsed?.let { used ->
+                state.requestsLimit?.let { limit -> "$used / $limit" }
+            } ?: notSet,
+            onClick = {},
+            enabled = state.enabled,
+            trailingIcon = null
+        )
+        SettingsDialogActionRow {
+            SettingsDialogActionButton(
+                text = stringResource(R.string.action_close),
+                onClick = onDismiss,
+                primary = true
+            )
+        }
+    }
+}
+
+@Composable
 private fun watchProgressSourceLabel(source: WatchProgressSource): String = when (source) {
     WatchProgressSource.TRAKT -> stringResource(R.string.trakt_name)
     WatchProgressSource.SIMKL -> stringResource(R.string.simkl_name)
@@ -668,6 +854,7 @@ private fun animeIdPreferenceLabel(preference: SimklAnimeIdPreference): String =
 private enum class TrackingFocusTarget {
     TRAKT,
     SIMKL,
+    MDBLIST,
     LIBRARY,
     WATCH_PROGRESS,
     CONTINUE_WATCHING,
@@ -678,6 +865,7 @@ internal object TrackingSettingsTestTags {
     const val OVERVIEW_LIST = "tracking_overview_list"
     const val TRAKT_PROVIDER = "tracking_provider_trakt"
     const val SIMKL_PROVIDER = "tracking_provider_simkl"
+    const val MDBLIST_PROVIDER = "tracking_provider_mdblist"
     const val LIBRARY_SOURCE = "tracking_source_library"
     const val WATCH_PROGRESS_SOURCE = "tracking_source_watch_progress"
     const val CONTINUE_WATCHING = "tracking_trakt_continue_watching"

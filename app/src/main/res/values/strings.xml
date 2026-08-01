@@ -1037,6 +1037,12 @@
     <string name="mdblist_api_key_title">API Key</string>
     <string name="mdblist_api_key_subtitle">Required to fetch ratings from MDBList</string>
     <string name="mdblist_tracking_title">Watch Tracking</string>
+    <string name="tracking_mdblist_integration_off">Turn MDBList on to use it for tracking</string>
+    <string name="tracking_mdblist_key_required">Add an MDBList API key to enable tracking</string>
+    <string name="tracking_mdblist_tracking_off">API key set \u2014 Watch Tracking is off</string>
+    <string name="tracking_mdblist_tracking_on">Tracking playback to your MDBList history</string>
+    <string name="tracking_mdblist_tracking_as">Tracking to %1$s\u2019s MDBList history</string>
+    <string name="tracking_mdblist_dialog_subtitle">Rating badges are configured in Settings \u2192 Integrations \u2192 MDBList</string>
     <string name="mdblist_tracking_subtitle">Scrobble playback to your MDBList watch history (marks watched at 80%)</string>
     <string name="mdblist_trakt_title">Trakt</string>
     <string name="mdblist_trakt_subtitle">Show Trakt score</string>

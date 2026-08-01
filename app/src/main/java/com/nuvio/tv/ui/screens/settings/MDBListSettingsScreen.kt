@@ -314,8 +314,10 @@ fun MDBListSettingsContent(
     }
 }
 
+// internal (not private): the Tracking settings screen hosts the same key entry,
+// so a user who reaches MDBList from there is not sent to another screen.
 @Composable
-private fun MDBListApiKeyDialog(
+internal fun MDBListApiKeyDialog(
     currentValue: String,
     viewModel: MDBListSettingsViewModel,
     onSaved: () -> Unit,
@@ -436,7 +438,7 @@ private fun MDBListApiKeyDialog(
     }
 }
 
-private fun maskApiKey(key: String, notSetLabel: String): String {
+internal fun maskApiKey(key: String, notSetLabel: String): String {
     val trimmed = key.trim()
     if (trimmed.isBlank()) return notSetLabel
     return if (trimmed.length <= 4) "••••" else "••••••${trimmed.takeLast(4)}"
