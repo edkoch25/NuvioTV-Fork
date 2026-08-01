@@ -4,6 +4,7 @@ package com.nuvio.tv.ui.screens.player
 
 import android.os.Build
 import android.util.Log
+import androidx.media3.common.C
 import androidx.media3.common.Format
 import com.nuvio.tv.core.player.FrameRateUtils
 import com.nuvio.tv.data.local.FrameRateMatchingMode
@@ -95,6 +96,11 @@ internal fun PlayerRuntimeController.maybeRunTrackFormatAfr(rawFps: Float, forma
     // P-F3: stamp this attempt with the current stream's generation; the
     // finally block stands down if a per-stream reset happened meanwhile.
     val startGeneration = afrTrackGeneration
+    // Fix 1: set true only if we actually disable audio for the switch, so
+    // the finally re-enables exactly what was disabled and can never latch a
+    // muted state on an unrelated exit path.
+    var audioQuiesced = false
+    var switchStartElapsedMs = 0L
 
     scope.launch {
         try {
@@ -143,6 +149,28 @@ internal fun PlayerRuntimeController.maybeRunTrackFormatAfr(rawFps: Float, forma
                     currentFilename
                 )
 
+                // Fix 1: quiesce audio across the HDMI mode switch. On the
+                // Shield, switching display mode tears the audio output down
+                // under a live AudioTrack, producing AudioSink write failures
+                // (-6) that media3 recovers from but which are the fragile
+                // window for passthrough corruption. Releasing the AudioTrack
+                // before the switch removes the live-track teardown entirely.
+                // Skip under an already-audio-disabled stream (don't fight the
+                // existing state machine) and under tunneling (the tunnel
+                // clock is the audio track).
+                if (!isAudioDisabledForCurrentPlayback && !playerSettings.tunnelingEnabled) {
+                    withContext(Dispatchers.Main) {
+                        _exoPlayer?.let { p ->
+                            p.trackSelectionParameters = p.trackSelectionParameters
+                                .buildUpon()
+                                .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                                .build()
+                        }
+                    }
+                    audioQuiesced = true
+                    switchStartElapsedMs = android.os.SystemClock.elapsedRealtime()
+                }
+
                 val result = FrameRateUtils.matchFrameRateAndWait(
                     activity = activity,
                     frameRate = targetFrameRate,
@@ -170,6 +198,17 @@ internal fun PlayerRuntimeController.maybeRunTrackFormatAfr(rawFps: Float, forma
                             "Track AFR: display mode switched; holding playback start ${TRACK_AFR_SETTLE_HOLD_MS}ms"
                         )
                         delay(TRACK_AFR_SETTLE_HOLD_MS)
+                        val sinceSwitchMs = if (switchStartElapsedMs > 0L) {
+                            android.os.SystemClock.elapsedRealtime() - switchStartElapsedMs
+                        } else {
+                            -1L
+                        }
+                        Log.d(
+                            PlayerRuntimeController.TAG,
+                            "Track AFR settle complete: elapsedSinceSwitchMs=" + sinceSwitchMs +
+                                " audioQuiesced=" + audioQuiesced +
+                                " firstFrame=" + hasRenderedFirstFrame
+                        )
                     }
                 }
             } ?: Log.w(
@@ -182,6 +221,18 @@ internal fun PlayerRuntimeController.maybeRunTrackFormatAfr(rawFps: Float, forma
             // stream's start-hold (and could start held playback early).
             if (afrTrackGeneration == startGeneration) {
                 afrTrackSwitchInFlight = false
+                // Fix 1: symmetric re-enable. Only touch audio if we disabled
+                // it above; runs on every exit path (success, deadline, reset).
+                if (audioQuiesced) {
+                    withContext(Dispatchers.Main) {
+                        _exoPlayer?.let { p ->
+                            p.trackSelectionParameters = p.trackSelectionParameters
+                                .buildUpon()
+                                .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                                .build()
+                        }
+                    }
+                }
                 resumePlaybackAfterTrackAfrIfHeld()
             }
         }
