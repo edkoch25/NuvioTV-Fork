@@ -34,7 +34,7 @@ of person who tunes buffer settings for fun.
   it can't honestly know so won't touch. Like the answers? Apply them all in one press. Change
   your mind? Revert restores every previous value, even after a restart. You stay in charge; it
   just does the homework.
-  - **MDBList watch tracking, alongside Trakt and Simkl** -- scrobbling, Continue Watching, resume,
+- **MDBList watch tracking, alongside Trakt and Simkl** -- scrobbling, Continue Watching, resume,
   watched ticks and Up Next, on nothing more than a free MDBList API key. Ported onto upstream's
   native pluggable tracking architecture: every connected tracker gets every write, and switching
   your Watch Progress source to MDBList only ever adds watched state, never wipes it.
