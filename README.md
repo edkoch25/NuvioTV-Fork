@@ -56,6 +56,17 @@ of person who tunes buffer settings for fun.
   it can't honestly know so won't touch. Like the answers? Apply them all in one press. Change
   your mind? Revert restores every previous value, even after a restart. You stay in charge; it
   just does the homework.
+  - **MDBList watch tracking, alongside Trakt and Simkl** -- scrobbling, Continue Watching, resume,
+  watched ticks and Up Next, on nothing more than a free MDBList API key. Ported onto upstream's
+  native pluggable tracking architecture: every connected tracker gets every write, and switching
+  your Watch Progress source to MDBList only ever adds watched state, never wipes it.
+- **Audio that fits your gear** -- per-format passthrough switches (Dolby Digital, DD+, TrueHD,
+  DTS, DTS-HD) phrased as questions about your receiver, following Kodi's audio settings. Android
+  treats passthrough as all-or-nothing, which is no help when your receiver handles every Dolby
+  format but no DTS, or takes DTS core but not DTS-HD. Switch off what your gear can't decode and
+  Nuvio decodes just those in the app -- with its own decoder, because some boxes ship a vendor
+  DTS decoder that quietly folds 5.1 to stereo. A diagnostics row shows what your chain actually
+  claims it can take, so you can tell a lying EDID from a real limitation.
 - **Fewer stalls, less wasted bandwidth** -- upstream's parallel downloading kept too little data
   queued ahead of playback and threw away chunks it had already paid to download (measured ~47% of
   transfer wasted on a 4K remux). This fork keeps the pipeline properly fed and stops the
@@ -96,6 +107,9 @@ of person who tunes buffer settings for fun.
   browse, opens the network connection at the press, and no longer over-fetches the file's tail
   index -- so pressing play reaches the player in a few hundred milliseconds instead of a couple
   of seconds.
+- **Pressing play reaches the player faster again** (~6.4 s -> ~2 s on a prepared press) --
+  streams are found, ranked and resolved while you're still browsing, and the content-server
+  connection is warmed to the right node ahead of time.
 - **Smoother browsing** -- home-grid scroll-jank reduction and poster prefetch/pre-decode, so the
   UI keeps up with your remote.
 - **Stats-for-nerds overlay -- proof, not vibes.** A live diagnostics HUD built for
