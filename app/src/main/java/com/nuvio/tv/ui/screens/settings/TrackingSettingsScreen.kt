@@ -538,6 +538,7 @@ internal fun TrackingSettingsOverview(
                             )
                             SettingsActionRow(
                                 title = stringResource(R.string.mdblist_title),
+                                leadingRawIconRes = R.raw.mdblist_glyph,
                                 subtitle = mdbListPresentation.subtitle,
                                 value = mdbListPresentation.value,
                                 valueColor = mdbListPresentation.color,
