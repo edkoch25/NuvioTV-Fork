@@ -1,3 +1,4 @@
+
 ## About
 
 This is a **personal fork** of [NuvioTV](https://github.com/NuvioMedia/NuvioTV) for test builds,
@@ -97,15 +98,25 @@ of person who tunes buffer settings for fun.
   TrueHD Atmos is hitting the sink, it measured it. The assessment configures; this overlay
   verifies.
 
-## New stats for nerds overlay -
+## Stats for Nerds Overlay -
 
-<img width="1920" height="1080" alt="screenshot" src="https://github.com/user-attachments/assets/5b572d80-d3b2-4716-86b5-51404f0b00ad" />
+<img width="1920" height="1080" alt="screenshot1" src="https://github.com/user-attachments/assets/9f4eba71-389e-47da-95a1-fc1b22e5a86c" />
 
+## MDBList Tracking Integration -
+
+<img width="1920" height="1080" alt="screenshot2" src="https://github.com/user-attachments/assets/808ff170-cac4-4d0e-9f68-412e761748bc" />
 
 ## Revised Last Played Stream Speed Test:
 
 <img width="1920" height="1080" alt="screenshot1" src="https://github.com/user-attachments/assets/1ccb4258-7487-4424-82cb-496a776e3c4f" />
 
+## Device Assessment:
+
+<img width="1920" height="1080" alt="screenshot4" src="https://github.com/user-attachments/assets/eb274129-553c-4b5c-b1ac-665aca9101fa" />
+
+## Per-Format Audio Passthrough Switches:
+
+<img width="1920" height="1080" alt="screenshot" src="https://github.com/user-attachments/assets/f3a339a9-3126-40fc-bd33-6b372e72a002" />
 
 ---
 
