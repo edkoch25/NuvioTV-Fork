@@ -266,7 +266,12 @@ class MDBListTrackingProgressProvider @Inject constructor(
         return watchedService.currentState().watchedEpisodes
     }
 
-    override suspend fun showIdSiblings(): Map<String, Set<String>> = emptyMap()
+    // Serves the alias map the watched service now derives (imdb -> {tmdb:N,
+    // tvdb:N}), matching how Trakt's provider serves its own. Continue
+    // Watching uses these to resolve ambiguous show ids. The service's state
+    // flow always has a current value, so first() is a non-blocking snapshot.
+    override suspend fun showIdSiblings(): Map<String, Set<String>> =
+        watchedService.observeShowSiblingIds().first()
 
     override suspend fun refresh(intent: TrackingRefreshIntent) {
         val force = intent != TrackingRefreshIntent.AUTOMATIC

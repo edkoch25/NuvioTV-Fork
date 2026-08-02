@@ -378,4 +378,49 @@ class MDBListWatchedServiceTest {
     fun `write body is null when there is nothing writable`() {
         assertNull(serviceWith(mockk()).buildWriteBody(emptyList()))
     }
+
+    // ----- sibling ids (watched checkmarks in tmdb-keyed browsers) -----
+
+    @Test
+    fun `derivation stores movie aliases in catalogue form alongside imdb`() {
+        val state = serviceWith(mockk()).deriveState(
+            MDBListWatchedPages(movies = listOf(michaelMovie))
+        )
+        assertTrue("tt11378946" in state.watchedMovieIds)
+        assertTrue("tmdb:936075" in state.watchedMovieIds)
+    }
+
+    @Test
+    fun `derivation maps show siblings from the show rows`() {
+        val state = serviceWith(mockk()).deriveState(
+            MDBListWatchedPages(shows = listOf(fromShow))
+        )
+        val siblings = state.showSiblingIds["tt9813792"].orEmpty()
+        assertTrue("tt9813792" in siblings)
+        assertTrue("tmdb:124364" in siblings)
+    }
+
+    @Test
+    fun `derivation maps show siblings from episode rows too because rollups lag`() {
+        val state = serviceWith(mockk()).deriveState(
+            MDBListWatchedPages(episodes = listOf(fromEpisode))
+        )
+        val siblings = state.showSiblingIds["tt9813792"].orEmpty()
+        assertTrue("tmdb:124364" in siblings)
+    }
+
+    @Test
+    fun `derivation omits alias forms for ids the payload does not carry`() {
+        val bare = MDBListWatchedMovieDto(
+            lastWatchedAt = "2026-07-30T21:19:57.000Z",
+            movie = MDBListSyncMovieDto(
+                title = "Bare", year = 2020,
+                ids = MDBListSyncIdsDto(imdb = "tt0000002")
+            )
+        )
+        val state = serviceWith(mockk()).deriveState(
+            MDBListWatchedPages(movies = listOf(bare))
+        )
+        assertEquals(setOf("tt0000002"), state.watchedMovieIds)
+    }
 }

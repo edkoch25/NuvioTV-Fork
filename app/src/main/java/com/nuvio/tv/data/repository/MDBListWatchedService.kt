@@ -56,6 +56,12 @@ data class MDBListWatchedWriteItem(
 
 data class MDBListWatchedState(
     val watchedMovieIds: Set<String> = emptySet(),
+    /**
+     * Sibling ids per watched show, keyed by the canonical IMDb id. Values
+     * use the app's catalogue conventions (`tmdb:N`, `tvdb:N`), matching
+     * upstream's Simkl provider, so tmdb-keyed browsers can join on them.
+     */
+    val showSiblingIds: Map<String, Set<String>> = emptyMap(),
     val watchedEpisodes: Map<String, Set<Pair<Int, Int>>> = emptyMap(),
     /** Show IMDb id to title, for seeds that must render a row label. */
     val showTitles: Map<String, String> = emptyMap(),
@@ -255,6 +261,10 @@ class MDBListWatchedService @Inject constructor(
     fun observeShowTitles(): Flow<Map<String, String>> =
         watchedState.map { it.showTitles }.distinctUntilChanged()
 
+    /** Sibling join keys per watched show, for tmdb/tvdb-keyed browsers. */
+    fun observeShowSiblingIds(): Flow<Map<String, Set<String>>> =
+        watchedState.map { it.showSiblingIds }.distinctUntilChanged()
+
     /** Per-episode watch timestamps, for seed ordering by recency. */
     fun observeEpisodeWatchedAt(): Flow<Map<String, Map<Pair<Int, Int>, Long>>> =
         watchedState.map { it.episodeWatchedAtMs }.distinctUntilChanged()
@@ -356,10 +366,16 @@ class MDBListWatchedService @Inject constructor(
      * the app joins on IMDb, and a tmdb-keyed row would silently never match.
      */
     internal fun deriveState(pages: MDBListWatchedPages): MDBListWatchedState {
+        // The full alias set goes in, not just imdb. The watched checkmark
+        // join across the app is literal set membership (`item.id in set`),
+        // and tmdb-sourced browsers key items as "tmdb:N" - imdb alone can
+        // never match there. Convention mirrors upstream's Simkl provider.
         val movieIds = mutableSetOf<String>()
         for (entry in pages.movies) {
-            val imdb = entry.movie?.ids?.imdb?.trim()
-            if (!imdb.isNullOrEmpty()) movieIds.add(imdb)
+            val ids = entry.movie?.ids ?: continue
+            val imdb = ids.imdb?.trim()
+            if (imdb.isNullOrEmpty()) continue
+            movieIds.addAll(aliasesOf(imdb, ids.tmdb, ids.tvdb))
         }
 
         val episodes = mutableMapOf<String, MutableSet<Pair<Int, Int>>>()
@@ -379,28 +395,45 @@ class MDBListWatchedService @Inject constructor(
         // show nested inside each episode row carries the same. Either is
         // enough, and a show with watched episodes always has the latter.
         val titles = mutableMapOf<String, String>()
+        val showSiblings = mutableMapOf<String, MutableSet<String>>()
         for (entry in pages.shows) {
             val body = entry.show ?: continue
             val showImdb = body.ids?.imdb?.trim()
             if (showImdb.isNullOrEmpty()) continue
             val title = body.title?.trim()
             if (!title.isNullOrEmpty()) titles[showImdb] = title
+            showSiblings.getOrPut(showImdb) { mutableSetOf() }
+                .addAll(aliasesOf(showImdb, body.ids?.tmdb, body.ids?.tvdb))
         }
+        // Episode rows carry the same nested show ids, and the show rollup
+        // row lags behind them, so a freshly watched show would otherwise
+        // have no siblings until the server catches up.
         for (entry in pages.episodes) {
             val show = entry.episode?.show ?: continue
             val showImdb = show.ids?.imdb?.trim()
             if (showImdb.isNullOrEmpty()) continue
             val title = show.title?.trim()
             if (!title.isNullOrEmpty()) titles.putIfAbsent(showImdb, title)
+            showSiblings.getOrPut(showImdb) { mutableSetOf() }
+                .addAll(aliasesOf(showImdb, show.ids?.tmdb, show.ids?.tvdb))
         }
 
         return MDBListWatchedState(
             watchedMovieIds = movieIds.toSet(),
             watchedEpisodes = episodes.mapValues { it.value.toSet() },
+            showSiblingIds = showSiblings.mapValues { it.value.toSet() },
             showTitles = titles.toMap(),
             episodeWatchedAtMs = watchedAt.mapValues { it.value.toMap() }
         )
     }
+
+    /** One item's join keys: canonical imdb plus prefixed tmdb/tvdb forms. */
+    private fun aliasesOf(imdb: String, tmdb: Int?, tvdb: Int?): Set<String> =
+        buildSet {
+            add(imdb)
+            tmdb?.let { add("tmdb:" + it) }
+            tvdb?.let { add("tvdb:" + it) }
+        }
 
     /** The watched-category stamps as read from the gate, uncommitted. */
     private class WatchedActivitySnapshot(

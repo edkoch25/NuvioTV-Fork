@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.combine
 import com.nuvio.tv.R
 import com.nuvio.tv.core.tmdb.TmdbEntityBrowseData
 import com.nuvio.tv.core.tmdb.TmdbEntityKind
@@ -27,6 +28,7 @@ class TmdbEntityBrowseViewModel @Inject constructor(
     private val tmdbMetadataService: TmdbMetadataService,
     private val tmdbSettingsDataStore: TmdbSettingsDataStore,
     private val watchProgressRepository: com.nuvio.tv.domain.repository.WatchProgressRepository,
+    private val mdbListWatchedService: com.nuvio.tv.data.repository.MDBListWatchedService,
     private val watchedSeriesStateHolder: com.nuvio.tv.data.local.WatchedSeriesStateHolder,
     val posterOptions: com.nuvio.tv.ui.components.posteroptions.PosterOptionsController,
     savedStateHandle: SavedStateHandle
@@ -45,7 +47,8 @@ class TmdbEntityBrowseViewModel @Inject constructor(
 
     private val _watchedMovieIds = MutableStateFlow<Set<String>>(emptySet())
     val watchedMovieIds: StateFlow<Set<String>> = _watchedMovieIds.asStateFlow()
-    val watchedSeriesIds: StateFlow<Set<String>> = watchedSeriesStateHolder.fullyWatchedSeriesIds
+    private val _watchedSeriesIds = MutableStateFlow<Set<String>>(emptySet())
+    val watchedSeriesIds: StateFlow<Set<String>> = _watchedSeriesIds.asStateFlow()
 
     private val _uiState = MutableStateFlow<TmdbEntityBrowseUiState>(TmdbEntityBrowseUiState.Loading)
     val uiState: StateFlow<TmdbEntityBrowseUiState> = _uiState.asStateFlow()
@@ -56,6 +59,23 @@ class TmdbEntityBrowseViewModel @Inject constructor(
         viewModelScope.launch {
             watchProgressRepository.observeWatchedMovieIds()
                 .collect { ids -> _watchedMovieIds.value = ids }
+        }
+        // The browser's items are keyed "tmdb:N", while fully-watched series
+        // are keyed by the id they were validated under (usually imdb), so
+        // the set is expanded with each show's sibling ids where MDBList
+        // knows them. Shows MDBList has never seen keep their original key
+        // only - the same scope upstream's Simkl aliasing has.
+        viewModelScope.launch {
+            combine(
+                watchedSeriesStateHolder.fullyWatchedSeriesIds,
+                mdbListWatchedService.observeShowSiblingIds()
+            ) { watched, siblings ->
+                if (siblings.isEmpty()) watched
+                else buildSet {
+                    addAll(watched)
+                    for (id in watched) siblings[id]?.let(::addAll)
+                }
+            }.collect { ids -> _watchedSeriesIds.value = ids }
         }
     }
 
