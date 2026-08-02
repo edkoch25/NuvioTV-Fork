@@ -16,28 +16,6 @@ This fork is a set of targeted optimisations layered on top of their work, not a
 
 ---
 
-## Latest: the speed release -- 0.7.20-beta-nt1
-
-Nearly every wait in the app just got shorter, and every claim was measured on-device:
-
-- **Pressing play reaches the player 2-5x sooner** (~1.7 s -> 0.3-0.7 s) -- sources are searched,
-  ranked and the debrid link fetched while you're still browsing, from the details page, the
-  episode list, and Continue Watching (which previously always started from cold: 1,254-2,351 ms
-  -> 2 ms).
-- **4K remuxes open ~2.3 s faster** -- the start-up index read fetches exactly what it needs
-  (it was downloading 4.8x too much), and the connection to the content server now opens the
-  moment you press play.
-- **"Next episode" starts ~2 s sooner** on a deliberate press.
-- **Profile switching stays fast all session** -- a compounding background leak meant it got
-  slower with every switch and never recovered until restart; now fixed (-34% on a warm switch).
-- Plus the full upstream **NuvioTV 0.7.20-beta** merged, smoother home-screen scrolling
-  (re-renders per frame halved), reliable fast repeat-plays, and a storage-aware image cache.
-
-Full details, honest caveats and the upstream changelog:
-[release notes](https://github.com/ysosrs123/NuvioTV-Fork/releases/tag/0.7.20-beta-nt1).
-
----
-
 ## What this fork adds
 
 Optimisation and playback-quality work, most of it aimed at high-bitrate remux and lossless audio.
