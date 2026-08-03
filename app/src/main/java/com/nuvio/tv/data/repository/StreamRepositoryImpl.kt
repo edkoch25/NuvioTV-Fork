@@ -30,11 +30,26 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import java.net.URLEncoder
 import javax.inject.Inject
 
 private const val TAG = "StreamRepositoryImpl"
+
+/**
+ * Per-addon deadline for a single stream fetch.
+ *
+ * Without this each addon inherits only the shared client's connect(30s) +
+ * read(60s) budget, so one unresponsive source can hold its slot for ~90s
+ * while every other addon has long since answered. 15s is deliberately
+ * generous: a cold scrape on a large title legitimately takes ten-plus
+ * seconds, and cutting those off would trade a latency win for lost results.
+ * Results already stream out as each addon lands, so a slow addon that beats
+ * the deadline still contributes.
+ */
+private const val ADDON_STREAM_FETCH_TIMEOUT_MS = 15_000L
 
 class StreamRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -97,6 +112,7 @@ class StreamRepositoryImpl @Inject constructor(
                 streamAddons.forEach { addon ->
                     launch {
                         try {
+                          withTimeout(ADDON_STREAM_FETCH_TIMEOUT_MS) {
                             val streamsResult = getStreamsFromAddon(addon.baseUrl, type, videoId, addon.displayName, addon.logo)
                             when (streamsResult) {
                                 is NetworkResult.Success -> {
@@ -135,6 +151,17 @@ class StreamRepositoryImpl @Inject constructor(
                                 }
                                 NetworkResult.Loading -> Unit
                             }
+                          }
+                        } catch (e: TimeoutCancellationException) {
+                            // MUST precede the broad catch below: TimeoutCancellationException
+                            // is a CancellationException, and rethrowing it would cancel the
+                            // enclosing coroutineScope and every sibling addon job with it.
+                            Log.w(TAG, "Addon ${addon.name} exceeded ${ADDON_STREAM_FETCH_TIMEOUT_MS}ms - abandoning")
+                            attemptedFailures += StreamAttemptFailure(
+                                addonName = addon.displayName,
+                                kind = StreamFailureKind.REQUEST_FAILED,
+                                detail = context.getString(com.nuvio.tv.R.string.stream_error_detail_addon_timeout)
+                            )
                         } catch (e: Exception) {
                             if (e is CancellationException) throw e
                             Log.e(TAG, "Addon ${addon.name} failed: ${e.message}")
