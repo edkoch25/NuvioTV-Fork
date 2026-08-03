@@ -29,6 +29,7 @@ import com.nuvio.tv.ui.screens.addon.CatalogOrderScreen
 import com.nuvio.tv.ui.screens.library.LibraryScreen
 import com.nuvio.tv.ui.screens.player.PlayerExitReason
 import com.nuvio.tv.ui.screens.player.PlayerScreen
+import com.nuvio.tv.ui.screens.player.isShortPlaceholderDuration
 import com.nuvio.tv.ui.screens.plugin.PluginScreen
 import com.nuvio.tv.ui.screens.search.DiscoverScreen
 import com.nuvio.tv.ui.screens.search.SearchScreen
@@ -159,7 +160,19 @@ fun NuvioNavHost(
                         year = null,
                         contentId = item.progress.contentId,
                         contentName = item.progress.name,
-                        runtime = null,
+                        // WatchProgress.duration is overloaded: a real playback duration on
+                        // some write paths, a 1L "watched, duration unknown" sentinel on
+                        // others (mark-watched, poster options, next-up seeds). Filter it
+                        // through the fork's existing definition of "too short to be a real
+                        // title" rather than converting blindly -- and check > 0 explicitly,
+                        // because isShortPlaceholderDuration's range starts at 1 and would
+                        // otherwise let a zero through as "0 minutes".
+                        //
+                        // Truncating rather than rounding is deliberate: a smaller runtime
+                        // weakens the placeholder gate's guard, so the error is fail-safe.
+                        runtime = item.progress.duration
+                            .takeIf { it > 0L && !isShortPlaceholderDuration(it) }
+                            ?.let { (it / 60_000L).toInt() },
                         manualSelection = manualSelection,
                         returnToDetailOnBack = item.progress.contentType.equals("series", ignoreCase = true),
                         returnToHomeOnBack = true,

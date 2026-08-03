@@ -198,8 +198,12 @@ class PlayerRuntimeController(
      * Expected runtime in minutes from the title's metadata, resolved by the
      * stream screen before the press. Null when unknown; consumers must treat
      * null as "do not judge" rather than as zero.
+     *
+     * A var, not a val: this controller survives a binge transition, so the value
+     * must follow the episode rather than stay pinned to the runtime carried in
+     * the original nav args. Updated in playNextEpisode from Video.runtime.
      */
-    internal val expectedRuntimeMinutes: Int? = navigationArgs.runtimeMinutes
+    internal var expectedRuntimeMinutes: Int? = navigationArgs.runtimeMinutes
 
     /**
      * One-shot guard for the placeholder probe. STATE_READY fires again after

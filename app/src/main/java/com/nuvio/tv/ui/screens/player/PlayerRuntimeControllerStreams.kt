@@ -1595,6 +1595,14 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
         return
     }
 
+    // Follow the episode. Video.runtime is the per-episode value the next-episode
+    // resolver already holds, so no lookup and no added latency on the transition.
+    // Placed after the early returns so an aborted transition cannot mutate it.
+    // Where the addon supplies no per-episode runtime the previous value is kept:
+    // same series, so a closer approximation than dropping to null, and every
+    // downstream use treats an over-estimate as fail-safe.
+    nextVideo.runtime?.let { expectedRuntimeMinutes = it }
+
     val episodeForMode = state.nextEpisode ?: nextInfo
     _uiState.update {
         it.copy(
