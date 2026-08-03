@@ -52,6 +52,23 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.nuvio.tv.R
 
+/**
+ * Height of the artwork box rendered above the loading text. The box is centred,
+ * so on the 540dp Android TV canvas it occupies 180..360dp.
+ */
+private val LOADING_ARTWORK_BOX_HEIGHT = 180.dp
+
+/**
+ * Top inset for the source/filename/message block when artwork is shown.
+ *
+ * Derived, not tuned: the artwork box ends at (540 - 180) / 2 + 180 == 360dp, and
+ * this clears it by 12dp. Anchored from the top rather than offset from centre so
+ * the clearance holds regardless of the block's own height -- a filename that
+ * wraps to two lines would otherwise raise a centre-anchored block back into the
+ * artwork.
+ */
+private val LOADING_TEXT_TOP_INSET = 372.dp
+
 @Composable
 fun LoadingOverlay(
     visible: Boolean,
@@ -160,7 +177,7 @@ fun LoadingOverlay(
                         Box(
                             modifier = Modifier
                                 .width(320.dp)
-                                .height(180.dp)
+                                .height(LOADING_ARTWORK_BOX_HEIGHT)
                         ) {
                             // Base layer: semi-transparent logo (always visible).
                             // When the fill effect is active we hold a steady low
@@ -231,11 +248,18 @@ fun LoadingOverlay(
                 // is acting as the fill indicator. The text message stays visible.
                 val showHorizontalBar = progress != null && !showLogo
                 if (!sourceLine.isNullOrBlank() || !filename.isNullOrBlank() || !message.isNullOrBlank() || showHorizontalBar) {
-                    val messageOffset = if (showLogo || !title.isNullOrBlank()) 94.dp else 86.dp
+                    // Artwork present: anchor from the top so the block always clears the
+                    // artwork box. Otherwise keep the historical centre-relative offsets.
+                    val messageAlignment = if (showLogo) Alignment.TopCenter else Alignment.Center
+                    val messageOffset = when {
+                        showLogo -> LOADING_TEXT_TOP_INSET
+                        !title.isNullOrBlank() -> 94.dp
+                        else -> 86.dp
+                    }
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier
-                            .align(Alignment.Center)
+                            .align(messageAlignment)
                             .offset(y = messageOffset)
                             .padding(horizontal = NuvioTheme.spacing.xl)
                     ) {
