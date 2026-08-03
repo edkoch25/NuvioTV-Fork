@@ -2468,6 +2468,11 @@ internal fun PlayerRuntimeController.resetLoadingOverlayForNewStream() {
     )
     hasRenderedFirstFrame = false
     hasMarkedCurrentEpisodeCompleted = false
+    // The placeholder probe is a per-stream measurement, not a
+    // per-screen one: the reuse path re-enters initializePlayer on the
+    // same controller, so without this reset it evaluated only the first
+    // stream of a binge and was inert on every transition after it.
+    placeholderProbeDone = false
     shouldEnforceAutoplayOnFirstReady = true
     userPausedManually = false
     timeoutRecoveryAttempts = 0
