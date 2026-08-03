@@ -165,10 +165,19 @@ data class BufferSettings(
         const val DEFAULT_BUFFER_FOR_PLAYBACK_MS = 5_000
         const val DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 3_000
         const val DEFAULT_TARGET_BUFFER_SIZE_MB: Int = 150
-        // Media3 reserves additional bytes for back buffer as a fraction of
-        // targetBufferBytes. 15s default keeps peak heap within Fire TV class
-        // limits while still covering 3 default 5s seek-back presses.
-        const val DEFAULT_BACK_BUFFER_DURATION_MS = 15_000
+        // Back-buffer bytes are charged against the SAME allocator budget as the
+        // forward buffer: SampleQueue holds already-played samples until
+        // discardBuffer() releases them, and DefaultLoadControl compares
+        // allocator.getTotalBytesAllocated() (forward + back) against the byte
+        // target. The reserve is therefore backBufferMs x BITRATE, not a
+        // fraction of targetBufferBytes as previously documented here.
+        //
+        // At remux bitrates the old 15s default consumed 150-190 MB, which on a
+        // 150-250 MB target left little or no forward cushion -- the load control
+        // then refused to load with the buffer nearly empty. 5s keeps the reserve
+        // near 56 MB at 90 Mbps, sits on the settings slider's 5s grid, and still
+        // covers one 5s seek-back press.
+        const val DEFAULT_BACK_BUFFER_DURATION_MS = 5_000
     }
 }
 
@@ -595,6 +604,7 @@ class PlayerSettingsDataStore @Inject constructor(
     private val migrationTargetBufferSizeBumpedDoneKey = booleanPreferencesKey("migration_target_buffer_size_bumped_done")
     private val migrationAfterRebufferLoweredDoneKey = booleanPreferencesKey("migration_after_rebuffer_lowered_done")
     private val migrationBackBufferDurationReducedDoneKey = booleanPreferencesKey("migration_back_buffer_duration_reduced_done")
+    private val migrationBackBufferBudgetDoneKey = booleanPreferencesKey("migration_back_buffer_budget_done")
     private val migrationTargetBufferSizeReducedDoneKey = booleanPreferencesKey("migration_target_buffer_size_reduced_done")
     init {
         ioScope.launch {
@@ -649,7 +659,12 @@ class PlayerSettingsDataStore @Inject constructor(
                     val currentBackBuffer = prefs[backBufferDurationMsKey]
                     val currentRetainBackBuffer = prefs[retainBackBufferFromKeyframeKey]
 
-                    val previousRetunedDefaultsDetected = currentMin == 50_000 && currentMax == 50_000 && currentPlayback == BufferSettings.DEFAULT_BUFFER_FOR_PLAYBACK_MS && currentPlaybackAfterRebuffer == BufferSettings.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS && currentTargetBuffer == BufferSettings.DEFAULT_TARGET_BUFFER_SIZE_MB && (currentBackBuffer == null || currentBackBuffer == BufferSettings.DEFAULT_BACK_BUFFER_DURATION_MS) && (currentRetainBackBuffer == null || !currentRetainBackBuffer)
+                    // Clauses below deliberately test LITERALS, not BufferSettings
+                    // constants: this predicate must keep detecting the defaults that were
+                    // current when the migration was authored. Comparing against a live
+                    // constant means any later default change silently narrows the match
+                    // and strands users on legacy values.
+                    val previousRetunedDefaultsDetected = currentMin == 50_000 && currentMax == 50_000 && currentPlayback == BufferSettings.DEFAULT_BUFFER_FOR_PLAYBACK_MS && currentPlaybackAfterRebuffer == BufferSettings.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS && currentTargetBuffer == BufferSettings.DEFAULT_TARGET_BUFFER_SIZE_MB && (currentBackBuffer == null || currentBackBuffer == 15_000) && (currentRetainBackBuffer == null || !currentRetainBackBuffer)
 
                     if (previousRetunedDefaultsDetected) prefs[minBufferMsKey] = BufferSettings.DEFAULT_MIN_BUFFER_MS
                     prefs[migrationLoadControlMinBufferRetunedDoneKey] = true
@@ -713,6 +728,19 @@ class PlayerSettingsDataStore @Inject constructor(
                         prefs[backBufferDurationMsKey] = BufferSettings.DEFAULT_BACK_BUFFER_DURATION_MS
                     }
                     prefs[migrationBackBufferDurationReducedDoneKey] = true
+                }
+
+                // Back buffer reduced 15s -> 5s: back-buffer bytes compete with the
+                // forward buffer inside one allocator budget, so at remux bitrates the
+                // 15s value could consume the entire byte target. Value-gated on the
+                // exact prior default, so a deliberately chosen value is left alone.
+                val backBufferBudgetFixed = prefs[migrationBackBufferBudgetDoneKey] ?: false
+                if (!backBufferBudgetFixed) {
+                    val currentBackBudget = prefs[backBufferDurationMsKey]
+                    if (currentBackBudget == null || currentBackBudget == 15_000) {
+                        prefs[backBufferDurationMsKey] = BufferSettings.DEFAULT_BACK_BUFFER_DURATION_MS
+                    }
+                    prefs[migrationBackBufferBudgetDoneKey] = true
                 }
 
                 // Corrects users from a 125 interim build back to the 150 default.
