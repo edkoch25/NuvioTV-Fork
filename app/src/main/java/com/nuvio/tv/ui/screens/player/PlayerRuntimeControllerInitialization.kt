@@ -324,6 +324,11 @@ internal fun PlayerRuntimeController.initializePlayer(
             val previousTrackSelectorForReuse = trackSelector
             val previousLoadControlForReuse = _loadControl
             val previousBitrateAwareLoadControlForReuse = currentBitrateAwareLoadControl
+            // The back buffer is baked into ExoPlayerImplInternal at construction and never
+            // re-read, so a reused player keeps the value it was first built with. Capture it
+            // here, before the per-stream reset below zeroes the field, so the reuse branch can
+            // report what the engine is actually running.
+            val previousEffectiveBackBufferMsForReuse = effectiveBackBufferDurationMs
             if (allowEngineFailover) {
                 startupEngineFailoverTriggered = false
             }
@@ -1149,8 +1154,11 @@ internal fun PlayerRuntimeController.initializePlayer(
                 _loadControl = previousLoadControlForReuse
                 currentBitrateAwareLoadControl = previousBitrateAwareLoadControlForReuse
                 previousBitrateAwareLoadControlForReuse?.let { liveLoadControl ->
-                    liveLoadControl.setBackBufferDurationOverrideMs(configuredBackBufferMs)
-                    effectiveBackBufferDurationMs = configuredBackBufferMs
+                    // The back buffer is NOT re-applied here: media3 captured it when this
+                    // player was first constructed and will not re-read it. Report the
+                    // captured value rather than the newly configured one (which the engine
+                    // never adopted) or 0 (the per-stream reset at the top of initializePlayer).
+                    effectiveBackBufferDurationMs = previousEffectiveBackBufferMsForReuse
                     liveLoadControl.setBudgetBytesOverride(customBufferBudgetBytes)
                 }
                 reuseCandidatePlayer!!.setVideoChangeFrameRateStrategy(
@@ -3362,11 +3370,9 @@ private fun PlayerRuntimeController.recordFirstFrameDiagnostics(
         val budgetManaged = playerSettings.bufferBudgetManaged
         val keepZeroForDv7 = budgetManaged && conversionSucceeded > 0L &&
                 MemoryBudget.isLowRamTier
-        val resolvedBackBufferMs = if (keepZeroForDv7) 0 else configuredBackBufferMs
-        if (resolvedBackBufferMs != effectiveBackBufferDurationMs) {
-            lc.setBackBufferDurationOverrideMs(resolvedBackBufferMs)
-            effectiveBackBufferDurationMs = resolvedBackBufferMs
-        }
+        // Only the BUDGET can be tightened at runtime. The back buffer was fixed when
+        // this player was constructed and media3 will not re-read it, so it is reported
+        // as built rather than as intended.
         if (keepZeroForDv7) {
             lc.setBudgetBytesOverride(
                 MemoryBudget.conversionBudgetMb.toLong() * 1024L * 1024L
@@ -3376,7 +3382,7 @@ private fun PlayerRuntimeController.recordFirstFrameDiagnostics(
             PlayerRuntimeController.TAG,
             "BACK_BUFFER_RESOLVED: dvConversion=$dvConversionOccurred " +
                     "lowRam=${MemoryBudget.isLowRamTier} " +
-                    "resolvedBackBufferMs=$resolvedBackBufferMs " +
+                    "effectiveBackBufferMs=$effectiveBackBufferDurationMs " +
                     "managed=$budgetManaged " +
                     "budgetMb=${when {
                         keepZeroForDv7 -> MemoryBudget.conversionBudgetMb

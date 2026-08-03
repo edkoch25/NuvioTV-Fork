@@ -530,7 +530,11 @@ private fun PlayerRuntimeController.buildPlaybackIssuePlaybackSettingsInput(): P
         targetBufferSizeMb = settings.bufferSettings.targetBufferSizeMb,
         backBufferDurationMs = settings.bufferSettings.backBufferDurationMs,
         effectiveBackBufferDurationMs = effectiveBackBufferDurationMs,
-        retainBackBufferFromKeyframe = settings.bufferSettings.retainBackBufferFromKeyframe,
+        // Report what the engine actually runs, not the stored setting. Every
+        // LoadControl branch constructs with retainBackBufferFromKeyframe = true; the
+        // stored flag is not wired to the engine, so reporting it made every issue
+        // report understate back-buffer retention.
+        retainBackBufferFromKeyframe = PlayerRuntimeController.ENGINE_RETAIN_BACK_BUFFER_FROM_KEYFRAME,
         parallelNetworkEnabled = settings.parallelNetworkEnabled,
         bufferBudgetManaged = settings.bufferBudgetManaged,
         allowLargeTargetBuffer = settings.allowLargeTargetBuffer,

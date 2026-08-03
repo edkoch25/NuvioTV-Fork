@@ -97,6 +97,15 @@ class PlayerRuntimeController(
 
     companion object {
         internal const val TAG = "PlayerViewModel"
+
+        /**
+         * The value every LoadControl branch constructs with. Verified at all three
+         * construction sites: BitrateAwareLoadControl(retainBackBufferFromKeyframe = true),
+         * NuvioExoPlayerPerformanceHelper .setBackBuffer(backBufferMs, true), and the stock
+         * branch .setBackBuffer(1_500, true). The persisted user setting is not wired to
+         * the engine, so diagnostics must report this rather than the stored flag.
+         */
+        internal const val ENGINE_RETAIN_BACK_BUFFER_FROM_KEYFRAME = true
         internal const val SWITCH_TRACE_TAG = "SwitchTrace"
         internal const val SWITCH_TRACE_ENABLED = false
         internal const val TRACK_FRAME_RATE_GRACE_MS = 1500L

@@ -3,19 +3,25 @@ package com.nuvio.tv.core.player
 import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
-import androidx.media3.exoplayer.analytics.PlayerId
 import androidx.media3.exoplayer.trackselection.ExoTrackSelection
 import androidx.media3.exoplayer.upstream.Allocator
 import androidx.media3.exoplayer.upstream.DefaultAllocator
 
 /**
- * DefaultLoadControl with a byte target tied to the device memory budget, and a back
- * buffer / budget that can be adjusted at runtime once we know whether the stream is
- * really DV7.
+ * DefaultLoadControl with a byte target tied to the device memory budget, adjustable
+ * at runtime once we know whether the stream is really DV7.
  *
  * On a DV-capable display AUTO arms conversion for every file, but most never actually
  * convert. So we build with the full budget and the user's back buffer, then tighten
- * only for confirmed DV7 via the override setters below.
+ * the BUDGET only for confirmed DV7 via the override setter below.
+ *
+ * The back buffer deliberately has no runtime override. media3 1.8.0
+ * ExoPlayerImplInternal reads getBackBufferDurationUs() and
+ * retainBackBufferFromKeyframe() exactly once, in its constructor, into private final
+ * fields (:211-212, :306-307). It never polls them again, so a setter here would be
+ * silently inert. The back buffer is fixed for the life of the player instance -- and
+ * for a REUSED player it stays at the value captured when that instance was first
+ * built. Changing it requires constructing a new player.
  */
 @UnstableApi
 class BitrateAwareLoadControl(
@@ -41,16 +47,6 @@ class BitrateAwareLoadControl(
     retainBackBufferFromKeyframe
 ) {
 
-    // Effective back buffer (µs) when >= 0, else the constructed value. The player polls
-    // getBackBufferDurationUs, so this can change mid-playback.
-    @Volatile
-    private var backBufferOverrideUs: Long = -1L
-
-    /** Set the back buffer at runtime; negative restores the constructed value. */
-    fun setBackBufferDurationOverrideMs(ms: Int) {
-        backBufferOverrideUs = if (ms < 0) -1L else ms.toLong() * 1000L
-    }
-
     // Effective byte budget when >= 0, else the constructed budget. Re-read on track
     // (re)selection, so this can change mid-playback.
     @Volatile
@@ -59,11 +55,6 @@ class BitrateAwareLoadControl(
     /** Set the byte budget at runtime; negative restores the constructed budget. */
     fun setBudgetBytesOverride(bytes: Long) {
         budgetBytesOverride = if (bytes < 0L) -1L else bytes
-    }
-
-    override fun getBackBufferDurationUs(playerId: PlayerId): Long {
-        val override = backBufferOverrideUs
-        return if (override >= 0L) override else super.getBackBufferDurationUs(playerId)
     }
 
     override fun calculateTargetBufferBytes(
