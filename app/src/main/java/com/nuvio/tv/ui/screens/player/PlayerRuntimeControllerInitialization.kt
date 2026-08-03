@@ -1397,6 +1397,9 @@ internal fun PlayerRuntimeController.initializePlayer(
                         }
 
                         if (playbackState == Player.STATE_READY) {
+                            // 5b: measure only. Evaluates the placeholder policy and logs
+                            // the verdict; deliberately does not act on it yet.
+                            probePlaceholderStream(this@apply)
                             if (pendingSeekTelemetryRequestedAtMs > 0L && pendingSeekTelemetryReadyAtMs <= 0L) {
                                 val latencyMs = (System.currentTimeMillis() - pendingSeekTelemetryRequestedAtMs).coerceAtLeast(0L)
                                 pendingSeekTelemetryReadyAtMs = System.currentTimeMillis()

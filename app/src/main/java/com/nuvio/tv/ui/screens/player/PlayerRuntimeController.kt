@@ -191,6 +191,13 @@ class PlayerRuntimeController(
      * null as "do not judge" rather than as zero.
      */
     internal val expectedRuntimeMinutes: Int? = navigationArgs.runtimeMinutes
+
+    /**
+     * One-shot guard for the placeholder probe. STATE_READY fires again after
+     * seeks and rebuffers; the probe is about the file, not the moment, so it
+     * runs once per play session.
+     */
+    internal var placeholderProbeDone: Boolean = false
     internal var currentFilename: String? = navigationArgs.filename
         ?: initialStreamUrl.substringBefore('?').substringAfterLast('/', "")
             .takeIf { it.isNotBlank() && it.contains('.') }
