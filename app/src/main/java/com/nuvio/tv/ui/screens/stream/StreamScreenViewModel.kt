@@ -1466,6 +1466,9 @@ class StreamScreenViewModel @Inject constructor(
             filename = stream.behaviorHints?.filename,
             videoHash = stream.behaviorHints?.videoHash,
             videoSize = stream.behaviorHints?.videoSize,
+            // Already resolved by loadMetadataIfNeeded, including the per-episode
+            // case; the route value is only a seed for it.
+            runtimeMinutes = _uiState.value.runtime,
             addonName = stream.addonName,
             addonLogo = stream.addonLogo,
             streamDescription = stream.description,
@@ -1972,6 +1975,7 @@ data class StreamPlaybackInfo(
     val filename: String? = null,
     val videoHash: String? = null,
     val videoSize: Long? = null,
+    val runtimeMinutes: Int? = null,
     val addonName: String? = null,
     val addonLogo: String? = null,
     val streamDescription: String? = null,

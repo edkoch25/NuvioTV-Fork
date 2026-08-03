@@ -537,6 +537,7 @@ fun NuvioNavHost(
                                 filename = playbackInfo.filename,
                                 videoHash = playbackInfo.videoHash,
                                 videoSize = playbackInfo.videoSize,
+                                runtimeMinutes = playbackInfo.runtimeMinutes,
                                 startFromBeginning = startFromBeginning,
                                 addonName = playbackInfo.addonName,
                                 addonLogo = playbackInfo.addonLogo,
@@ -579,6 +580,7 @@ fun NuvioNavHost(
                                 filename = playbackInfo.filename,
                                 videoHash = playbackInfo.videoHash,
                                 videoSize = playbackInfo.videoSize,
+                                runtimeMinutes = playbackInfo.runtimeMinutes,
                                 startFromBeginning = startFromBeginning,
                                 addonName = playbackInfo.addonName,
                                 addonLogo = playbackInfo.addonLogo,
@@ -699,6 +701,11 @@ fun NuvioNavHost(
                     defaultValue = null
                 },
                 navArgument("videoSize") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+                navArgument("runtimeMinutes") {
                     type = NavType.StringType
                     nullable = true
                     defaultValue = null

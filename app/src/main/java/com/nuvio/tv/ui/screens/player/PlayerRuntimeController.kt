@@ -184,6 +184,13 @@ class PlayerRuntimeController(
 
     internal var currentVideoHash: String? = navigationArgs.videoHash
     internal var currentVideoSize: Long? = navigationArgs.videoSize
+
+    /**
+     * Expected runtime in minutes from the title's metadata, resolved by the
+     * stream screen before the press. Null when unknown; consumers must treat
+     * null as "do not judge" rather than as zero.
+     */
+    internal val expectedRuntimeMinutes: Int? = navigationArgs.runtimeMinutes
     internal var currentFilename: String? = navigationArgs.filename
         ?: initialStreamUrl.substringBefore('?').substringAfterLast('/', "")
             .takeIf { it.isNotBlank() && it.contains('.') }
