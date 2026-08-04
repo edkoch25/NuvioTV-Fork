@@ -368,6 +368,13 @@ internal class PlaybackSpeedAwareAudioSink(
             val posDeltaMs = (posUs - lastPos) / 1_000L
             val expectedMs = (wallDeltaMs * playbackSpeed).toLong()
             val absMs = abs(posDeltaMs - expectedMs)
+            if (absMs > 50L) {
+                Log.w(
+                    TAG,
+                    "SEEK_TRACE JITTER er=$nowMs posUs=$posUs posDeltaMs=$posDeltaMs " +
+                        "expectedMs=$expectedMs devMs=$absMs"
+                )
+            }
             // nt8: storm detector -- signed lead accumulation, floored at zero, each
             // sample clamped. Runs independently of the jitter row's plausibility cap
             // so violent strides still register. Active-only and window-bounded.

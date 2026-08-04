@@ -2188,6 +2188,20 @@ internal fun PlayerRuntimeController.initializePlayer(
                             wasCanceled = wasCanceled
                         )
                     }
+
+                    override fun onPositionDiscontinuity(
+                        eventTime: AnalyticsListener.EventTime,
+                        oldPosition: Player.PositionInfo,
+                        newPosition: Player.PositionInfo,
+                        reason: Int
+                    ) {
+                        Log.w(
+                            PlayerRuntimeController.TAG,
+                            "SEEK_TRACE DISCONTINUITY er=${SystemClock.elapsedRealtime()} reason=$reason " +
+                                "oldMs=${oldPosition.positionMs} newMs=${newPosition.positionMs} " +
+                                "eventRealtimeMs=${eventTime.realtimeMs}"
+                        )
+                    }
                 }
                 currentExoAnalyticsListener = exoAnalyticsListenerForStream
                 addAnalyticsListener(exoAnalyticsListenerForStream)
