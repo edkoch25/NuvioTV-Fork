@@ -314,20 +314,6 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                         player.seekTo(target)
                     }
                 }
-
-                // nt9: TrueHD PCM grace expiry -> promote to real passthrough. The
-                // capabilities nudge invalidates track selection (the selector is
-                // built with allowInvalidateSelectionsOnRendererCapabilitiesChange),
-                // and the re-selected TrueHD track reconfigures as bitstream on the
-                // now-settled system; the byte gate and storm monitor re-arm at that
-                // start and stand guard over the promotion itself.
-                if (playbackSpeedAwareAudioSink?.maybeExpireTruehdPcmGrace() == true) {
-                    Log.i(
-                        PlayerRuntimeController.TAG,
-                        "TRUEHD_GRACE expired: promoting TrueHD from PCM grace to passthrough"
-                    )
-                    playbackSpeedAwareAudioSink?.notifyAudioProcessingRequirementChanged()
-                }
                 val displayPosition = pendingPreviewSeekPosition ?: pos
                 updatePlaybackTimeline(
                     currentPosition = displayPosition,

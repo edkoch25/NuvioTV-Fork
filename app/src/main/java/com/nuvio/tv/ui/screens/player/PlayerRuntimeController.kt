@@ -510,11 +510,6 @@ class PlayerRuntimeController(
     // playback start briefly so the (tunneled) pipeline does not begin inside
     // the mode transition.
     internal var exoDelayStartAfterAfrSwitch: Boolean = false
-
-    // nt9: wall time of the last real display-mode switch this playback (0 = none);
-    // used to arm the sink's TrueHD PCM grace window, including when the switch
-    // happens before the audio sink exists (the AFR preflight path).
-    internal var truehdPcmGraceSwitchAtMs: Long = 0L
     // nt6 AFR option 1: frame rate taken from ExoPlayer's reported track format
     // between prepare and first frame, replacing the MediaExtractor probe on the
     // ExoPlayer engine path. trackAfrAttemptedForCurrentStream gates one attempt
