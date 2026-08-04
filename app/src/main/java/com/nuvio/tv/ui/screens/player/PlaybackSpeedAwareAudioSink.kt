@@ -32,6 +32,13 @@ private const val JITTER_EVENT_MS = 20L
 // Below this many samples the row says nothing rather than something unstable.
 private const val JITTER_MIN_SAMPLES = 25
 
+// nt7: byte floor and wall cap for the deferred TrueHD passthrough start (see play()).
+// 192 KiB is 3.5+ s of a near-silent (~0.3 Mbps) TrueHD head — comfortably past the
+// Amlogic MS12 startup draw that emptied a ~55 KB prefill on device — while a typical
+// (>= 1 Mbps) track has written this much before play() is ever called and never defers.
+private const val TRUEHD_START_MIN_BYTES = 196_608L
+private const val TRUEHD_START_DEFER_CAP_MS = 1_500L
+
 internal class PlaybackSpeedAwareAudioSink(
     private val delegate: AudioSink,
     initialForcePcm: Boolean = false,
@@ -94,6 +101,17 @@ internal class PlaybackSpeedAwareAudioSink(
     @Volatile
     private var passthroughStartupCompensationPending: Boolean = false
 
+    /**
+     * nt7: byte-gated TrueHD passthrough start (see play()). Set when play() was
+     * deferred because too few encoded bytes had been written; released from
+     * handleBuffer() once the byte floor is met or the wall cap expires.
+     */
+    @Volatile
+    private var passthroughDeferredPlayPending: Boolean = false
+
+    @Volatile
+    private var passthroughDeferredPlaySinceMs: Long = 0L
+
     fun setInitialPlaybackSpeed(speed: Float) {
         playbackSpeed = normalizeSpeed(speed)
         markPcmFallbackIfNeeded(currentInputFormat, playbackSpeed)
@@ -120,6 +138,7 @@ internal class PlaybackSpeedAwareAudioSink(
     override fun flush() {
         passthroughPauseCompensationPending = false
         passthroughStartupCompensationPending = false
+        passthroughDeferredPlayPending = false
         resetAudioMeasurements()
         // nt: AudioTrack reuse-on-flush disabled. Reusing the passthrough
         // AudioTrack across a seek left the audio clock mismapped on some HALs
@@ -168,6 +187,7 @@ internal class PlaybackSpeedAwareAudioSink(
             }
             encodedAudioLastPtsUs = presentationTimeUs
         }
+        maybeReleaseDeferredPlay()
         maybeSampleAudioClockJitter()
         return handled
     }
@@ -294,6 +314,10 @@ internal class PlaybackSpeedAwareAudioSink(
      * position is safe to read; rate limited to ~20 ms.
      */
     private fun maybeSampleAudioClockJitter() {
+        // nt7: while a deferred start holds the track stopped, the player already
+        // reports isPlaying and the position legitimately sits still — every sample
+        // would score as a fake jitter event (the nt35 lesson). Sit out the deferral.
+        if (passthroughDeferredPlayPending) return
         val nowMs = SystemClock.elapsedRealtime()
         val lastWall = jitterLastWallMs
         if (lastWall != 0L && nowMs - lastWall < JITTER_MIN_INTERVAL_MS) return
@@ -595,10 +619,53 @@ internal class PlaybackSpeedAwareAudioSink(
             passthroughPauseCompensationPending = true
             Log.d(TAG, "Passthrough pause: compensation armed for ${currentInputFormat?.sampleMimeType}")
         }
+        // nt7: a pause during a deferred start cancels the deferral without starting
+        // the track. The next play() re-evaluates the byte floor from scratch.
+        passthroughDeferredPlayPending = false
         super.pause()
     }
 
     override fun play() {
+        // nt7: byte-gate TrueHD passthrough starts. ExoPlayer's start decision is
+        // duration-based (~1.5 s buffered), but the Amlogic MS12 TrueHD path fails on
+        // BYTE starvation: a near-silent VBR head (~0.3 Mbps, measured on device)
+        // leaves ~55 KB in the AudioTrack at start, the pipeline's startup draw
+        // empties it, and the resulting input gap costs MS12 its MLP access-unit
+        // alignment — it then discards input hunting for a major sync faster than a
+        // thin head can refill, a self-sustaining storm (~15 s on device) that steps
+        // the master audio clock and drags the video renderer into a decoder flush.
+        // Deferring the track start until a byte floor is met keeps the pipeline fed
+        // through its startup draw. Dense tracks pass the floor before play() is
+        // called and start exactly as before; the wall cap fail-safes to the old
+        // behaviour so no stream can hold the start hostage.
+        if (isCurrentlyPassthrough &&
+            currentInputFormat?.sampleMimeType == MimeTypes.AUDIO_TRUEHD &&
+            encodedAudioBytes < TRUEHD_START_MIN_BYTES
+        ) {
+            if (!passthroughDeferredPlayPending) {
+                passthroughDeferredPlayPending = true
+                passthroughDeferredPlaySinceMs = SystemClock.elapsedRealtime()
+                Log.d(
+                    TAG,
+                    "Passthrough deferred start: $encodedAudioBytes B < " +
+                        "$TRUEHD_START_MIN_BYTES B floor for audio/true-hd"
+                )
+            }
+            return
+        }
+        firePendingPassthroughResync()
+        super.play()
+    }
+
+    override fun playToEndOfStream() {
+        // nt7: end of stream while a deferred start is pending — release it so the
+        // buffered tail plays out instead of stalling a very short stream forever.
+        maybeReleaseDeferredPlay(force = true)
+        super.playToEndOfStream()
+    }
+
+    // nt7: the resync formerly inlined in play(); shared by the deferred-start release.
+    private fun firePendingPassthroughResync() {
         if (passthroughPauseCompensationPending || passthroughStartupCompensationPending) {
             val isStartup = passthroughStartupCompensationPending
             passthroughPauseCompensationPending = false
@@ -608,6 +675,22 @@ internal class PlaybackSpeedAwareAudioSink(
             handleDiscontinuity()
             Log.d(TAG, "Passthrough ${if (isStartup) "startup" else "resume"}: forced media time resync via handleDiscontinuity()")
         }
+    }
+
+    // nt7: called from handleBuffer() (passthrough branch) while a deferred start is
+    // pending; starts the track once the byte floor is met or the wall cap expires.
+    private fun maybeReleaseDeferredPlay(force: Boolean = false) {
+        if (!passthroughDeferredPlayPending) return
+        val elapsedMs = SystemClock.elapsedRealtime() - passthroughDeferredPlaySinceMs
+        val floorMet = encodedAudioBytes >= TRUEHD_START_MIN_BYTES
+        if (!force && !floorMet && elapsedMs < TRUEHD_START_DEFER_CAP_MS) return
+        passthroughDeferredPlayPending = false
+        firePendingPassthroughResync()
+        Log.d(
+            TAG,
+            "Passthrough deferred start released: bytes=$encodedAudioBytes " +
+                "floorMet=$floorMet elapsedMs=$elapsedMs force=$force"
+        )
         super.play()
     }
 
