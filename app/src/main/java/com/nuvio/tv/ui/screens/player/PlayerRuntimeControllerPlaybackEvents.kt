@@ -23,6 +23,7 @@ import com.nuvio.tv.domain.model.WatchProgress
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
+import com.nuvio.tv.core.player.PlaceholderStreamPolicy
 import kotlinx.coroutines.launch
 
 internal const val AUDIO_AMPLIFICATION_MIN_DB = 0
@@ -175,6 +176,15 @@ internal fun shouldTreatAsNaturalPlaybackCompletion(
     return true
 }
 
+/**
+ * 5c note: this 2:01 threshold is intentionally NOT aligned with
+ * [com.nuvio.tv.core.player.PlaceholderStreamPolicy.MIN_PLAUSIBLE_DURATION_MS] (3:00).
+ * This guard is duration-only and suppresses watch-state side-effects (progress,
+ * mark-watched, next-episode) for junk clips. Raising it to 3:00 would wrongly
+ * suppress those for legitimately short real content; the policy avoids that only
+ * because its 3:00 threshold is ANDed with a <33%-of-runtime ratio this guard has
+ * no runtime to apply. The two serve different jobs and must stay separate.
+ */
 /** Streams shorter than ~2:01 are treated as error/placeholder clips, not real episodes. */
 internal fun isShortPlaceholderDuration(duration: Long): Boolean = duration in 1..120_999L
 
@@ -264,6 +274,21 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                 val playerDuration = player.duration
                 if (playerDuration > lastKnownDuration) {
                     lastKnownDuration = playerDuration
+                }
+                // 5c: duration backstop. Content-length was cleared at READY (2a);
+                // here the decoded duration is trustworthy. Guarded on a blank error so
+                // it fires once -- the reject sets error, and every later tick short-circuits.
+                if (hasRenderedFirstFrame && _uiState.value.error.isNullOrBlank()) {
+                    val placeholderDurationVerdict = PlaceholderStreamPolicy.evaluate(
+                        contentLengthBytes = null,
+                        durationMs = getEffectiveDuration(pos),
+                        expectedRuntimeMs = expectedRuntimeMinutes?.let { it * 60_000L }
+                    )
+                    if (placeholderDurationVerdict is PlaceholderStreamPolicy.Verdict.Reject &&
+                        placeholderDurationVerdict.reason == PlaceholderStreamPolicy.Reason.ImplausibleDuration
+                    ) {
+                        rejectPlaceholderStream(placeholderDurationVerdict)
+                    }
                 }
                 val displayPosition = pendingPreviewSeekPosition ?: pos
                 updatePlaybackTimeline(

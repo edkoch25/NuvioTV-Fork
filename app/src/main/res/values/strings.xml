@@ -1621,6 +1621,7 @@
     <string name="player_more_aspect_ratio">Aspect Ratio</string>
     <string name="player_more_open_external">Open in External Player</string>
     <string name="player_error_no_stream_url">No stream URL provided</string>
+    <string name="player_error_placeholder_stream">This stream looks like a provider error card, not the video. Try a different source.</string>
 
 
     <string name="stream_info_section_source">SOURCE</string>

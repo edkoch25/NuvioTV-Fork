@@ -91,6 +91,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.net.SocketTimeoutException
 import kotlin.math.min
 import androidx.media3.common.Tracks
+import com.nuvio.tv.core.player.PlaceholderStreamPolicy
 
 private const val STARTUP_SUBTITLE_PREFETCH_TIMEOUT_MS = 20_000L
 private const val MPV_AFR_SETTLE_DELAY_MS = 2_000L
@@ -1405,9 +1406,17 @@ internal fun PlayerRuntimeController.initializePlayer(
                         }
 
                         if (playbackState == Player.STATE_READY) {
-                            // 5b: measure only. Evaluates the placeholder policy and logs
-                            // the verdict; deliberately does not act on it yet.
-                            probePlaceholderStream(this@apply)
+                            // 5c: the byte floor acts here -- content-length is stable at
+                            // READY. The duration backstop is deferred to the progress tick
+                            // (see rejectPlaceholderStream). Returning skips autoplay for a
+                            // rejected placeholder; the policy's runtime guard is the fail-safe.
+                            val placeholderVerdict = probePlaceholderStream(this@apply)
+                            if (placeholderVerdict is PlaceholderStreamPolicy.Verdict.Reject &&
+                                placeholderVerdict.reason == PlaceholderStreamPolicy.Reason.ImplausibleSize
+                            ) {
+                                rejectPlaceholderStream(placeholderVerdict)
+                                return
+                            }
                             if (pendingSeekTelemetryRequestedAtMs > 0L && pendingSeekTelemetryReadyAtMs <= 0L) {
                                 val latencyMs = (System.currentTimeMillis() - pendingSeekTelemetryRequestedAtMs).coerceAtLeast(0L)
                                 pendingSeekTelemetryReadyAtMs = System.currentTimeMillis()

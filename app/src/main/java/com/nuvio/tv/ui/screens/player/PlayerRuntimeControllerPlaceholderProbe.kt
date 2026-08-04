@@ -33,8 +33,8 @@ private const val TAG = "PlayerViewModel"
  *
  * Upstream: NuvioMedia/NuvioTV. Licensed under GPL-3.0.
  */
-internal fun PlayerRuntimeController.probePlaceholderStream(player: ExoPlayer) {
-    if (placeholderProbeDone) return
+internal fun PlayerRuntimeController.probePlaceholderStream(player: ExoPlayer): PlaceholderStreamPolicy.Verdict {
+    if (placeholderProbeDone) return PlaceholderStreamPolicy.Verdict.Accept
     placeholderProbeDone = true
 
     val contentLengthBytes = PlaybackByteCounter.contentLengthFor(currentStreamUrl)
@@ -61,4 +61,6 @@ internal fun PlayerRuntimeController.probePlaceholderStream(player: ExoPlayer) {
             "durationMs=${durationMs ?: -1} " +
             "expectedRuntimeMin=${expectedRuntimeMinutes ?: -1}"
     )
+
+    return verdict
 }
