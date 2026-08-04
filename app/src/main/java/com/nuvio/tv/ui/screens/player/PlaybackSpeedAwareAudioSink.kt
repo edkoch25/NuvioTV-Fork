@@ -144,6 +144,11 @@ internal class PlaybackSpeedAwareAudioSink(
     @Volatile
     private var skipNextStormSampleAfterResync: Boolean = false
 
+    // nt14: log-only wall-stamp rate limiter for the SEEK_TRACE POS instrument
+    // (getCurrentPositionUs override). Observation only; no clock-path effect.
+    @Volatile
+    private var seekTracePosLogAtMs: Long = 0L
+
     fun setInitialPlaybackSpeed(speed: Float) {
         playbackSpeed = normalizeSpeed(speed)
         markPcmFallbackIfNeeded(currentInputFormat, playbackSpeed)
@@ -177,6 +182,20 @@ internal class PlaybackSpeedAwareAudioSink(
         // (e.g. Ugoos SK1), causing progressive A/V desync after skipping.
         // Fall through to release/recreate, matching upstream flush behaviour.
         super.flush()
+    }
+
+    // nt14: SEEK_TRACE POS -- log-only observation of the renderer master-clock
+    // read. Returns super(...) UNCHANGED (no clamp, no intervention); logs the
+    // value rate-limited to ~5ms so the seek->flush poison window can be read on
+    // the real read path rather than the :361 proxy.
+    override fun getCurrentPositionUs(sourceEnded: Boolean): Long {
+        val posUs = super.getCurrentPositionUs(sourceEnded)
+        val nowMs = SystemClock.elapsedRealtime()
+        if (nowMs - seekTracePosLogAtMs >= 5L) {
+            seekTracePosLogAtMs = nowMs
+            Log.w(TAG, "SEEK_TRACE POS er=$nowMs posUs=$posUs sourceEnded=$sourceEnded")
+        }
+        return posUs
     }
 
     // Measured bitrate of the encoded audio bitstream. MKV declares no bitrate for audio
