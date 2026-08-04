@@ -290,6 +290,27 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                         rejectPlaceholderStream(placeholderDurationVerdict)
                     }
                 }
+
+                // nt8: TrueHD startup-storm auto-recovery. The Amlogic MS12 TrueHD
+                // bypass parser can start misaligned after a display-mode switch and
+                // then hunts for a major sync indefinitely, consuming buffered audio
+                // 3-4x faster than real time (the racing master clock is the visible
+                // position jump). The proven cure is an in-place seek: it recreates
+                // the AudioTrack on the settled system (reuse-on-flush is disabled),
+                // after which MS12 locks instantly -- measured on device. Roll back by
+                // the burned lead so the viewer resumes roughly where the storm began.
+                if (_uiState.value.error.isNullOrBlank() && truehdStormRecoveryAttempts < 2) {
+                    playbackSpeedAwareAudioSink?.consumeTruehdStormRecoverySignal()?.let { leadMs ->
+                        truehdStormRecoveryAttempts += 1
+                        val target = (pos - leadMs - 500L).coerceAtLeast(0L)
+                        Log.w(
+                            PlayerRuntimeController.TAG,
+                            "TRUEHD_STORM_RECOVERY: attempt=$truehdStormRecoveryAttempts " +
+                                "leadMs=$leadMs pos=${pos}ms seekTo=${target}ms"
+                        )
+                        player.seekTo(target)
+                    }
+                }
                 val displayPosition = pendingPreviewSeekPosition ?: pos
                 updatePlaybackTimeline(
                     currentPosition = displayPosition,

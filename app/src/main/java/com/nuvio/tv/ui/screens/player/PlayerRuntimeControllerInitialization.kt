@@ -505,6 +505,7 @@ internal fun PlayerRuntimeController.initializePlayer(
             DoviBridge.resetRuntimeCounters()
             DolbyVisionConversionStats.reset()
             rebufferCount = 0
+            truehdStormRecoveryAttempts = 0
             rebufferTotalMs = 0L
             rebufferStartedAtMs = 0L
 

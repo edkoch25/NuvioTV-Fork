@@ -39,6 +39,15 @@ private const val JITTER_MIN_SAMPLES = 25
 private const val TRUEHD_START_MIN_BYTES = 196_608L
 private const val TRUEHD_START_DEFER_CAP_MS = 1_500L
 
+// nt8: TrueHD startup-storm detector (see truehdStormLeadAccumMs). Storm lead was
+// measured on device at ~550 ms of clock lead per wall second (and the storm never
+// self-recovered); clean-playback noise is symmetric, and signed accumulation with
+// a floor at zero random-walks near zero, so a 1 s accumulated lead inside the 60 s
+// startup window separates cleanly.
+private const val TRUEHD_STORM_LEAD_THRESHOLD_MS = 1_000L
+private const val TRUEHD_STORM_SAMPLE_CAP_MS = 2_000L
+private const val TRUEHD_STORM_MONITOR_WINDOW_MS = 60_000L
+
 internal class PlaybackSpeedAwareAudioSink(
     private val delegate: AudioSink,
     initialForcePcm: Boolean = false,
@@ -111,6 +120,21 @@ internal class PlaybackSpeedAwareAudioSink(
 
     @Volatile
     private var passthroughDeferredPlaySinceMs: Long = 0L
+
+    // nt8: TrueHD startup-storm detector. After a display-mode switch the Amlogic
+    // MS12 TrueHD bypass parser can start misaligned and hunt for a major sync
+    // indefinitely, consuming input 3-4x faster than real time; under passthrough
+    // the audio clock is the master, so the position visibly races ahead. Detected
+    // here as accumulated positive clock lead over wall time within a startup
+    // window; consumed by the controller, whose proven cure is an in-place seek.
+    @Volatile
+    private var truehdStormLeadAccumMs: Long = 0L
+
+    @Volatile
+    private var truehdStormMonitorUntilMs: Long = 0L
+
+    @Volatile
+    private var truehdStormDetected: Boolean = false
 
     fun setInitialPlaybackSpeed(speed: Float) {
         playbackSpeed = normalizeSpeed(speed)
@@ -209,6 +233,9 @@ internal class PlaybackSpeedAwareAudioSink(
         driftLastMs = 0L
         driftMaxAbsMs = 0L
         driftSumAbsMs = 0L
+        truehdStormLeadAccumMs = 0L
+        truehdStormMonitorUntilMs = 0L
+        truehdStormDetected = false
     }
 
     /**
@@ -332,6 +359,29 @@ internal class PlaybackSpeedAwareAudioSink(
             val posDeltaMs = (posUs - lastPos) / 1_000L
             val expectedMs = (wallDeltaMs * playbackSpeed).toLong()
             val absMs = abs(posDeltaMs - expectedMs)
+            // nt8: storm detector -- signed lead accumulation, floored at zero, each
+            // sample clamped. Runs independently of the jitter row's plausibility cap
+            // so violent strides still register. Active-only and window-bounded.
+            if (truehdStormMonitorUntilMs != 0L && !truehdStormDetected &&
+                active && wallDeltaMs in JITTER_MIN_INTERVAL_MS..JITTER_MAX_WINDOW_MS
+            ) {
+                if (nowMs > truehdStormMonitorUntilMs) {
+                    truehdStormMonitorUntilMs = 0L
+                } else {
+                    val leadMs = (posDeltaMs - expectedMs)
+                        .coerceIn(-TRUEHD_STORM_SAMPLE_CAP_MS, TRUEHD_STORM_SAMPLE_CAP_MS)
+                    truehdStormLeadAccumMs = (truehdStormLeadAccumMs + leadMs).coerceAtLeast(0L)
+                    if (truehdStormLeadAccumMs >= TRUEHD_STORM_LEAD_THRESHOLD_MS) {
+                        truehdStormDetected = true
+                        truehdStormMonitorUntilMs = 0L
+                        Log.w(
+                            TAG,
+                            "TRUEHD_STORM detected: audio clock leads wall by " +
+                                "$truehdStormLeadAccumMs ms accumulated in the startup window"
+                        )
+                    }
+                }
+            }
             // nt35: a sample only counts while the player is actually playing (see
             // playbackActive) AND its window is plausible AND its deviation is
             // plausible. setPlaybackActive resets the window on every transition, so
@@ -654,6 +704,7 @@ internal class PlaybackSpeedAwareAudioSink(
             return
         }
         firePendingPassthroughResync()
+        armTruehdStormMonitor()
         super.play()
     }
 
@@ -691,7 +742,28 @@ internal class PlaybackSpeedAwareAudioSink(
             "Passthrough deferred start released: bytes=$encodedAudioBytes " +
                 "floorMet=$floorMet elapsedMs=$elapsedMs force=$force"
         )
+        armTruehdStormMonitor()
         super.play()
+    }
+
+    // nt8: arm the storm monitor at every real TrueHD passthrough start (deferred or
+    // not) -- mode-switch storms are independent of head density.
+    private fun armTruehdStormMonitor() {
+        if (isCurrentlyPassthrough && currentInputFormat?.sampleMimeType == MimeTypes.AUDIO_TRUEHD) {
+            truehdStormLeadAccumMs = 0L
+            truehdStormDetected = false
+            truehdStormMonitorUntilMs = SystemClock.elapsedRealtime() + TRUEHD_STORM_MONITOR_WINDOW_MS
+        }
+    }
+
+    /**
+     * nt8: one-shot storm verdict for the controller's progress tick. Returns the
+     * accumulated clock lead in ms once per detection, then clears.
+     */
+    fun consumeTruehdStormRecoverySignal(): Long? {
+        if (!truehdStormDetected) return null
+        truehdStormDetected = false
+        return truehdStormLeadAccumMs
     }
 
     override fun setPlaybackParameters(playbackParameters: PlaybackParameters) {

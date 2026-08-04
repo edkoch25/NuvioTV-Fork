@@ -378,6 +378,9 @@ class PlayerRuntimeController(
     internal var shouldEnforceAutoplayOnFirstReady = true
 
     internal var rebufferCount: Int = 0
+
+    // nt8: TrueHD startup-storm auto-recovery attempts this playback session (cap 2).
+    internal var truehdStormRecoveryAttempts: Int = 0
     internal var rebufferTotalMs: Long = 0L
     internal var rebufferStartedAtMs: Long = 0L
     /** Back buffer (ms) currently in force, after the first-frame DV7/low-RAM resolution. */
