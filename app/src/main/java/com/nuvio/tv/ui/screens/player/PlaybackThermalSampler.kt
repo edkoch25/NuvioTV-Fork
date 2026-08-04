@@ -112,13 +112,49 @@ internal class PlaybackThermalSampler(context: Context) {
     private fun readHeadroom(): Float? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
         val pm = powerManager ?: return null
-        return runCatching { pm.getThermalHeadroom(0) }
+        if (headroomHalDead) return null
+        val headroom = runCatching { pm.getThermalHeadroom(0) }
             .getOrNull()
             ?.takeIf { !it.isNaN() && it >= 0f }
+        if (headroom == null) {
+            headroomConsecutiveFailures += 1
+            if (headroomConsecutiveFailures >= HEADROOM_FAILURES_BEFORE_DEAD) {
+                headroomHalDead = true
+                Log.i(
+                    TAG,
+                    "thermal headroom HAL unusable ($headroomConsecutiveFailures consecutive " +
+                        "failures) — not polling again this process; each poll makes " +
+                        "system_server hammer the broken HAL"
+                )
+            }
+        } else {
+            headroomConsecutiveFailures = 0
+        }
+        return headroom
     }
 
     private companion object {
         const val TAG = "ThermalSampler"
         const val MAX_ZONES = 16
+
+        // nt7: on boxes whose thermal HAL cannot serve temperatures at all (Xiaomi
+        // MiTV-AFMU0: IThermal.getTemperaturesWithType throws "cannot read any sensor
+        // data"), every getThermalHeadroom() call makes system_server's
+        // TemperatureWatcher retry against the dead HAL and log a full stack trace
+        // per attempt — measured at ~1,360 log lines/second sustained for as long as
+        // the stats HUD stays open. Mirror the sysfs probe-once precedent: after this
+        // many CONSECUTIVE failures, latch the headroom tier off for the rest of the
+        // process and let the row hide. Occasional NaN is legitimate (the API
+        // rate-limits at ~1 Hz and HUD ticks can jitter under it), hence a
+        // consecutive-failure count with reset-on-success rather than probe-once — a
+        // healthy HAL that answers even occasionally never latches.
+        const val HEADROOM_FAILURES_BEFORE_DEAD = 10
+
+        // Process-wide: a dead HAL is a property of the box, not of one player session.
+        @Volatile
+        var headroomHalDead: Boolean = false
+
+        @Volatile
+        var headroomConsecutiveFailures: Int = 0
     }
 }
