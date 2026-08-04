@@ -1021,7 +1021,14 @@ internal fun PlayerRuntimeController.initializePlayer(
                 matPassthroughEnabled = playerSettings.matPassthroughEnabled,
                 playbackSpeedProvider = { _uiState.value.playbackSpeed },
                 initialForcePcm = hasTriedAudioPcmFallback,
-                onPlaybackSpeedAwareAudioSinkCreated = { playbackSpeedAwareAudioSink = it },
+                onPlaybackSpeedAwareAudioSinkCreated = {
+                    playbackSpeedAwareAudioSink = it
+                    // nt9: preflight-path switches happen before the sink exists; arm
+                    // retroactively (stale deadlines no-op inside the sink).
+                    if (truehdPcmGraceSwitchAtMs > 0L) {
+                        it.armTruehdPcmGraceUntil(truehdPcmGraceSwitchAtMs + PlaybackSpeedAwareAudioSink.TRUEHD_PCM_GRACE_MS)
+                    }
+                },
                 onFfmpegAudioRendererChanged = { renderer ->
                     ffmpegAudioRenderer = renderer
                     renderer?.applyDownmixSettings(

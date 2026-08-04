@@ -144,6 +144,17 @@ internal class PlaybackSpeedAwareAudioSink(
     @Volatile
     private var skipNextStormSampleAfterResync: Boolean = false
 
+    // nt9: PCM grace window for TrueHD after a real display-mode switch. The Amlogic
+    // MS12 TrueHD bypass parser starts misaligned for several seconds after a switch
+    // (storms measured up to 8.6 s post-switch; track recreates at 3.3/3.9 s failed,
+    // one at 8.6 s locked instantly). During the window the TrueHD track is decoded
+    // to multichannel PCM via the proven policy-deny path (mixer, immune); on expiry
+    // the controller nudges the selector and the track re-establishes true
+    // passthrough on the settled system. Wall-clock scoped: deliberately NOT cleared
+    // by flush()/configure(), which churn during exactly the window it must survive.
+    @Volatile
+    private var truehdPcmGraceUntilMs: Long = 0L
+
     fun setInitialPlaybackSpeed(speed: Float) {
         playbackSpeed = normalizeSpeed(speed)
         markPcmFallbackIfNeeded(currentInputFormat, playbackSpeed)
@@ -778,6 +789,35 @@ internal class PlaybackSpeedAwareAudioSink(
         return truehdStormLeadAccumMs
     }
 
+    private fun isTruehdGraceActive(format: Format): Boolean {
+        return format.sampleMimeType == MimeTypes.AUDIO_TRUEHD &&
+            SystemClock.elapsedRealtime() < truehdPcmGraceUntilMs
+    }
+
+    /**
+     * nt9: arm (or extend) the TrueHD PCM grace window to an absolute
+     * [SystemClock.elapsedRealtime] deadline. Past or shorter deadlines no-op, so a
+     * stale arm from a previous playback cannot re-open a window.
+     */
+    fun armTruehdPcmGraceUntil(deadlineMs: Long) {
+        val now = SystemClock.elapsedRealtime()
+        if (deadlineMs <= now || deadlineMs <= truehdPcmGraceUntilMs) return
+        truehdPcmGraceUntilMs = deadlineMs
+        Log.i(TAG, "TrueHD PCM grace armed for ${deadlineMs - now} ms (post display-mode switch)")
+    }
+
+    /**
+     * nt9: one-shot expiry signal for the controller's progress tick; true exactly
+     * once when an armed grace window has lapsed, after which the caller nudges the
+     * track selector to re-establish passthrough.
+     */
+    fun maybeExpireTruehdPcmGrace(): Boolean {
+        val deadline = truehdPcmGraceUntilMs
+        if (deadline == 0L || SystemClock.elapsedRealtime() < deadline) return false
+        truehdPcmGraceUntilMs = 0L
+        return true
+    }
+
     override fun setPlaybackParameters(playbackParameters: PlaybackParameters) {
         playbackSpeed = normalizeSpeed(playbackParameters.speed)
         var shouldNotify = markPcmFallbackIfNeeded(currentInputFormat, playbackSpeed)
@@ -840,7 +880,7 @@ internal class PlaybackSpeedAwareAudioSink(
      */
     fun isPolicyDeniedPassthrough(format: Format): Boolean {
         return isBitstreamFormat(format) &&
-            passthroughPolicy.deniesPassthrough(format.sampleMimeType)
+            (isTruehdGraceActive(format) || passthroughPolicy.deniesPassthrough(format.sampleMimeType))
     }
 
     /** Returns true if audio is currently playing in direct passthrough mode. */
@@ -852,6 +892,7 @@ internal class PlaybackSpeedAwareAudioSink(
     private fun shouldRejectDirectPlayback(format: Format): Boolean {
         if (!isBitstreamFormat(format)) return false
         if (forcePcmForCurrentSession || playbackSpeed != 1f) return true
+        if (isTruehdGraceActive(format)) return true
         // Per-format user override. Inert on the default policy, so with every switch
         // left on this function is behaviourally identical to before. This is the only
         // chokepoint that needs to change: getFormatSupport, getFormatOffloadSupport,
@@ -904,5 +945,10 @@ internal class PlaybackSpeedAwareAudioSink(
 
     companion object {
         private const val TAG = "PassthroughAudioSink"
+
+        // nt9: length of the TrueHD PCM grace window after a real display-mode
+        // switch. Settle measured on device: recreates at 3.3/3.9 s post-switch
+        // still stormed; one at 8.6 s locked instantly.
+        internal const val TRUEHD_PCM_GRACE_MS = 8_000L
     }
 }

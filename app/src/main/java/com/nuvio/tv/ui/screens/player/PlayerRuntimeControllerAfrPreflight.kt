@@ -36,6 +36,18 @@ internal const val AFR_PREFLIGHT_MIN_STAGE_MS = 2_000L
  * non-faststart MP4s is structurally impossible on this path. The full probing
  * preflight below remains in use for the MPV engine only.
  */
+// nt9: a real display-mode switch destabilises the Amlogic MS12 TrueHD pipeline for
+// several seconds; record the switch and arm the audio sink's PCM grace window so a
+// TrueHD track starts decoded (immune) and is promoted to passthrough once settled.
+// Also armed retroactively at sink creation for the preflight path, where the switch
+// happens before the sink exists.
+internal fun PlayerRuntimeController.armTruehdPcmGraceForSwitch() {
+    truehdPcmGraceSwitchAtMs = android.os.SystemClock.elapsedRealtime()
+    playbackSpeedAwareAudioSink?.armTruehdPcmGraceUntil(
+        truehdPcmGraceSwitchAtMs + PlaybackSpeedAwareAudioSink.TRUEHD_PCM_GRACE_MS
+    )
+}
+
 internal suspend fun PlayerRuntimeController.runAfrCachePreflightIfEnabled(
     url: String,
     headers: Map<String, String>,
@@ -112,6 +124,7 @@ internal suspend fun PlayerRuntimeController.runAfrCachePreflightIfEnabled(
             initialDisplayModeId != result.appliedMode.modeId
         mpvDelayStartAfterAfrSwitch = switchedDisplayMode
         exoDelayStartAfterAfrSwitch = switchedDisplayMode
+        if (switchedDisplayMode) armTruehdPcmGraceForSwitch()
         // Track-format AFR stands down when the cache path already ran a
         // mode selection for this stream (whether or not the mode changed).
         afrModeAppliedPreStart = true
@@ -221,6 +234,7 @@ internal suspend fun PlayerRuntimeController.runAfrPreflightIfEnabled(
                     initialDisplayModeId != result.appliedMode.modeId
                 mpvDelayStartAfterAfrSwitch = switchedDisplayMode
                 exoDelayStartAfterAfrSwitch = switchedDisplayMode
+                if (switchedDisplayMode) armTruehdPcmGraceForSwitch()
 
                 _uiState.update {
                     it.copy(
@@ -350,6 +364,7 @@ internal suspend fun PlayerRuntimeController.runAfrPreflightIfEnabled(
                 initialDisplayModeId != result.appliedMode.modeId
             mpvDelayStartAfterAfrSwitch = switchedDisplayMode
             exoDelayStartAfterAfrSwitch = switchedDisplayMode
+            if (switchedDisplayMode) armTruehdPcmGraceForSwitch()
 
             _uiState.update {
                 it.copy(

@@ -193,6 +193,7 @@ internal fun PlayerRuntimeController.maybeRunTrackFormatAfr(rawFps: Float, forma
                         )
                     }
                     if (switchedDisplayMode) {
+                        armTruehdPcmGraceForSwitch()
                         Log.d(
                             PlayerRuntimeController.TAG,
                             "Track AFR: display mode switched; holding playback start ${TRACK_AFR_SETTLE_HOLD_MS}ms"
