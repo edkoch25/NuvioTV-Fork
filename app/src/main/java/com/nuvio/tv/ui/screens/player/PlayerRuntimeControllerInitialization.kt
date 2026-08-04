@@ -507,6 +507,7 @@ internal fun PlayerRuntimeController.initializePlayer(
             rebufferCount = 0
             truehdStormRecoveryAttempts = 0
             truehdStormLastRecoveryAtMs = 0L
+            truehdStormOnsetPosMs = -1L
             rebufferTotalMs = 0L
             rebufferStartedAtMs = 0L
 

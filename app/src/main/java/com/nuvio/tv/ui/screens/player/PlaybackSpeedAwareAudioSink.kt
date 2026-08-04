@@ -769,6 +769,13 @@ internal class PlaybackSpeedAwareAudioSink(
     }
 
     /**
+     * nt11: non-consuming storm peek. The controller latches the player-timeline
+     * position on the first tick this reads true, so recovery rolls back to storm
+     * onset rather than the raced position at consume time. Does NOT clear the flag.
+     */
+    fun isTruehdStormDetected(): Boolean = truehdStormDetected
+
+    /**
      * nt8: one-shot storm verdict for the controller's progress tick. Returns the
      * accumulated clock lead in ms once per detection, then clears.
      */

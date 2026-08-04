@@ -386,6 +386,10 @@ class PlayerRuntimeController(
     // second lands after the post-mode-switch settle window (~5-8 s measured)
     // instead of 0.7 s after the first, which was provably wasted on device.
     internal var truehdStormLastRecoveryAtMs: Long = 0L
+    // nt11: player-timeline position (ms) latched on the first tick that observes
+    // an un-consumed storm, so recovery rolls back to onset, not the raced pos.
+    // -1L = no storm currently latched.
+    internal var truehdStormOnsetPosMs: Long = -1L
     internal var rebufferTotalMs: Long = 0L
     internal var rebufferStartedAtMs: Long = 0L
     /** Back buffer (ms) currently in force, after the first-frame DV7/low-RAM resolution. */

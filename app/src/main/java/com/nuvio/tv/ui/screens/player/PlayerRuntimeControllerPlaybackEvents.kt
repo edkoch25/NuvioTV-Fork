@@ -299,19 +299,35 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                 // the AudioTrack on the settled system (reuse-on-flush is disabled),
                 // after which MS12 locks instantly -- measured on device. Roll back by
                 // the burned lead so the viewer resumes roughly where the storm began.
+                // nt11: latch the player-timeline position on the FIRST tick that
+                // observes an un-consumed storm (<=500ms after onset). D's spacing
+                // gate can defer the actual recovery by ~3s, during which the racing
+                // clock moves `pos` ~10s past onset; latching here captures onset
+                // before that drift. Non-consuming peek -- the flag is cleared only
+                // by consumeTruehdStormRecoverySignal() below.
+                if (truehdStormOnsetPosMs < 0L &&
+                    playbackSpeedAwareAudioSink?.isTruehdStormDetected() == true
+                ) {
+                    truehdStormOnsetPosMs = pos
+                }
                 if (_uiState.value.error.isNullOrBlank() && truehdStormRecoveryAttempts < 2 &&
                     android.os.SystemClock.elapsedRealtime() - truehdStormLastRecoveryAtMs >= 3_000L
                 ) {
                     playbackSpeedAwareAudioSink?.consumeTruehdStormRecoverySignal()?.let { leadMs ->
                         truehdStormRecoveryAttempts += 1
                         truehdStormLastRecoveryAtMs = android.os.SystemClock.elapsedRealtime()
-                        val target = (pos - leadMs - 500L).coerceAtLeast(0L)
+                        // nt11: roll back to the latched storm onset, not the raced
+                        // consume-time pos. leadMs retained in the log for continuity.
+                        val onsetPos = if (truehdStormOnsetPosMs >= 0L) truehdStormOnsetPosMs else pos
+                        val target = (onsetPos - 500L).coerceAtLeast(0L)
                         Log.w(
                             PlayerRuntimeController.TAG,
                             "TRUEHD_STORM_RECOVERY: attempt=$truehdStormRecoveryAttempts " +
-                                "leadMs=$leadMs pos=${pos}ms seekTo=${target}ms"
+                                "leadMs=$leadMs onsetPos=${onsetPos}ms pos=${pos}ms seekTo=${target}ms"
                         )
                         player.seekTo(target)
+                        // nt11: clear the latch so a second storm latches its own onset.
+                        truehdStormOnsetPosMs = -1L
                     }
                 }
                 val displayPosition = pendingPreviewSeekPosition ?: pos
