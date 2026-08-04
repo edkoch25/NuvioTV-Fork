@@ -34,6 +34,13 @@ internal const val AUDIO_DELAY_MIN_MS = -3000
 internal const val AUDIO_DELAY_MAX_MS = 3000
 internal const val AUDIO_DELAY_STEP_MS = 25
 
+// nt15: after this long with no storm-recovery seek, the per-playback recovery
+// attempt budget resets, so a distinct later storm cluster gets a fresh 2 attempts
+// instead of being starved by a cap the earlier cold-start cluster already spent.
+// Chosen > the D >=3s spacing so a normal 2-attempt cluster cannot self-reset
+// mid-cluster; < the gap that separated the run-2 clusters (~10.7s).
+internal const val TRUEHD_STORM_ATTEMPT_RESET_MS = 6_000L
+
 internal fun PlayerRuntimeController.applyAudioDelay(
     delayMs: Int,
     persistForCurrentRoute: Boolean = true
@@ -309,6 +316,16 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                     playbackSpeedAwareAudioSink?.isTruehdStormDetected() == true
                 ) {
                     truehdStormOnsetPosMs = pos
+                }
+                // nt15: reset the spent per-playback budget after a clean interval,
+                // so a distinct later storm cluster is not starved by the earlier
+                // cluster's spent cap. Only acts when already capped; never touches
+                // lastRecoveryAtMs (the >=3s spacing gate) or the onset latch.
+                if (truehdStormRecoveryAttempts >= 2 &&
+                    truehdStormLastRecoveryAtMs != 0L &&
+                    android.os.SystemClock.elapsedRealtime() - truehdStormLastRecoveryAtMs >= TRUEHD_STORM_ATTEMPT_RESET_MS
+                ) {
+                    truehdStormRecoveryAttempts = 0
                 }
                 if (_uiState.value.error.isNullOrBlank() && truehdStormRecoveryAttempts < 2 &&
                     android.os.SystemClock.elapsedRealtime() - truehdStormLastRecoveryAtMs >= 3_000L
