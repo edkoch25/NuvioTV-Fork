@@ -136,6 +136,14 @@ internal class PlaybackSpeedAwareAudioSink(
     @Volatile
     private var truehdStormDetected: Boolean = false
 
+    // nt9: one storm-accumulator sample is skipped right after a passthrough resync:
+    // handleDiscontinuity() makes DefaultAudioSink restamp startMediaTimeUs on the
+    // next buffer, which can appear as a single large position stride. The jitter
+    // row's plausibility cap filters it there; the storm accumulator deliberately
+    // has no such cap, so it must skip that one stride instead.
+    @Volatile
+    private var skipNextStormSampleAfterResync: Boolean = false
+
     fun setInitialPlaybackSpeed(speed: Float) {
         playbackSpeed = normalizeSpeed(speed)
         markPcmFallbackIfNeeded(currentInputFormat, playbackSpeed)
@@ -236,6 +244,7 @@ internal class PlaybackSpeedAwareAudioSink(
         truehdStormLeadAccumMs = 0L
         truehdStormMonitorUntilMs = 0L
         truehdStormDetected = false
+        skipNextStormSampleAfterResync = false
     }
 
     /**
@@ -367,6 +376,8 @@ internal class PlaybackSpeedAwareAudioSink(
             ) {
                 if (nowMs > truehdStormMonitorUntilMs) {
                     truehdStormMonitorUntilMs = 0L
+                } else if (skipNextStormSampleAfterResync) {
+                    skipNextStormSampleAfterResync = false
                 } else {
                     val leadMs = (posDeltaMs - expectedMs)
                         .coerceIn(-TRUEHD_STORM_SAMPLE_CAP_MS, TRUEHD_STORM_SAMPLE_CAP_MS)
@@ -725,6 +736,7 @@ internal class PlaybackSpeedAwareAudioSink(
             // This compensates for initial passthrough handshake or audio played from receiver buffer during pause.
             handleDiscontinuity()
             Log.d(TAG, "Passthrough ${if (isStartup) "startup" else "resume"}: forced media time resync via handleDiscontinuity()")
+            skipNextStormSampleAfterResync = true
         }
     }
 

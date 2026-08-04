@@ -299,9 +299,12 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                 // the AudioTrack on the settled system (reuse-on-flush is disabled),
                 // after which MS12 locks instantly -- measured on device. Roll back by
                 // the burned lead so the viewer resumes roughly where the storm began.
-                if (_uiState.value.error.isNullOrBlank() && truehdStormRecoveryAttempts < 2) {
+                if (_uiState.value.error.isNullOrBlank() && truehdStormRecoveryAttempts < 2 &&
+                    android.os.SystemClock.elapsedRealtime() - truehdStormLastRecoveryAtMs >= 3_000L
+                ) {
                     playbackSpeedAwareAudioSink?.consumeTruehdStormRecoverySignal()?.let { leadMs ->
                         truehdStormRecoveryAttempts += 1
+                        truehdStormLastRecoveryAtMs = android.os.SystemClock.elapsedRealtime()
                         val target = (pos - leadMs - 500L).coerceAtLeast(0L)
                         Log.w(
                             PlayerRuntimeController.TAG,

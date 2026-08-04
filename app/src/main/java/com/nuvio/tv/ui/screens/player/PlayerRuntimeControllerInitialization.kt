@@ -506,6 +506,7 @@ internal fun PlayerRuntimeController.initializePlayer(
             DolbyVisionConversionStats.reset()
             rebufferCount = 0
             truehdStormRecoveryAttempts = 0
+            truehdStormLastRecoveryAtMs = 0L
             rebufferTotalMs = 0L
             rebufferStartedAtMs = 0L
 

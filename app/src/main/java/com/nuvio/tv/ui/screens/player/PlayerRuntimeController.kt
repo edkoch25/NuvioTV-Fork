@@ -381,6 +381,11 @@ class PlayerRuntimeController(
 
     // nt8: TrueHD startup-storm auto-recovery attempts this playback session (cap 2).
     internal var truehdStormRecoveryAttempts: Int = 0
+
+    // nt9: wall time of the last storm-recovery seek. Attempts are spaced so the
+    // second lands after the post-mode-switch settle window (~5-8 s measured)
+    // instead of 0.7 s after the first, which was provably wasted on device.
+    internal var truehdStormLastRecoveryAtMs: Long = 0L
     internal var rebufferTotalMs: Long = 0L
     internal var rebufferStartedAtMs: Long = 0L
     /** Back buffer (ms) currently in force, after the first-frame DV7/low-RAM resolution. */
