@@ -48,6 +48,13 @@ private const val TRUEHD_STORM_LEAD_THRESHOLD_MS = 1_000L
 private const val TRUEHD_STORM_SAMPLE_CAP_MS = 2_000L
 private const val TRUEHD_STORM_MONITOR_WINDOW_MS = 60_000L
 
+// nt16: SHADOW governor tunables (log-only; getCurrentPositionUs returns raw).
+private const val GOV_ENGAGE_RATE_X100 = 150L   // engage when raw races >1.50x
+private const val GOV_RATE_WINDOW_MS = 50L       // window for the raw-rate estimate
+private const val GOV_A_CAP_US = 2_000_000L      // variant A: snap forward if >2s behind
+private const val GOV_C_FREEZE_US = 300_000L     // variant C: freeze once >300ms ahead
+private const val GOV_LOG_INTERVAL_MS = 5L       // GOV trace rate limit
+
 internal class PlaybackSpeedAwareAudioSink(
     private val delegate: AudioSink,
     initialForcePcm: Boolean = false,
@@ -149,6 +156,21 @@ internal class PlaybackSpeedAwareAudioSink(
     @Volatile
     private var seekTracePosLogAtMs: Long = 0L
 
+    // nt16: SHADOW governor state. All log-only -- getCurrentPositionUs returns the
+    // raw delegate value regardless. Engages on a raced raw rate while playing,
+    // disengages in resetAudioMeasurements() (flush/configure).
+    @Volatile private var govEngaged: Boolean = false
+    @Volatile private var govBasePosUs: Long = 0L   // B & C baseline
+    @Volatile private var govBaseWallMs: Long = 0L
+    @Volatile private var govAPosUs: Long = 0L      // A baseline (re-anchors on cap)
+    @Volatile private var govAWallMs: Long = 0L
+    @Volatile private var govCFrozen: Boolean = false
+    @Volatile private var govCHoldUs: Long = 0L
+    @Volatile private var govRateRefPosUs: Long = C.TIME_UNSET
+    @Volatile private var govRateRefWallMs: Long = 0L
+    @Volatile private var govRateX100: Long = 100L
+    @Volatile private var govLogAtMs: Long = 0L
+
     fun setInitialPlaybackSpeed(speed: Float) {
         playbackSpeed = normalizeSpeed(speed)
         markPcmFallbackIfNeeded(currentInputFormat, playbackSpeed)
@@ -195,7 +217,57 @@ internal class PlaybackSpeedAwareAudioSink(
             seekTracePosLogAtMs = nowMs
             Log.w(TAG, "SEEK_TRACE POS er=$nowMs posUs=$posUs sourceEnded=$sourceEnded")
         }
+        computeShadowGovernor(posUs, nowMs)
         return posUs
+    }
+
+    // nt16: SHADOW governor. Computes three candidate governed positions and logs
+    // them against raw. RETURNS NOTHING and CHANGES NOTHING -- getCurrentPositionUs
+    // returns the raw delegate value. Engages when the windowed raw rate exceeds
+    // GOV_ENGAGE_RATE_X100 while playing; disengaged in resetAudioMeasurements().
+    private fun computeShadowGovernor(rawUs: Long, nowMs: Long) {
+        if (rawUs == AudioSink.CURRENT_POSITION_NOT_SET) return
+        if (govRateRefPosUs == C.TIME_UNSET) {
+            govRateRefPosUs = rawUs; govRateRefWallMs = nowMs
+        } else if (nowMs - govRateRefWallMs >= GOV_RATE_WINDOW_MS) {
+            val dW = nowMs - govRateRefWallMs
+            if (dW > 0L) govRateX100 = ((rawUs - govRateRefPosUs) * 100L) / (dW * 1000L)
+            govRateRefPosUs = rawUs; govRateRefWallMs = nowMs
+        }
+        if (!govEngaged && playbackActive && govRateX100 > GOV_ENGAGE_RATE_X100) {
+            govEngaged = true
+            govBasePosUs = rawUs; govBaseWallMs = nowMs
+            govAPosUs = rawUs; govAWallMs = nowMs
+            govCFrozen = false; govCHoldUs = rawUs
+            Log.w(TAG, "SEEK_TRACE GOV_ENGAGE er=$nowMs atPosUs=$rawUs rate100=$govRateX100")
+        }
+        var govA = rawUs
+        var govB = rawUs
+        var govC = rawUs
+        if (govEngaged) {
+            val ceilBC = govBasePosUs + (nowMs - govBaseWallMs) * 1000L
+            govB = if (rawUs < ceilBC) rawUs else ceilBC
+            if (!govCFrozen) {
+                if (rawUs > ceilBC + GOV_C_FREEZE_US) {
+                    govCFrozen = true; govCHoldUs = ceilBC; govC = ceilBC
+                } else {
+                    govC = if (rawUs < ceilBC) rawUs else ceilBC
+                }
+            } else {
+                govC = govCHoldUs
+            }
+            val ceilA = govAPosUs + (nowMs - govAWallMs) * 1000L
+            if (rawUs - ceilA > GOV_A_CAP_US) {
+                govAPosUs = rawUs; govAWallMs = nowMs; govA = rawUs
+            } else {
+                govA = if (rawUs < ceilA) rawUs else ceilA
+            }
+        }
+        if (nowMs - govLogAtMs >= GOV_LOG_INTERVAL_MS) {
+            govLogAtMs = nowMs
+            Log.w(TAG, "SEEK_TRACE GOV er=$nowMs raw=$rawUs A=$govA B=$govB C=$govC " +
+                "eng=${if (govEngaged) 1 else 0} rate100=$govRateX100")
+        }
     }
 
     // Measured bitrate of the encoded audio bitstream. MKV declares no bitrate for audio
@@ -264,6 +336,11 @@ internal class PlaybackSpeedAwareAudioSink(
         truehdStormMonitorUntilMs = 0L
         truehdStormDetected = false
         skipNextStormSampleAfterResync = false
+        // nt16: disengage the shadow governor on flush/configure.
+        govEngaged = false
+        govCFrozen = false
+        govRateRefPosUs = C.TIME_UNSET
+        govRateX100 = 100L
     }
 
     /**
