@@ -163,6 +163,7 @@ fun PlayerScreen(
     var subtitleTimingConsumeNextConfirmKeyUp by remember { mutableStateOf(false) }
     var reportCodeVisible by remember { mutableStateOf(false) }
     var exitDispatched by remember { mutableStateOf(false) }
+    var externalHandoffInProgress by remember { mutableStateOf(false) }
 
     val exitPlayer: () -> Unit = exitPlayer@{
         if (exitDispatched) return@exitPlayer
@@ -236,7 +237,8 @@ fun PlayerScreen(
         }
     }
 
-    val handleBackPress = {
+    val handleBackPress = handleBackPress@{
+        if (externalHandoffInProgress) return@handleBackPress
         if (shouldConfirmNextEpisodeOnEnd) {
             returnToDetailsFromEndPrompt()
         } else if (uiState.error != null) {
@@ -630,7 +632,9 @@ fun PlayerScreen(
                         }
                         KeyEvent.KEYCODE_DPAD_LEFT,
                         KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                            if (!uiState.showControls) {
+                            val overlayButtonsCoexist = skipButtonActuallyVisible &&
+                                uiState.postPlayMode is PostPlayMode.AutoPlay
+                            if (!uiState.showControls && !overlayButtonsCoexist) {
                                 val isLeft =
                                     keyEvent.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_LEFT
                                 val deltaMs = PlayerScrubRates.deltaMsForKeyRepeat(
@@ -641,6 +645,7 @@ fun PlayerScreen(
                                 true
                             } else {
                                 // Let focus system handle navigation when controls are visible
+                                // or both skip and next-episode buttons are on screen
                                 false
                             }
                         }
@@ -908,11 +913,16 @@ fun PlayerScreen(
         )
 
         // Skip Intro button (bottom-left, lifted when controls are visible)
+        val skipIntroCanFocus = isSkipIntroCanFocus(
+            subtitleOverlayVisible = uiState.showSubtitleOverlay,
+        )
         SkipIntroButton(
             interval = if (uiState.showPauseOverlay || uiState.showLoadingOverlay) null else uiState.activeSkipInterval,
             dismissed = uiState.skipIntervalDismissed,
             controlsVisible = uiState.showControls,
-            suppressFocus = uiState.postPlayMode is PostPlayMode.AutoPlay,
+            // Autoplay next-episode card owns focus; subtitle menu must keep D-pad focus (#2874).
+            suppressFocus = uiState.postPlayMode is PostPlayMode.AutoPlay || !skipIntroCanFocus,
+            canFocus = skipIntroCanFocus,
             onSkip = { viewModel.onEvent(PlayerEvent.OnSkipIntro) },
             onDismiss = { viewModel.onEvent(PlayerEvent.OnDismissSkipIntro) },
             onVisibilityChanged = { skipButtonActuallyVisible = it },
@@ -924,6 +934,7 @@ fun PlayerScreen(
             } else {
                 null
             },
+            rightFocusRequester = if (uiState.postPlayMode is PostPlayMode.AutoPlay) nextEpisodeFocusRequester else null,
             onHideControls = {
                 if (uiState.showControls) viewModel.hideControls()
                 else viewModel.onEvent(PlayerEvent.OnToggleControls)
@@ -953,6 +964,7 @@ fun PlayerScreen(
             controlsVisible = uiState.showControls,
             nextEpisodeFocusRequester = nextEpisodeFocusRequester,
             progressBarFocusRequester = if (uiState.showControls) progressBarFocusRequester else null,
+            leftFocusRequester = if (skipButtonActuallyVisible) skipIntroFocusRequester else null,
             onPlayNext = { viewModel.onEvent(PlayerEvent.OnPlayNextEpisode) },
             onContinueStillWatching = { viewModel.onEvent(PlayerEvent.OnStillWatchingContinue) },
             onDismissStillWatching = { viewModel.onEvent(PlayerEvent.OnDismissStillWatchingPrompt) },
@@ -1071,17 +1083,25 @@ fun PlayerScreen(
                     }
                 },
                 onOpenInExternalPlayer = {
-                    val url = viewModel.getCurrentStreamUrl()
-                    val title = uiState.title
-                    val headers = viewModel.getCurrentHeaders()
-                    val timeline = viewModel.playbackTimeline.value
-                    viewModel.stopAndRelease()
-                    // Launch via tracker - it handles progress saving independently
-                    viewModel.launchInExternalPlayer(context, timeline.currentPosition)
-                    // Exit PlayerScreen - tracker will save progress when external player returns
-                    val completed = timeline.duration > 0L &&
-                        (timeline.currentPosition.toFloat() / timeline.duration.toFloat()) >= WatchProgress.COMPLETED_THRESHOLD
-                    onBackPress(uiState.currentVideoId, uiState.currentSeason, uiState.currentEpisode, uiState.streamAutoPlayMode != StreamAutoPlayMode.MANUAL, completed)
+                    if (!externalHandoffInProgress) {
+                        externalHandoffInProgress = true
+                        val timeline = viewModel.playbackTimeline.value
+                        val completed = timeline.duration > 0L &&
+                            (timeline.currentPosition.toFloat() / timeline.duration.toFloat()) >= WatchProgress.COMPLETED_THRESHOLD
+                        viewModel.launchInExternalPlayer(context, timeline.currentPosition) { launched ->
+                            externalHandoffInProgress = false
+                            if (launched && !exitDispatched) {
+                                exitDispatched = true
+                                currentOnBackPress(
+                                    uiState.currentVideoId,
+                                    uiState.currentSeason,
+                                    uiState.currentEpisode,
+                                    uiState.streamAutoPlayMode != StreamAutoPlayMode.MANUAL,
+                                    completed
+                                )
+                            }
+                        }
+                    }
                 },
                 onShowStreamInfo = {
                     restoreStreamInfoFocus = true

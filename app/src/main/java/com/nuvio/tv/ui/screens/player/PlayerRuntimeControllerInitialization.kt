@@ -385,8 +385,11 @@ internal fun PlayerRuntimeController.initializePlayer(
             val playerSettings = playerSettingsDataStore.playerSettings.first()
             currentPlayerSettingsForReport = playerSettings
             rememberAudioDelayPerDeviceEnabled = playerSettings.rememberAudioDelayPerDevice
+            // Always watch output-device changes so Bluetooth connect/disconnect can switch
+            // between PCM-only and passthrough sink policies (Media3 1.8.0 BT semantics).
+            registerAudioDelayRouteCallback()
+            currentAudioOutputRoute = AudioOutputRouteDetector.detect(context)
             if (rememberAudioDelayPerDeviceEnabled) {
-                registerAudioDelayRouteCallback()
                 applyStoredAudioDelayForCurrentRouteIfEnabled()
             }
             cachedDecoderPriority = playerSettings.decoderPriority
@@ -972,17 +975,41 @@ internal fun PlayerRuntimeController.initializePlayer(
             val vc1SoftwareFallbackActive = vc1SoftwarePreferredStreamUrls.contains(url)
             val preferFfmpegAudioActive = preferFfmpegAudioStreamUrls.contains(url)
             isVc1SoftwareFallbackActiveForCurrentPlayback = vc1SoftwareFallbackActive
-            val isForcePassthroughActive = playerSettings.forceOpticalPassthrough && playerSettings.decoderPriority != 0
+            // Bluetooth media sink (A2DP / LE Audio): Media3 only advertises PCM. Do not attempt
+            // optical/HDMI passthrough — decode to PCM and let the BT stack encode SBC/AAC/aptX/LDAC.
+            val isBluetoothAudioOutput = currentAudioOutputRoute?.isBluetooth == true ||
+                AudioOutputRouteDetector.isBluetoothMediaOutput(context)
+            // Force-optical must never win over Bluetooth: AC3/DTS AudioTrack to A2DP fails hard.
+            val isForcePassthroughActive = !isBluetoothAudioOutput &&
+                playerSettings.forceOpticalPassthrough &&
+                playerSettings.decoderPriority != 0
             // Audio review F4: force-AC3 no longer escalates the *global*
             // extension mode to PREFER (which put software AV1 video decode
             // ahead of MediaCodec). The FFmpeg audio renderer is instead
-            // reordered audio-locally in buildAudioRenderers.
-            val effectiveDecoderPriority = if (vc1SoftwareFallbackActive || hasTriedAudioPcmFallback) {
+            // reordered audio-locally in buildAudioRenderers. Bluetooth keeps
+            // upstream's global PREFER, paired with preferSoftwareAudioOnly
+            // below, which demotes the video renderers back to MediaCodec-first.
+            val effectiveDecoderPriority = if (vc1SoftwareFallbackActive || hasTriedAudioPcmFallback || isBluetoothAudioOutput) {
                 DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
             } else if (isForcePassthroughActive) {
                 maxOf(playerSettings.decoderPriority, DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             } else {
                 playerSettings.decoderPriority
+            }
+            // A2DP is stereo; force a clean 2.0 downmix so surround content is audible and balanced.
+            val bluetoothStereoDownmix = isBluetoothAudioOutput
+            val effectiveDownmixEnabled = playerSettings.downmixEnabled || bluetoothStereoDownmix
+            val effectiveAudioOutputChannels = if (bluetoothStereoDownmix) {
+                com.nuvio.tv.data.local.AudioOutputChannels.CHANNELS_2_0
+            } else {
+                playerSettings.audioOutputChannels
+            }
+            if (isBluetoothAudioOutput) {
+                Log.i(
+                    PlayerRuntimeController.TAG,
+                    "Bluetooth media output active (route=${currentAudioOutputRoute?.key}): " +
+                        "PCM-only sink, stereo downmix, no optical passthrough"
+                )
             }
 
             // ── Renderers Factory (Combining Libass offsets + Audio Gain + Video Fallback) ──
@@ -1044,21 +1071,23 @@ internal fun PlayerRuntimeController.initializePlayer(
                     if (pv != null) pv.videoBoundsFraction(videoAspectRatio) else null
                 },
                 gainAudioProcessor = gainAudioProcessor,
-                downmixEnabled = playerSettings.downmixEnabled,
-                audioOutputChannels = playerSettings.audioOutputChannels,
+                downmixEnabled = effectiveDownmixEnabled,
+                audioOutputChannels = effectiveAudioOutputChannels,
                 downmixNormalizationEnabled = !playerSettings.maintainOriginalAudioOnDownmix,
                 forceOpticalPassthrough = isForcePassthroughActive,
                 deniedTranscodeMimes = deniedTranscodeMimes,
                 preferFfmpegAudio = preferFfmpegAudioActive,
                 matPassthroughEnabled = playerSettings.matPassthroughEnabled,
+                bluetoothForcePcm = isBluetoothAudioOutput,
                 playbackSpeedProvider = { _uiState.value.playbackSpeed },
-                initialForcePcm = hasTriedAudioPcmFallback,
+                initialForcePcm = hasTriedAudioPcmFallback || isBluetoothAudioOutput,
+                preferSoftwareAudioOnly = isBluetoothAudioOutput && !vc1SoftwareFallbackActive,
                 onPlaybackSpeedAwareAudioSinkCreated = { playbackSpeedAwareAudioSink = it },
                 onFfmpegAudioRendererChanged = { renderer ->
                     ffmpegAudioRenderer = renderer
                     renderer?.applyDownmixSettings(
-                        downmixEnabled = playerSettings.downmixEnabled,
-                        audioOutputChannels = playerSettings.audioOutputChannels,
+                        downmixEnabled = effectiveDownmixEnabled,
+                        audioOutputChannels = effectiveAudioOutputChannels,
                         downmixNormalizationEnabled = !playerSettings.maintainOriginalAudioOnDownmix,
                         forceOpticalPassthrough = isForcePassthroughActive,
                         deniedTranscodeMimes = deniedTranscodeMimes
@@ -1907,7 +1936,7 @@ internal fun PlayerRuntimeController.initializePlayer(
 
                         val responseCode = (error.cause as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)?.responseCode
                         if (responseCode == 416 && !hasRetriedCurrentStreamAfter416) {
-                            retryCurrentStreamFromStartAfter416(currentPosition)
+                            retryCurrentStreamFromStartAfter416()
                             return
                         }
 
@@ -2295,7 +2324,7 @@ internal fun PlayerRuntimeController.initializePlayer(
     }
 }
 
-internal fun PlayerRuntimeController.resolveAutoInternalPlayerEngine(): InternalPlayerEngine {
+internal suspend fun PlayerRuntimeController.resolveAutoInternalPlayerEngine(): InternalPlayerEngine {
     val streamMetadataText = buildString {
         currentFilename?.let { appendLine(it) }
         streamName?.let { appendLine(it) }
@@ -2307,14 +2336,21 @@ internal fun PlayerRuntimeController.resolveAutoInternalPlayerEngine(): Internal
     return if (isHdrOrDv) {
         InternalPlayerEngine.EXOPLAYER
     } else {
-        val hasAnimeGenre = metaGenres.any { it.equals("anime", ignoreCase = true) }
-        val isAnimationFromJapan = (metaGenres.any { it.equals("animation", ignoreCase = true) } &&
-                metaCountry?.contains("Japan", ignoreCase = true) == true)
         val hasAnimeId = currentVideoId?.startsWith("kitsu:") == true ||
                 currentVideoId?.startsWith("mal:") == true ||
                 currentVideoId?.startsWith("anilist:") == true
 
-        val isAnime = hasAnimeGenre || hasAnimeId || isAnimationFromJapan
+        if (hasAnimeId) return InternalPlayerEngine.MVP_PLAYER
+
+        metaFetchJob?.let { job ->
+            withTimeoutOrNull(3000L) { job.join() }
+        }
+
+        val hasAnimeGenre = metaGenres.any { it.equals("anime", ignoreCase = true) }
+        val isAnimationFromJapan = (metaGenres.any { it.equals("animation", ignoreCase = true) } &&
+                metaCountry?.contains("Japan", ignoreCase = true) == true)
+
+        val isAnime = hasAnimeGenre || isAnimationFromJapan
 
         if (isAnime) InternalPlayerEngine.MVP_PLAYER else InternalPlayerEngine.EXOPLAYER
     }
@@ -2609,18 +2645,53 @@ private class SubtitleOffsetRenderersFactory(
     private val preferFfmpegAudio: Boolean,
     private val matPassthroughEnabled: Boolean,
     private val audioPassthroughPolicy: com.nuvio.tv.core.player.AudioPassthroughPolicy,
+    private val bluetoothForcePcm: Boolean = false,
     private val playbackSpeedProvider: () -> Float,
     private val initialForcePcm: Boolean = false,
+    /**
+     * When true, [EXTENSION_RENDERER_MODE_PREFER] applies to audio only — video stays on the
+     * platform MediaCodec path so Bluetooth PCM policy does not force software video decode.
+     */
+    private val preferSoftwareAudioOnly: Boolean = false,
     private val onPlaybackSpeedAwareAudioSinkCreated: (PlaybackSpeedAwareAudioSink) -> Unit,
     private val onFfmpegAudioRendererChanged: (FfmpegAudioRenderer?) -> Unit
 ) : DefaultRenderersFactory(context) {
+
+    override fun buildVideoRenderers(
+        context: Context,
+        extensionRendererMode: Int,
+        mediaCodecSelector: MediaCodecSelector,
+        enableDecoderFallback: Boolean,
+        eventHandler: Handler,
+        eventListener: VideoRendererEventListener,
+        allowedVideoJoiningTimeMs: Long,
+        out: ArrayList<Renderer>
+    ) {
+        val videoExtensionMode = when {
+            !preferSoftwareAudioOnly -> extensionRendererMode
+            extensionRendererMode == EXTENSION_RENDERER_MODE_PREFER -> EXTENSION_RENDERER_MODE_ON
+            else -> extensionRendererMode
+        }
+        super.buildVideoRenderers(
+            context,
+            videoExtensionMode,
+            mediaCodecSelector,
+            enableDecoderFallback,
+            eventHandler,
+            eventListener,
+            allowedVideoJoiningTimeMs,
+            out
+        )
+    }
 
     override fun buildAudioSink(
         context: Context,
         enableFloatOutput: Boolean,
         enableAudioTrackPlaybackParams: Boolean
     ): AudioSink {
-        // On Android TV, pin audio capabilities: build the sink WITHOUT a Context so
+        // Bluetooth: pin Media3-equivalent DEFAULT (PCM-only) so TV HDMI profiles / force-optical
+        // cannot advertise AC3/DTS passthrough while audio is routed to A2DP.
+        // Otherwise, on Android TV, pin audio capabilities: build the sink WITHOUT a Context so
         // media3 does NOT install a live AudioCapabilitiesReceiver. On the context
         // path, any audio-device change (e.g. a Bluetooth remote idling for battery,
         // then reinitialising) makes media3 re-query capabilities mid-playback; if
@@ -2632,18 +2703,25 @@ private class SubtitleOffsetRenderersFactory(
         // changes are common there and must be handled dynamically.
         // TRADE-OFF (TV): capabilities fixed at build time — no adaptation if the
         // output genuinely changes mid-playback; a cold AVR/soundbar wake-up may be
-        // probed before it reports passthrough (recovers on next play).
+        // probed before it reports passthrough (recovers on next play). A Bluetooth
+        // route flip IS handled: the route callback rebuilds the player, landing in
+        // the bluetoothForcePcm branch here.
         val isTelevision =
             context.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK)
-        val builder = (if (isTelevision) {
-            val probeAttributes = AudioAttributes.Builder()
-                .setUsage(C.USAGE_MEDIA)
-                .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
-                .build()
-            DefaultAudioSink.Builder()
-                .setAudioCapabilities(AudioCapabilities.getCapabilities(context, probeAttributes, null))
-        } else {
-            DefaultAudioSink.Builder(context)
+        val builder = (when {
+            bluetoothForcePcm -> {
+                DefaultAudioSink.Builder()
+                    .setAudioCapabilities(AudioOutputRouteDetector.bluetoothPcmOnlyCapabilities())
+            }
+            isTelevision -> {
+                val probeAttributes = AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                    .build()
+                DefaultAudioSink.Builder()
+                    .setAudioCapabilities(AudioCapabilities.getCapabilities(context, probeAttributes, null))
+            }
+            else -> DefaultAudioSink.Builder(context)
         })
             .setEnableFloatOutput(enableFloatOutput)
             .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
@@ -2667,7 +2745,8 @@ private class SubtitleOffsetRenderersFactory(
             initialForcePcm,
             forceAc3Support = forceOpticalPassthrough || deniedTranscodeMimes.isNotEmpty(),
             passthroughPolicy = audioPassthroughPolicy,
-            faultInjectRejectMime = faultInjectRejectMime
+            faultInjectRejectMime = faultInjectRejectMime,
+            forcePcmForBluetooth = bluetoothForcePcm
         )
         playbackSpeedAwareAudioSink.setInitialPlaybackSpeed(playbackSpeedProvider())
         onPlaybackSpeedAwareAudioSinkCreated(playbackSpeedAwareAudioSink)
@@ -2799,6 +2878,10 @@ private fun FfmpegAudioRenderer.applyDownmixSettings(
     }
 }
 
+// The Unicode replacement character ("�") that shows up when a subtitle byte sequence fails to
+// decode with the detected/assumed charset.
+private const val REPLACEMENT_CHARACTER = '\uFFFD'
+
 private class CueNormalizingTextOutput(
     private val delegate: TextOutput,
     private val shouldNormalizeCuePositionProvider: () -> Boolean,
@@ -2807,17 +2890,64 @@ private class CueNormalizingTextOutput(
 ) : TextOutput {
 
     override fun onCues(cueGroup: CueGroup) {
-        val processed = cueGroup.cues.map(::processCue)
-        delegate.onCues(CueGroup(processed, cueGroup.presentationTimeUs))
+        val cues = cueGroup.cues
+        if (cues.isEmpty()) {
+            delegate.onCues(cueGroup)
+            return
+        }
+        var modifiedList: ArrayList<Cue>? = null
+        val count = cues.size
+        for (i in 0 until count) {
+            val original = cues[i]
+            val processed = processCue(original)
+            if (processed !== original) {
+                if (modifiedList == null) {
+                    modifiedList = ArrayList(count)
+                    for (j in 0 until i) {
+                        modifiedList.add(cues[j])
+                    }
+                }
+                modifiedList.add(processed)
+            } else {
+                modifiedList?.add(original)
+            }
+        }
+        if (modifiedList != null) {
+            delegate.onCues(CueGroup(modifiedList, cueGroup.presentationTimeUs))
+        } else {
+            delegate.onCues(cueGroup)
+        }
     }
 
     @Deprecated("Uses the deprecated Media3 callback for text outputs.")
     override fun onCues(cues: List<Cue>) {
-        delegate.onCues(cues.map(::processCue))
+        if (cues.isEmpty()) {
+            delegate.onCues(cues)
+            return
+        }
+        var modifiedList: ArrayList<Cue>? = null
+        val count = cues.size
+        for (i in 0 until count) {
+            val original = cues[i]
+            val processed = processCue(original)
+            if (processed !== original) {
+                if (modifiedList == null) {
+                    modifiedList = ArrayList(count)
+                    for (j in 0 until i) {
+                        modifiedList.add(cues[j])
+                    }
+                }
+                modifiedList.add(processed)
+            } else {
+                modifiedList?.add(original)
+            }
+        }
+        delegate.onCues(modifiedList ?: cues)
     }
 
     private fun processCue(cue: Cue): Cue {
-        var processed = fixRtlCueText(cue)
+        var processed = stripReplacementCharacter(cue)
+        processed = fixRtlCueText(processed)
         if (shouldNormalizeCuePositionProvider()) {
             processed = normalizeCuePosition(processed)
         }
@@ -2861,8 +2991,27 @@ private class CueNormalizingTextOutput(
             .build()
     }
 
+    // Malformed/mis-encoded subtitle files sometimes decode a character as U+FFFD (the "�"
+    // replacement character). Strip it from cues shown to the viewer during playback. This does
+    // NOT affect PlayerSubtitleCueParser / the Sync Line preview list in SubtitleTimingDialog,
+    // which read the raw subtitle text independently for the manual-sync picker.
+    private fun stripReplacementCharacter(cue: Cue): Cue {
+        val text = cue.text ?: return cue
+        if (!text.contains(REPLACEMENT_CHARACTER)) return cue
+        val builder = android.text.SpannableStringBuilder(text)
+        for (i in builder.length - 1 downTo 0) {
+            if (builder[i] == REPLACEMENT_CHARACTER) {
+                builder.delete(i, i + 1)
+            }
+        }
+        return cue.buildUpon().setText(builder).build()
+    }
+
     private fun fixRtlCueText(cue: Cue): Cue {
         val text = cue.text ?: return cue
+        if (!hasAnyRtlCharacter(text)) {
+            return cue
+        }
 
         // Arabic: wrap each physical line with RLE (\u202B) ... PDF (\u202C).
         // This renders boundary punctuation and auto-wrapped lines as RTL in an LTR container.
@@ -3089,6 +3238,30 @@ private class CueNormalizingTextOutput(
             if (d == Character.DIRECTIONALITY_RIGHT_TO_LEFT ||
                 d == Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC ||
                 d == Character.DIRECTIONALITY_ARABIC_NUMBER) return true
+            i += Character.charCount(codePoint)
+        }
+        return false
+    }
+
+    private fun hasAnyRtlCharacter(text: CharSequence): Boolean {
+        var i = 0
+        val len = text.length
+        while (i < len) {
+            val codePoint = Character.codePointAt(text, i)
+            if (codePoint >= 0x0590) {
+                if (codePoint in 0x0590..0x08FF ||
+                    codePoint in 0xFB1D..0xFEFF
+                ) {
+                    return true
+                }
+                val d = Character.getDirectionality(codePoint)
+                if (d == Character.DIRECTIONALITY_RIGHT_TO_LEFT ||
+                    d == Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC ||
+                    d == Character.DIRECTIONALITY_ARABIC_NUMBER
+                ) {
+                    return true
+                }
+            }
             i += Character.charCount(codePoint)
         }
         return false

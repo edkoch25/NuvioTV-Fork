@@ -57,6 +57,14 @@ private const val GOV_LOG_INTERVAL_MS = 5L       // GOV trace rate limit
 private const val GOV_TELEPORT_REJECT_X100 = 4000L  // >40x = seek/rebuffer jump, never a storm
 private const val GOV_MAX_FREEZE_MS = 3500L         // nt19: hard cap on frozen-frame duration (>D-spacing)
 
+/**
+ * Audio sink wrapper that forces a decode-to-PCM path when:
+ * - Playback speed != 1x for bitstream formats that cannot be tempo-adjusted in passthrough, or
+ * - Bluetooth media output is active (Media3 policy: Bluetooth only supports PCM).
+ *
+ * Bluetooth cannot carry TrueHD / Atmos / DTS-HD passthrough. Forcing PCM lets MediaCodec/FFmpeg
+ * decode to the format the BT stack actually accepts; the system then encodes to SBC/AAC/aptX/LDAC.
+ */
 internal class PlaybackSpeedAwareAudioSink(
     private val delegate: AudioSink,
     initialForcePcm: Boolean = false,
@@ -86,9 +94,15 @@ internal class PlaybackSpeedAwareAudioSink(
      * Armed with `settings put global nuvio_fault_reject_mime <mime>`; null (the shipping
      * default) is fully inert - one volatile read per buffer and nothing else.
      */
-    private val faultInjectRejectMime: String? = null
+    private val faultInjectRejectMime: String? = null,
+    /**
+     * Upstream 0.8.2: when Bluetooth media output is active, always decode to PCM
+     * (Media3 policy - A2DP/LE Audio cannot carry TrueHD/Atmos/DTS-HD bitstream).
+     */
+    forcePcmForBluetooth: Boolean = false
 ) : ForwardingAudioSink(delegate) {
 
+    // Set when the sink is built with forcePcm (error recovery). Don't clear on speed reset.
     private val startedWithForcedPcm: Boolean = initialForcePcm
 
     @Volatile
@@ -96,6 +110,9 @@ internal class PlaybackSpeedAwareAudioSink(
 
     @Volatile
     private var forcePcmForCurrentSession: Boolean = initialForcePcm
+
+    @Volatile
+    private var bluetoothForcePcm: Boolean = forcePcmForBluetooth
 
     @Volatile
     private var currentInputFormat: Format? = null
@@ -195,6 +212,20 @@ internal class PlaybackSpeedAwareAudioSink(
         playbackSpeed = normalizeSpeed(speed)
         markPcmFallbackIfNeeded(currentInputFormat, playbackSpeed)
     }
+
+    /**
+     * Update Bluetooth policy without rebuilding the player when possible.
+     * Call [notifyAudioProcessingRequirementChanged] after flipping from false → true mid-session
+     * if the sink is already configured for passthrough.
+     */
+    fun setBluetoothForcePcm(enabled: Boolean) {
+        bluetoothForcePcm = enabled
+        if (enabled) {
+            forcePcmForCurrentSession = true
+        }
+    }
+
+    fun isBluetoothForcePcm(): Boolean = bluetoothForcePcm
 
     override fun setListener(listener: AudioSink.Listener) {
         this.listener = listener
@@ -1030,7 +1061,8 @@ internal class PlaybackSpeedAwareAudioSink(
 
     private fun shouldRejectDirectPlayback(format: Format): Boolean {
         if (!isBitstreamFormat(format)) return false
-        if (forcePcmForCurrentSession || playbackSpeed != 1f) return true
+        // Bluetooth: always decode to PCM (Media3 DEFAULT_AUDIO_CAPABILITIES policy).
+        if (bluetoothForcePcm || forcePcmForCurrentSession || playbackSpeed != 1f) return true
         // Per-format user override. Inert on the default policy, so with every switch
         // left on this function is behaviourally identical to before. This is the only
         // chokepoint that needs to change: getFormatSupport, getFormatOffloadSupport,
@@ -1041,7 +1073,15 @@ internal class PlaybackSpeedAwareAudioSink(
     }
 
     private fun markPcmFallbackIfNeeded(format: Format?, speed: Float): Boolean {
-        if (format == null || speed == 1f || !isBitstreamFormat(format)) {
+        if (format == null || !isBitstreamFormat(format)) {
+            return false
+        }
+        if (bluetoothForcePcm) {
+            val wasForcingPcm = forcePcmForCurrentSession
+            forcePcmForCurrentSession = true
+            return !wasForcingPcm
+        }
+        if (speed == 1f) {
             return false
         }
         val wasForcingPcm = forcePcmForCurrentSession

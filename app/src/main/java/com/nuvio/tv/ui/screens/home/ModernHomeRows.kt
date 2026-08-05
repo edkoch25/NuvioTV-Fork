@@ -101,11 +101,20 @@ import coil3.memory.MemoryCache
 import coil3.request.ImageRequest
 import coil3.request.CachePolicy
 import coil3.request.crossfade
+import coil3.request.transformations
 import com.nuvio.tv.R
 import com.nuvio.tv.domain.model.FocusedPosterTrailerPlaybackTarget
 import com.nuvio.tv.domain.model.CardDepthSurface
 import com.nuvio.tv.domain.model.MetaPreview
+import com.nuvio.tv.domain.model.ContinueWatchingCardStyle
+import com.nuvio.tv.domain.model.PLACEHOLDER_IMAGE_URL
+import com.nuvio.tv.domain.model.isPlaceholder
 import com.nuvio.tv.ui.components.ContinueWatchingCard
+import com.nuvio.tv.ui.components.continueWatchingArtworkWidth
+import com.nuvio.tv.ui.components.continueWatchingImageCacheKey
+import com.nuvio.tv.ui.components.continueWatchingImageModel
+import com.nuvio.tv.ui.components.continueWatchingShouldBlur
+import com.nuvio.tv.ui.components.continueWatchingUsesEpisodeThumbnails
 import com.nuvio.tv.ui.components.LocalCardDepthStyle
 import com.nuvio.tv.ui.components.MonochromePosterPlaceholder
 import com.nuvio.tv.ui.components.TrailerPlayer
@@ -154,6 +163,8 @@ private fun ModernContinueWatchingRowItem(
     imageHeight: Dp,
     blurUnwatchedEpisodes: Boolean,
     useEpisodeThumbnails: Boolean,
+    continueWatchingCardStyle: ContinueWatchingCardStyle,
+    continueWatchingCornerRadius: Dp,
     onFocused: () -> Unit,
     onContinueWatchingClick: (ContinueWatchingItem) -> Unit,
     onShowOptions: (ContinueWatchingItem) -> Unit,
@@ -192,6 +203,9 @@ private fun ModernContinueWatchingRowItem(
         imageHeight = imageHeight,
         blurUnwatchedEpisodes = blurUnwatchedEpisodes,
         useEpisodeThumbnails = useEpisodeThumbnails,
+        cardStyle = continueWatchingCardStyle,
+        cornerRadius = continueWatchingCornerRadius,
+        isFocused = isCardFocused,
         modifier = modifier
             .focusRequester(requester)
             .onFocusChanged {
@@ -444,6 +458,8 @@ internal fun ModernRowSection(
     continueWatchingCardHeight: Dp,
     blurUnwatchedEpisodes: Boolean,
     useEpisodeThumbnails: Boolean,
+    continueWatchingCardStyle: ContinueWatchingCardStyle,
+    continueWatchingCornerRadius: Dp,
     onContinueWatchingClick: (ContinueWatchingItem) -> Unit,
     onContinueWatchingOptions: (ContinueWatchingItem) -> Unit,
     isCatalogItemWatched: (MetaPreview) -> Boolean,
@@ -513,17 +529,17 @@ internal fun ModernRowSection(
         // When placeholder items are replaced by real data and this row
         // is the active row, re-request focus on the first real item.
         val firstItemImageUrl = row.items.list.firstOrNull()?.imageUrl
-        val wasPlaceholderRef = remember { mutableStateOf(row.isLoading && firstItemImageUrl == "placeholder://empty") }
+        val wasPlaceholderRef = remember { mutableStateOf(row.isLoading && firstItemImageUrl.isPlaceholder()) }
         val needsFocusRestore = remember { mutableStateOf(false) }
         
         LaunchedEffect(row.isLoading, firstItemImageUrl, isActiveRow) {
             val wasPlaceholder = wasPlaceholderRef.value
-            val isNowReal = !row.isLoading || firstItemImageUrl != "placeholder://empty"
+            val isNowReal = !row.isLoading || !firstItemImageUrl.isPlaceholder()
             if (wasPlaceholder && isNowReal && isActiveRow()) {
                 needsFocusRestore.value = true
                 blockingFocusExit.value = true
             }
-            wasPlaceholderRef.value = row.isLoading && firstItemImageUrl == "placeholder://empty"
+            wasPlaceholderRef.value = row.isLoading && firstItemImageUrl.isPlaceholder()
         }
 
         // Restore focus after placeholder→data transition.
@@ -607,10 +623,20 @@ internal fun ModernRowSection(
             portraitCatalogCardWidth,
             portraitCatalogCardHeight,
             landscapeCatalogCardWidth,
-            landscapeCatalogCardHeight
+            landscapeCatalogCardHeight,
+            continueWatchingCardWidth,
+            continueWatchingCardHeight,
+            useEpisodeThumbnails,
+            blurUnwatchedEpisodes
         ) {
             if (!isActiveRow() || isVerticalRowsScrollingState.value) return@LaunchedEffect
             delay(150) // Wait before spamming image requests to survive rapid vertical D-pad scrolls!
+            val cwWidthPx = with(density) {
+                continueWatchingArtworkWidth(
+                    continueWatchingCardStyle, continueWatchingCardWidth, continueWatchingCardHeight
+                ).roundToPx()
+            }
+            val cwHeightPx = with(density) { continueWatchingCardHeight.roundToPx() }
             fun requestSizePx(item: ModernCarouselItem): Pair<Int, Int> {
                 val metrics = item.catalogCardRequestMetrics(
                     useLandscapePosters = useLandscapePosters,
@@ -623,24 +649,46 @@ internal fun ModernRowSection(
                 return with(density) { metrics.width.roundToPx() } to with(density) { metrics.height.roundToPx() }
             }
             fun enqueueIfNeeded(item: ModernCarouselItem) {
-                // Continue Watching cards build their requests in ContinueWatchingCard with a
-                // different data source (episode thumbnails), image height, and a _blur-suffixed
-                // memory-cache key — a prefetch from here can never match, so skip rather than
-                // waste one of the two decode slots. CW prefetch parity is a ledger follow-up.
-                if (item.payload is ModernPayload.ContinueWatching) return
-                val url = item.imageUrl ?: return
-                val (widthPx, heightPx) = requestSizePx(item)
-                if (widthPx <= 0 || heightPx <= 0) return
-                // catalogCardRequestMetrics mirrors ModernCarouselCard's maxRequestCardWidth
-                // recipe (incl. the backdrop-expand width), so this cache key matches the one
-                // the card will request — which is the whole point of the prefetch.
-                val cacheKey = "${url}_${widthPx}x${heightPx}"
+                val payload = item.payload
+                val model: String
+                val cacheKey: String
+                val widthPx: Int
+                val heightPx: Int
+                var blur = false
+                if (payload is ModernPayload.ContinueWatching) {
+                    // Upstream 0.8.2 closed the fork's noted "CW prefetch parity" follow-up:
+                    // compute the same model and cache key ContinueWatchingCard reads —
+                    // style-aware artwork source, artwork dimensions and the blur suffix —
+                    // so this prefetch warms the entry the card will actually request.
+                    val usesThumbs = continueWatchingUsesEpisodeThumbnails(continueWatchingCardStyle, useEpisodeThumbnails)
+                    val nonCardStyle = continueWatchingCardStyle != ContinueWatchingCardStyle.CARD
+                    model = continueWatchingImageModel(payload.item, usesThumbs, nonCardStyle) ?: return
+                    blur = continueWatchingShouldBlur(payload.item, blurUnwatchedEpisodes, usesThumbs, nonCardStyle)
+                    widthPx = cwWidthPx
+                    heightPx = cwHeightPx
+                    if (widthPx <= 0 || heightPx <= 0) return
+                    cacheKey = continueWatchingImageCacheKey(model, widthPx, heightPx, blur)
+                } else {
+                    val url = item.imageUrl ?: return
+                    val (w, h) = requestSizePx(item)
+                    widthPx = w
+                    heightPx = h
+                    if (widthPx <= 0 || heightPx <= 0) return
+                    // catalogCardRequestMetrics mirrors ModernCarouselCard's maxRequestCardWidth
+                    // recipe (incl. the backdrop-expand width), so this cache key matches the one
+                    // the card will request — which is the whole point of the prefetch.
+                    model = url
+                    cacheKey = "${url}_${widthPx}x${heightPx}"
+                }
                 if (imageLoader.memoryCache?.get(MemoryCache.Key(cacheKey)) != null) return
                 imageLoader.enqueue(
                     ImageRequest.Builder(context)
-                        .data(url)
+                        .data(model)
                         .memoryCacheKey(cacheKey)
                         .size(width = widthPx, height = heightPx)
+                        .apply {
+                            if (blur) transformations(com.nuvio.tv.ui.util.BlurTransformation())
+                        }
                         .build()
                 )
             }
@@ -764,7 +812,7 @@ internal fun ModernRowSection(
 
         CompositionLocalProvider(LocalBringIntoViewSpec provides horizontalBringIntoViewSpec) {
             val usesPlaceholderShimmer = row.isLoading &&
-                row.items.list.firstOrNull()?.imageUrl?.startsWith("placeholder://") == true
+                row.items.list.firstOrNull()?.imageUrl.isPlaceholder()
             val placeholderShimmerOffsetState = if (usesPlaceholderShimmer) {
                 sharedPlaceholderShimmerOffsetState
             } else {
@@ -830,6 +878,8 @@ internal fun ModernRowSection(
                                 imageHeight = continueWatchingCardHeight,
                                 blurUnwatchedEpisodes = blurUnwatchedEpisodes,
                                 useEpisodeThumbnails = useEpisodeThumbnails,
+                                continueWatchingCardStyle = continueWatchingCardStyle,
+                                continueWatchingCornerRadius = continueWatchingCornerRadius,
                                 onFocused = onFocused,
                                 onContinueWatchingClick = onContinueWatchingClick,
                                 onShowOptions = onContinueWatchingOptions
@@ -977,9 +1027,10 @@ private fun ModernCarouselCard(
     // The first non-blank value wins and is never replaced.
     // Primary source of truth is the data-layer frozen value (survives navigation);
     // the remember-state acts as a secondary guard within the same composition.
-    val dataFrozenLogo = item.heroPreview.frozenLogoUrl
-    val frozenLogoUrl = remember(item.key) { mutableStateOf(dataFrozenLogo ?: item.heroPreview.logo) }
-    if (frozenLogoUrl.value.isNullOrBlank() && !item.heroPreview.logo.isNullOrBlank()) {
+    val dataFrozenLogo = item.heroPreview.frozenLogoUrl?.takeIf { !it.isPlaceholder() }
+    val frozenLogoUrl = remember(item.key) { mutableStateOf(dataFrozenLogo ?: item.heroPreview.logo?.takeIf { !it.isPlaceholder() }) }
+    if ((frozenLogoUrl.value.isNullOrBlank() || frozenLogoUrl.value.isPlaceholder()) &&
+        !item.heroPreview.logo.isNullOrBlank() && !item.heroPreview.logo.isPlaceholder()) {
         frozenLogoUrl.value = item.heroPreview.logo
     }
     if (!enrichedLogoUrl.isNullOrBlank() && frozenLogoUrl.value != enrichedLogoUrl) {
@@ -994,17 +1045,18 @@ private fun ModernCarouselCard(
             frozenLogoUrl.value = enrichedLogoUrl
         }
     }
-    val effectiveLogoUrl = frozenLogoUrl.value
+    val effectiveLogoUrl = frozenLogoUrl.value?.takeIf { !it.isPlaceholder() }
     // Freeze the backdrop URL for landscape cards - prevents image reload when enrichment updates backdrop.
-    val dataFrozenBackdrop = item.heroPreview.frozenBackdropUrl
-    val frozenBackdropUrl = remember(item.key) { mutableStateOf(dataFrozenBackdrop ?: item.heroPreview.backdrop) }
-    if (frozenBackdropUrl.value.isNullOrBlank() && !item.heroPreview.backdrop.isNullOrBlank()) {
+    val dataFrozenBackdrop = item.heroPreview.frozenBackdropUrl?.takeIf { !it.isPlaceholder() }
+    val frozenBackdropUrl = remember(item.key) { mutableStateOf(dataFrozenBackdrop ?: item.heroPreview.backdrop?.takeIf { !it.isPlaceholder() }) }
+    if ((frozenBackdropUrl.value.isNullOrBlank() || frozenBackdropUrl.value.isPlaceholder()) &&
+        !item.heroPreview.backdrop.isNullOrBlank() && !item.heroPreview.backdrop.isPlaceholder()) {
         frozenBackdropUrl.value = item.heroPreview.backdrop
     }
     if (!useLandscapeOverlayTreatment && !enrichedBackdropUrl.isNullOrBlank() && frozenBackdropUrl.value != enrichedBackdropUrl) {
         frozenBackdropUrl.value = enrichedBackdropUrl
     }
-    val effectiveBackdropUrl = frozenBackdropUrl.value
+    val effectiveBackdropUrl = frozenBackdropUrl.value?.takeIf { !it.isPlaceholder() }
     var isFocused by remember { mutableStateOf(false) }
     val payload = item.payload as? ModernPayload.CollectionFolder
     val isCollectionFolder = item.payload is ModernPayload.CollectionFolder
@@ -1231,7 +1283,7 @@ private fun ModernCarouselCard(
                 }
 
                 Box(modifier = mediaLayerModifier) {
-                    val isPlaceholderItem = item.imageUrl?.startsWith("placeholder://") == true
+                    val isPlaceholderItem = item.imageUrl.isPlaceholder()
                     if (isPlaceholderItem) {
                         // Horizontal sweeping shimmer for placeholder cards
                         val effectivePlaceholderShimmerOffsetState =

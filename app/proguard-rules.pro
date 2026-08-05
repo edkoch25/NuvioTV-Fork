@@ -70,6 +70,13 @@
 -dontwarn androidx.media3.**
 -keep class androidx.media3.** { *; }
 -keep interface androidx.media3.** { *; }
+
+# NuvioAssMatroskaExtractor (libass path) extends the vendored dvmkv
+# MatroskaExtractor and reflects on its private fields (extractorOutput,
+# subtitleSample) via getDeclaredField. The class sits outside the
+# androidx.media3.** blanket keep, so pin it explicitly for minified release
+# builds. (Flagged during the 0.8.2 merge; the reflective access predates it.)
+-keep class com.nuvio.tv.core.player.dvmkv.MatroskaExtractor { *; }
 -keep class androidx.media.** { *; }
 -keep class androidx.media3.decoder.** { *; }
 -keep class androidx.media3.exoplayer.** { *; }

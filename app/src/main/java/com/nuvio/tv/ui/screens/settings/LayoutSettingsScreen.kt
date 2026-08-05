@@ -15,12 +15,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -28,6 +29,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Image
@@ -40,6 +42,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
@@ -57,12 +60,16 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Border
 import androidx.tv.material3.Button
 import androidx.tv.material3.ButtonDefaults
+import androidx.tv.material3.Card
+import androidx.tv.material3.CardDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
+import androidx.tv.material3.Icon
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.nuvio.tv.core.build.AppFeaturePolicy
 import com.nuvio.tv.core.streams.STREAM_BADGE_IMPORT_LIMIT
 import com.nuvio.tv.core.streams.StreamBadgePlacement
+import com.nuvio.tv.domain.model.ContinueWatchingCardStyle
 import com.nuvio.tv.domain.model.ContinueWatchingSortMode
 import com.nuvio.tv.domain.model.CardDepthStyle
 import com.nuvio.tv.domain.model.CardDepthSurface
@@ -72,7 +79,10 @@ import com.nuvio.tv.domain.model.DEFAULT_CARD_DEPTH_SHEEN_STRENGTH
 import com.nuvio.tv.domain.model.DiscoverLocation
 import com.nuvio.tv.domain.model.FocusedPosterTrailerPlaybackTarget
 import com.nuvio.tv.domain.model.HomeLayout
+import com.nuvio.tv.ui.components.CardCwStylePreview
 import com.nuvio.tv.ui.components.NuvioDialog
+import com.nuvio.tv.ui.components.PosterCwStylePreview
+import com.nuvio.tv.ui.components.WideCwStylePreview
 import com.nuvio.tv.ui.components.cardDepthVisual
 import com.nuvio.tv.ui.screens.addon.QrCodeOverlay
 
@@ -562,19 +572,69 @@ fun LayoutSettingsContent(
                     focusRequester = continueWatchingHeaderFocus,
                     onFocused = { focusedSection = LayoutSettingsSection.CONTINUE_WATCHING }
                 ) {
-                    CompactToggleRow(
-                        title = stringResource(R.string.layout_use_episode_thumbnails_cw),
-                        subtitle = stringResource(R.string.layout_use_episode_thumbnails_cw_sub),
-                        checked = uiState.useEpisodeThumbnailsInCw,
-                        onToggle = {
-                            viewModel.onEvent(
-                                LayoutSettingsEvent.SetUseEpisodeThumbnailsInCw(!uiState.useEpisodeThumbnailsInCw)
-                            )
-                        },
-                        onFocused = { focusedSection = LayoutSettingsSection.CONTINUE_WATCHING }
+                    Text(
+                        text = stringResource(R.string.layout_cw_card_style),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = NuvioTheme.colors.TextSecondary
                     )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.md)
+                    ) {
+                        CwStyleCard(
+                            style = ContinueWatchingCardStyle.CARD,
+                            isSelected = uiState.continueWatchingCardStyle == ContinueWatchingCardStyle.CARD,
+                            onClick = {
+                                viewModel.onEvent(
+                                    LayoutSettingsEvent.SetContinueWatchingCardStyle(ContinueWatchingCardStyle.CARD)
+                                )
+                            },
+                            onFocused = { focusedSection = LayoutSettingsSection.CONTINUE_WATCHING },
+                            modifier = Modifier.weight(1f)
+                        )
+                        CwStyleCard(
+                            style = ContinueWatchingCardStyle.WIDE,
+                            isSelected = uiState.continueWatchingCardStyle == ContinueWatchingCardStyle.WIDE,
+                            onClick = {
+                                viewModel.onEvent(
+                                    LayoutSettingsEvent.SetContinueWatchingCardStyle(ContinueWatchingCardStyle.WIDE)
+                                )
+                            },
+                            onFocused = { focusedSection = LayoutSettingsSection.CONTINUE_WATCHING },
+                            modifier = Modifier.weight(1f)
+                        )
+                        CwStyleCard(
+                            style = ContinueWatchingCardStyle.POSTER,
+                            isSelected = uiState.continueWatchingCardStyle == ContinueWatchingCardStyle.POSTER,
+                            onClick = {
+                                viewModel.onEvent(
+                                    LayoutSettingsEvent.SetContinueWatchingCardStyle(ContinueWatchingCardStyle.POSTER)
+                                )
+                            },
+                            onFocused = { focusedSection = LayoutSettingsSection.CONTINUE_WATCHING },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
 
-                    if (uiState.useEpisodeThumbnailsInCw) {
+                    // Poster cards always show poster art, so the episode thumbnail options do not apply to them.
+                    val episodeThumbnailsApply =
+                        uiState.continueWatchingCardStyle != ContinueWatchingCardStyle.POSTER
+
+                    if (episodeThumbnailsApply) {
+                        CompactToggleRow(
+                            title = stringResource(R.string.layout_use_episode_thumbnails_cw),
+                            subtitle = stringResource(R.string.layout_use_episode_thumbnails_cw_sub),
+                            checked = uiState.useEpisodeThumbnailsInCw,
+                            onToggle = {
+                                viewModel.onEvent(
+                                    LayoutSettingsEvent.SetUseEpisodeThumbnailsInCw(!uiState.useEpisodeThumbnailsInCw)
+                                )
+                            },
+                            onFocused = { focusedSection = LayoutSettingsSection.CONTINUE_WATCHING }
+                        )
+                    }
+
+                    if (episodeThumbnailsApply && uiState.useEpisodeThumbnailsInCw) {
                         CompactToggleRow(
                             title = stringResource(R.string.layout_blur_cw_next_up),
                             subtitle = stringResource(R.string.layout_blur_cw_next_up_sub),
@@ -1124,6 +1184,90 @@ private fun DiscoverLocationDialog(
         width = 460.dp,
         maxHeight = 320.dp
     )
+}
+
+@Composable
+private fun CwStyleCard(
+    style: ContinueWatchingCardStyle,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    onFocused: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var isFocused by remember { mutableStateOf(false) }
+
+    Card(
+        onClick = onClick,
+        modifier = modifier.onFocusChanged { state ->
+            val nowFocused = state.isFocused
+            if (isFocused != nowFocused) {
+                isFocused = nowFocused
+                if (nowFocused) onFocused()
+            }
+        },
+        colors = CardDefaults.colors(
+            containerColor = NuvioTheme.colors.Background,
+            focusedContainerColor = NuvioTheme.colors.Background
+        ),
+        border = CardDefaults.border(
+            border = if (isSelected) Border(
+                border = BorderStroke(NuvioTheme.spacing.hairline, NuvioTheme.colors.FocusRing),
+                shape = RoundedCornerShape(SettingsSecondaryCardRadius)
+            ) else Border.None,
+            focusedBorder = Border(
+                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                shape = RoundedCornerShape(SettingsSecondaryCardRadius)
+            )
+        ),
+        shape = CardDefaults.shape(RoundedCornerShape(SettingsSecondaryCardRadius)),
+        scale = CardDefaults.scale(focusedScale = 1f, pressedScale = 1f)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(112.dp)
+            ) {
+                when (style) {
+                    ContinueWatchingCardStyle.CARD -> CardCwStylePreview(modifier = Modifier.fillMaxSize())
+                    ContinueWatchingCardStyle.WIDE -> WideCwStylePreview(modifier = Modifier.fillMaxSize())
+                    ContinueWatchingCardStyle.POSTER -> PosterCwStylePreview(modifier = Modifier.fillMaxSize())
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                if (isSelected) {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = stringResource(R.string.cd_selected),
+                        tint = NuvioTheme.colors.FocusRing,
+                        modifier = Modifier
+                            .size(NuvioTheme.spacing.lg)
+                            .padding(end = 6.dp)
+                    )
+                }
+                Text(
+                    text = when (style) {
+                        ContinueWatchingCardStyle.CARD -> stringResource(R.string.layout_cw_card_style_card)
+                        ContinueWatchingCardStyle.WIDE -> stringResource(R.string.layout_cw_card_style_wide)
+                        ContinueWatchingCardStyle.POSTER -> stringResource(R.string.layout_cw_card_style_poster)
+                    },
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (isSelected || isFocused) NuvioTheme.colors.TextPrimary else NuvioTheme.colors.TextSecondary
+                )
+            }
+        }
+    }
 }
 
 @Composable

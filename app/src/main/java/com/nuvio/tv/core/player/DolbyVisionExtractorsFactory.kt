@@ -29,13 +29,18 @@ import java.util.concurrent.atomic.AtomicLong
  * Dolby Vision RPU NAL (type 62) via [DoviBridge], drops the enhancement-layer
  * NAL units, and rewrites the codec string (dvhe.07 becomes dvhe.08).
  *
- * Matroska is special: the RPU arrives as BlockAdditional data that stock Media3
- * discards before any TrackOutput, so for MKV this factory swaps in the vendored
- * [com.nuvio.tv.core.player.dvmkv.MatroskaExtractor], which surfaces the RPU through
- * [DolbyVisionMatroskaTransformer].
+ * Matroska is special for two reasons:
+ * 1. DV7 RPU arrives as BlockAdditional data that stock Media3 discards before
+ *    any TrackOutput, so MKV swaps in the vendored
+ *    [com.nuvio.tv.core.player.dvmkv.MatroskaExtractor] for RPU transform.
+ * 2. That same vendored extractor sniffs the first DTS sample to distinguish
+ *    core DTS vs DTS-HD MA / DTS:X (mkvmerge tags every DTS variant as A_DTS;
+ *    stock media3 maps that to core DTS with no inspection). The Matroska swap
+ *    is therefore unconditional — even when DV conversion is inactive — so
+ *    native-DV / policy-OFF boxes still get correct HD audio mime for bitstream.
  *
- * For any non-DV7 content (or when [config] is inactive) every wrapper is a strict
- * pass-through, so normal playback of all formats is unaffected.
+ * For any non-DV7 content (or when [config] is inactive) every non-Matroska
+ * wrapper is a strict pass-through, so normal playback of all formats is unaffected.
  */
 @UnstableApi
 internal class DolbyVisionExtractorsFactory(
