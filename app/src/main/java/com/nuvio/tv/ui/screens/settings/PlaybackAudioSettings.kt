@@ -95,7 +95,6 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
 
     // ── Audio Section ──
     item(key = "audio_header") {
-        Spacer(modifier = Modifier.height(NuvioTheme.spacing.lg))
         Text(
             text = stringResource(R.string.audio_section),
             style = MaterialTheme.typography.titleMedium,
