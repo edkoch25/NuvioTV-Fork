@@ -55,6 +55,7 @@ private const val GOV_A_CAP_US = 2_000_000L      // variant A: snap forward if >
 private const val GOV_C_FREEZE_US = 300_000L     // variant C: freeze once >300ms ahead
 private const val GOV_LOG_INTERVAL_MS = 5L       // GOV trace rate limit
 private const val GOV_TELEPORT_REJECT_X100 = 4000L  // >40x = seek/rebuffer jump, never a storm
+private const val GOV_MAX_FREEZE_MS = 3500L         // nt19: hard cap on frozen-frame duration (>D-spacing)
 
 internal class PlaybackSpeedAwareAudioSink(
     private val delegate: AudioSink,
@@ -167,6 +168,8 @@ internal class PlaybackSpeedAwareAudioSink(
     @Volatile private var govAWallMs: Long = 0L
     @Volatile private var govCFrozen: Boolean = false
     @Volatile private var govCHoldUs: Long = 0L
+    @Volatile private var govFreezeStartMs: Long = 0L  // nt19: when the current freeze began
+    @Volatile private var govCReleased: Boolean = false // nt19: freeze cap tripped -> follow raw this storm
     @Volatile private var govRateRefPosUs: Long = C.TIME_UNSET
     @Volatile private var govRateRefWallMs: Long = 0L
     @Volatile private var govRateX100: Long = 100L
@@ -220,16 +223,16 @@ internal class PlaybackSpeedAwareAudioSink(
             seekTracePosLogAtMs = nowMs
             Log.w(TAG, "SEEK_TRACE POS er=$nowMs posUs=$posUs sourceEnded=$sourceEnded")
         }
-        computeShadowGovernor(posUs, nowMs)
-        return posUs
+        val governedUs = computeShadowGovernor(posUs, nowMs)
+        return governedUs
     }
 
     // nt16: SHADOW governor. Computes three candidate governed positions and logs
     // them against raw. RETURNS NOTHING and CHANGES NOTHING -- getCurrentPositionUs
     // returns the raw delegate value. Engages when the windowed raw rate exceeds
     // GOV_ENGAGE_RATE_X100 while playing; disengaged in resetAudioMeasurements().
-    private fun computeShadowGovernor(rawUs: Long, nowMs: Long) {
-        if (rawUs == AudioSink.CURRENT_POSITION_NOT_SET) return
+    private fun computeShadowGovernor(rawUs: Long, nowMs: Long): Long {
+        if (rawUs == AudioSink.CURRENT_POSITION_NOT_SET) return rawUs
         if (govRateRefPosUs == C.TIME_UNSET) {
             govRateRefPosUs = rawUs; govRateRefWallMs = nowMs
         } else if (nowMs - govRateRefWallMs >= GOV_RATE_WINDOW_MS) {
@@ -255,7 +258,7 @@ internal class PlaybackSpeedAwareAudioSink(
                     govEngaged = true
                     govBasePosUs = rawUs; govBaseWallMs = nowMs
                     govAPosUs = rawUs; govAWallMs = nowMs
-                    govCFrozen = false; govCHoldUs = rawUs
+                    govCFrozen = false; govCHoldUs = rawUs; govCReleased = false; govFreezeStartMs = 0L
                     Log.w(TAG, "SEEK_TRACE GOV_ENGAGE er=$nowMs atPosUs=$rawUs rate100=$r " +
                         "sinceLastSpikeMs=${nowMs - govLastSpikeMs}")
                 }
@@ -268,12 +271,21 @@ internal class PlaybackSpeedAwareAudioSink(
         if (govEngaged) {
             val ceilBC = govBasePosUs + (nowMs - govBaseWallMs) * 1000L
             govB = if (rawUs < ceilBC) rawUs else ceilBC
-            if (!govCFrozen) {
+            // nt19: C is a 3-state machine. TRACKING follows raw at <=1.0x; on a
+            // >300ms lead it FREEZES (holds the frame). If frozen past the hard cap
+            // it RELEASES and follows raw for the rest of this storm, so the picture
+            // can never freeze indefinitely if a recovery seek never lands.
+            if (govCReleased) {
+                govC = rawUs
+            } else if (!govCFrozen) {
                 if (rawUs > ceilBC + GOV_C_FREEZE_US) {
-                    govCFrozen = true; govCHoldUs = ceilBC; govC = ceilBC
+                    govCFrozen = true; govCHoldUs = ceilBC; govFreezeStartMs = nowMs; govC = ceilBC
                 } else {
                     govC = if (rawUs < ceilBC) rawUs else ceilBC
                 }
+            } else if (nowMs - govFreezeStartMs > GOV_MAX_FREEZE_MS) {
+                govCReleased = true; govCFrozen = false; govC = rawUs
+                Log.w(TAG, "SEEK_TRACE GOV_FREEZE_CAP er=$nowMs heldMs=${nowMs - govFreezeStartMs} snapToUs=$rawUs")
             } else {
                 govC = govCHoldUs
             }
@@ -287,8 +299,10 @@ internal class PlaybackSpeedAwareAudioSink(
         if (nowMs - govLogAtMs >= GOV_LOG_INTERVAL_MS) {
             govLogAtMs = nowMs
             Log.w(TAG, "SEEK_TRACE GOV er=$nowMs raw=$rawUs A=$govA B=$govB C=$govC " +
-                "eng=${if (govEngaged) 1 else 0} rate100=$govRateX100")
+                "eng=${if (govEngaged) 1 else 0} frozen=${if (govCFrozen) 1 else 0} rate100=$govRateX100")
         }
+        // nt19 LIVE C: report the frozen position while engaged+frozen; raw otherwise.
+        return if (govEngaged && govCFrozen) govCHoldUs else rawUs
     }
 
     // Measured bitrate of the encoded audio bitstream. MKV declares no bitrate for audio
@@ -364,6 +378,8 @@ internal class PlaybackSpeedAwareAudioSink(
         govRateX100 = 100L
         govOldEngaged = false
         govLastSpikeMs = 0L
+        govFreezeStartMs = 0L
+        govCReleased = false
     }
 
     /**
