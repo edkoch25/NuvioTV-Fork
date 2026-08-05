@@ -219,7 +219,20 @@ internal fun LazyListScope.diagnosticsCardItems(
             DiagnosticRow(stringResource(R.string.diag_label_hdr_format_intended), diagnostics.videoHdrType?.takeIf { it.isNotBlank() } ?: "-")
             // Audio review F9: negotiated audio path (passthrough / decode).
             DiagnosticRow(stringResource(R.string.diag_label_audio_path), diagnostics.audioPath?.takeIf { it.isNotBlank() } ?: "-")
-            DiagnosticRow(stringResource(R.string.diag_label_audio_caps), diagnostics.audioCapabilities?.takeIf { it.isNotBlank() } ?: "-")
+            // F2b: append encodings the platform refused at AudioTrack open() this
+            // session (AudioTrackRejectionLog, populated by the 5001 recovery path).
+            // Ground truth alongside the policy "direct" claims and the "negotiated"
+            // list - on a TV that advertises DTS but will not open it, this is the
+            // line that names what actually failed.
+            DiagnosticRow(
+                stringResource(R.string.diag_label_audio_caps),
+                (diagnostics.audioCapabilities?.takeIf { it.isNotBlank() } ?: "-").let { base ->
+                    val rejected = com.nuvio.tv.ui.screens.player.AudioTrackRejectionLog
+                        .snapshot().map { it.encoding }.distinct()
+                    if (rejected.isEmpty()) base
+                    else "$base · rejected on open: ${rejected.joinToString(" ")}"
+                }
+            )
             DiagnosticRow(
                 stringResource(R.string.diag_label_first_frame),
                 if (diagnostics.firstFrameMs >= 0) "${diagnostics.firstFrameMs} ms"
