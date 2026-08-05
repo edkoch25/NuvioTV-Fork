@@ -243,6 +243,10 @@ data class PlayerSettings(
     val allowTrueHdPassthrough: Boolean = true,
     val allowDtsPassthrough: Boolean = true,
     val allowDtsHdPassthrough: Boolean = true,
+    // F5: how formats switched off above are played. DECODE_PCM (default) decodes
+    // losslessly on the box; TRANSCODE_AC3 re-encodes to 5.1 AC-3 for chains that
+    // cannot accept multichannel LPCM.
+    val deniedCodecHandling: DeniedCodecHandling = DeniedCodecHandling.DECODE_PCM,
     // F3: learned AudioTrack-open rejections, keyed "routeKey::GROUP". `seen` holds groups
     // rejected in one session; a group rejected again in a later session is promoted to
     // `confirmed`, which is what actually denies passthrough - so a one-off 5001 never
@@ -442,6 +446,27 @@ enum class LibassRenderType {
  *   STRIP_DV: libdovi DV stripping
  * - OFF: pass DV7 through untouched (may glitch on hardware lacking DV7 support)
  */
+/**
+ * F5: what happens to a compressed format whose passthrough is denied (by the user
+ * switches or an F3-learned rejection). DECODE_PCM is the default and matches prior
+ * behaviour: decode on the box, output lossless multichannel PCM. TRANSCODE_AC3
+ * re-encodes eligible denied formats to 5.1 AC-3 inside the FFmpeg renderer - the
+ * right choice only for chains that cannot accept multichannel LPCM.
+ */
+enum class DeniedCodecHandling {
+    DECODE_PCM,
+    TRANSCODE_AC3;
+
+    companion object {
+        /** Tolerant string parser used by the DataStore. */
+        fun fromStoredString(value: String?): DeniedCodecHandling = when (value) {
+            DECODE_PCM.name -> DECODE_PCM
+            TRANSCODE_AC3.name -> TRANSCODE_AC3
+            else -> DECODE_PCM
+        }
+    }
+}
+
 enum class Dv7HandlingMode {
     AUTO,
     HDR10_BASE_LAYER,
@@ -501,6 +526,7 @@ class PlayerSettingsDataStore @Inject constructor(
     private val allowTrueHdPassthroughKey = booleanPreferencesKey("allow_truehd_passthrough")
     private val allowDtsPassthroughKey = booleanPreferencesKey("allow_dts_passthrough")
     private val allowDtsHdPassthroughKey = booleanPreferencesKey("allow_dts_hd_passthrough")
+    private val deniedCodecHandlingKey = stringPreferencesKey("denied_codec_handling")
     private val audioRejectionsSeenKey = stringSetPreferencesKey("audio_rejections_seen")
     private val audioRejectionsConfirmedKey = stringSetPreferencesKey("audio_rejections_confirmed")
     private val matPassthroughEnabledKey = booleanPreferencesKey("mat_passthrough_enabled")
@@ -869,6 +895,7 @@ class PlayerSettingsDataStore @Inject constructor(
                 allowTrueHdPassthrough = prefs[allowTrueHdPassthroughKey] ?: true,
                 allowDtsPassthrough = prefs[allowDtsPassthroughKey] ?: true,
                 allowDtsHdPassthrough = prefs[allowDtsHdPassthroughKey] ?: true,
+                deniedCodecHandling = DeniedCodecHandling.fromStoredString(prefs[deniedCodecHandlingKey]),
                 audioRejectionsSeen = prefs[audioRejectionsSeenKey] ?: emptySet(),
                 audioRejectionsConfirmed = prefs[audioRejectionsConfirmedKey] ?: emptySet(),
                 matPassthroughEnabled = prefs[matPassthroughEnabledKey] ?: false,
@@ -1519,6 +1546,7 @@ class PlayerSettingsDataStore @Inject constructor(
     // Dolby Vision setters (libdovi conversion)
     suspend fun setDv5ToDv81Enabled(enabled: Boolean) { store().edit { it[dv5ToDv81EnabledKey] = enabled } }
     suspend fun setDv7HandlingMode(mode: Dv7HandlingMode) { store().edit { it[dv7HandlingModeKey] = mode.name } }
+    suspend fun setDeniedCodecHandling(mode: DeniedCodecHandling) { store().edit { it[deniedCodecHandlingKey] = mode.name } }
     suspend fun setDv7LibdoviModeOverride(mode: Int) { store().edit { it[dv7LibdoviModeOverrideKey] = mode.coerceIn(-1, 4) } }
     suspend fun setStripHdr10PlusSei(enabled: Boolean) { store().edit { it[stripHdr10PlusSeiKey] = enabled } }
 

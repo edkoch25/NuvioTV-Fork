@@ -186,6 +186,7 @@ internal data class ExoConstructionFingerprint(
     val matPassthroughEnabled: Boolean,
     val initialForcePcm: Boolean,
     val audioPassthroughPolicy: com.nuvio.tv.core.player.AudioPassthroughPolicy,
+    val deniedTranscodeMimes: Set<String>,
     val extensionRendererMode: Int,
     val convertToDv81Active: Boolean,
     val mapDv7ToHevc: Boolean,
@@ -1012,6 +1013,16 @@ internal fun PlayerRuntimeController.initializePlayer(
                     effectiveDecoderPriority != DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF,
                 learnedDeniedGroups = learnedDeniedGroups
             )
+            // F5: denied-codec handling. Compute which denied formats should be
+            // transcoded to AC-3 (opt-in, per chain) rather than decoded to PCM.
+            // Empty in every default configuration; see DeniedTranscodePlanner for
+            // the guards (incl. the sink-fallback guard on AC-3 usability).
+            val deniedTranscodeMimes = com.nuvio.tv.core.player.DeniedTranscodePlanner.effectiveTranscodeMimes(
+                policy = audioPassthroughPolicy,
+                transcodeDeniedToAc3 = playerSettings.deniedCodecHandling ==
+                    com.nuvio.tv.data.local.DeniedCodecHandling.TRANSCODE_AC3,
+                forcePassthroughActive = isForcePassthroughActive
+            )
             val renderersFactory = SubtitleOffsetRenderersFactory(
                 audioPassthroughPolicy = audioPassthroughPolicy,
                 context = context,
@@ -1033,6 +1044,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                 audioOutputChannels = playerSettings.audioOutputChannels,
                 downmixNormalizationEnabled = !playerSettings.maintainOriginalAudioOnDownmix,
                 forceOpticalPassthrough = isForcePassthroughActive,
+                deniedTranscodeMimes = deniedTranscodeMimes,
                 matPassthroughEnabled = playerSettings.matPassthroughEnabled,
                 playbackSpeedProvider = { _uiState.value.playbackSpeed },
                 initialForcePcm = hasTriedAudioPcmFallback,
@@ -1043,7 +1055,8 @@ internal fun PlayerRuntimeController.initializePlayer(
                         downmixEnabled = playerSettings.downmixEnabled,
                         audioOutputChannels = playerSettings.audioOutputChannels,
                         downmixNormalizationEnabled = !playerSettings.maintainOriginalAudioOnDownmix,
-                        forceOpticalPassthrough = isForcePassthroughActive
+                        forceOpticalPassthrough = isForcePassthroughActive,
+                        deniedTranscodeMimes = deniedTranscodeMimes
                     )
                     applyCenterMixLevel(_uiState.value.centerMixLevelDb)
                     updateAudioControlAvailability()
@@ -1135,6 +1148,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                 matPassthroughEnabled = playerSettings.matPassthroughEnabled,
                 initialForcePcm = hasTriedAudioPcmFallback,
                 audioPassthroughPolicy = audioPassthroughPolicy,
+                deniedTranscodeMimes = deniedTranscodeMimes,
                 extensionRendererMode = effectiveDecoderPriority,
                 convertToDv81Active = convertToDv81Active,
                 mapDv7ToHevc = mapDv7ToHevcEnabled,
@@ -2577,6 +2591,7 @@ private class SubtitleOffsetRenderersFactory(
     private val audioOutputChannels: com.nuvio.tv.data.local.AudioOutputChannels,
     private val downmixNormalizationEnabled: Boolean,
     private val forceOpticalPassthrough: Boolean,
+    private val deniedTranscodeMimes: Set<String>,
     private val matPassthroughEnabled: Boolean,
     private val audioPassthroughPolicy: com.nuvio.tv.core.player.AudioPassthroughPolicy,
     private val playbackSpeedProvider: () -> Float,
@@ -2635,7 +2650,7 @@ private class SubtitleOffsetRenderersFactory(
         val playbackSpeedAwareAudioSink = PlaybackSpeedAwareAudioSink(
             baseAudioSink,
             initialForcePcm,
-            forceAc3Support = forceOpticalPassthrough,
+            forceAc3Support = forceOpticalPassthrough || deniedTranscodeMimes.isNotEmpty(),
             passthroughPolicy = audioPassthroughPolicy,
             faultInjectRejectMime = faultInjectRejectMime
         )
@@ -2741,7 +2756,8 @@ private class SubtitleOffsetRenderersFactory(
                 downmixEnabled = downmixEnabled,
                 audioOutputChannels = audioOutputChannels,
                 downmixNormalizationEnabled = downmixNormalizationEnabled,
-                forceOpticalPassthrough = forceOpticalPassthrough
+                forceOpticalPassthrough = forceOpticalPassthrough,
+                deniedTranscodeMimes = deniedTranscodeMimes
             )
         }
         onFfmpegAudioRendererChanged(ffmpegRenderers.firstOrNull())
@@ -2751,9 +2767,11 @@ private fun FfmpegAudioRenderer.applyDownmixSettings(
     downmixEnabled: Boolean,
     audioOutputChannels: com.nuvio.tv.data.local.AudioOutputChannels,
     downmixNormalizationEnabled: Boolean,
-    forceOpticalPassthrough: Boolean
+    forceOpticalPassthrough: Boolean,
+    deniedTranscodeMimes: Set<String>
 ) {
     setForceOpticalPassthrough(forceOpticalPassthrough)
+    setDeniedTranscodeMimes(deniedTranscodeMimes)
     if (downmixEnabled) {
         setAudioOutputChannels(
             audioOutputChannels.ffmpegLayoutName,
