@@ -8,6 +8,7 @@ package com.nuvio.tv.ui.screens.player
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
@@ -83,7 +84,7 @@ object AudioCapabilityReport {
                     (if (ok) supported else absent).add(label)
                 }
                 val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-                format(supported, absent, surroundModeName(audioManager))
+                format(supported, absent, negotiatedEncodings(audioManager), surroundModeName(audioManager))
             }
         } catch (t: Throwable) {
             "unavailable (${t.javaClass.simpleName})"
@@ -96,10 +97,59 @@ object AudioCapabilityReport {
     }
 
     /** Pure formatter, split out so the wording is unit-testable without a device. */
-    internal fun format(supported: List<String>, absent: List<String>, surroundMode: String): String {
+    internal fun format(
+        supported: List<String>,
+        absent: List<String>,
+        negotiated: String,
+        surroundMode: String
+    ): String {
         val direct = if (supported.isEmpty()) "none" else supported.joinToString(" ")
         val missing = if (absent.isEmpty()) "none" else absent.joinToString(" ")
-        return "direct: $direct · absent: $missing · surround: $surroundMode"
+        return "direct: $direct · absent: $missing · negotiated: $negotiated · surround: $surroundMode"
+    }
+
+    /** HDMI/ARC/eARC output device types whose negotiated encodings we report. */
+    private val HDMI_OUTPUT_TYPES = setOf(
+        AudioDeviceInfo.TYPE_HDMI,
+        AudioDeviceInfo.TYPE_HDMI_ARC,
+        AudioDeviceInfo.TYPE_HDMI_EARC
+    )
+
+    /**
+     * The encodings the connected HDMI/ARC/eARC output actually negotiated, read from
+     * [AudioDeviceInfo.getEncodings]. A different oracle from isDirectPlaybackSupported
+     * above: that reads the vendor audio-policy profiles (static, and on some TVs still
+     * advertising formats the licence-stripped HAL will not open); this reflects what the
+     * HDMI link reported after EDID negotiation. When the two disagree - a TV that claims
+     * DTS it cannot open - this is the row that tends to be honest. PCM16 is included
+     * deliberately: its presence is what makes the line legible at a glance.
+     *
+     * Best-effort. getEncodings() returns an empty array when the platform does not
+     * expose it, which is common on TVs; we say "unknown" then rather than imply nothing
+     * is accepted.
+     */
+    private fun negotiatedEncodings(audioManager: AudioManager?): String {
+        if (audioManager == null) return "unknown"
+        val labels = runCatching {
+            audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                .filter { it.type in HDMI_OUTPUT_TYPES }
+                .flatMap { it.encodings.asList() }
+                .distinct()
+                .mapNotNull(::encodingLabel)
+        }.getOrNull().orEmpty()
+        return if (labels.isEmpty()) "unknown" else labels.joinToString(" ")
+    }
+
+    /** AudioFormat.ENCODING_* to the same short labels used in the direct/absent lists. */
+    private fun encodingLabel(encoding: Int): String? = when (encoding) {
+        AudioFormat.ENCODING_PCM_16BIT -> "PCM16"
+        AudioFormat.ENCODING_AC3 -> "AC3"
+        AudioFormat.ENCODING_E_AC3 -> "EAC3"
+        AudioFormat.ENCODING_E_AC3_JOC -> "EAC3-JOC"
+        AudioFormat.ENCODING_DOLBY_TRUEHD -> "TrueHD"
+        AudioFormat.ENCODING_DTS -> "DTS"
+        AudioFormat.ENCODING_DTS_HD -> "DTS-HD"
+        else -> null
     }
 
     /**
@@ -109,8 +159,15 @@ object AudioCapabilityReport {
      */
     private fun surroundModeName(audioManager: AudioManager?): String {
         if (audioManager == null) return "unknown"
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return "unknown"
-        return when (runCatching { audioManager.encodedSurroundMode }.getOrNull()) {
+        // getEncodedSurroundMode() is API 31+ (Android 12). The previous API 29 gate let
+        // the call through on Android 10/11, where it throws and collapsed to "unknown" -
+        // indistinguishable from a genuinely unreadable value. Attempt only where the
+        // getter exists, wrap it so an OEM off-by-one still degrades cleanly, and say
+        // "n/a" when the platform cannot report the mode rather than "unknown".
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return "n/a (<API 31)"
+        val mode = runCatching { audioManager.encodedSurroundMode }.getOrNull()
+            ?: return "n/a"
+        return when (mode) {
             AudioManager.ENCODED_SURROUND_OUTPUT_NEVER -> "NEVER"
             AudioManager.ENCODED_SURROUND_OUTPUT_ALWAYS -> "ALWAYS"
             AudioManager.ENCODED_SURROUND_OUTPUT_AUTO -> "AUTO"
