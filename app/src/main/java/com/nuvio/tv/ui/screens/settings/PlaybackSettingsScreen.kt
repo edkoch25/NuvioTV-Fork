@@ -134,6 +134,7 @@ fun PlaybackSettingsContent(
     var showOutlineColorDialog by remember { mutableStateOf(false) }
     var showAudioLanguageDialog by remember { mutableStateOf(false) }
     var showDv7HandlingModeDialog by remember { mutableStateOf(false) }
+    var showDeniedHandlingDialog by remember { mutableStateOf(false) }
     var showSecondaryAudioLanguageDialog by remember { mutableStateOf(false) }
     var showAudioOutputChannelsDialog by remember { mutableStateOf(false) }
     var showDecoderPriorityDialog by remember { mutableStateOf(false) }
@@ -162,6 +163,7 @@ fun PlaybackSettingsContent(
         showDecoderPriorityDialog = false
         showMpvHardwareDecodeModeDialog = false
         showDv7HandlingModeDialog = false
+        showDeniedHandlingDialog = false
         showStreamAutoPlayModeDialog = false
         showStreamAutoPlaySourceDialog = false
         showStreamAutoPlayAddonSelectionDialog = false
@@ -302,6 +304,7 @@ fun PlaybackSettingsContent(
                 onSetAllowDtsPassthrough = { allowed -> coroutineScope.launch { viewModel.setAllowDtsPassthrough(allowed) } },
                 onSetAllowDtsHdPassthrough = { allowed -> coroutineScope.launch { viewModel.setAllowDtsHdPassthrough(allowed) } },
                 onShowDv7HandlingModeDialog = { openDialog { showDv7HandlingModeDialog = true } },
+                onShowDeniedHandlingDialog = { openDialog { showDeniedHandlingDialog = true } },
                 onSetDv5ToDv81Enabled = { enabled ->
                     coroutineScope.launch { viewModel.setDv5ToDv81Enabled(enabled) }
                 },
@@ -492,6 +495,7 @@ fun PlaybackSettingsContent(
         showDecoderPriorityDialog = showDecoderPriorityDialog,
         showMpvHardwareDecodeModeDialog = showMpvHardwareDecodeModeDialog,
         showDv7HandlingModeDialog = showDv7HandlingModeDialog,
+        showDeniedHandlingDialog = showDeniedHandlingDialog,
         showStreamAutoPlayModeDialog = showStreamAutoPlayModeDialog,
         showStreamAutoPlaySourceDialog = showStreamAutoPlaySourceDialog,
         showStreamAutoPlayAddonSelectionDialog = showStreamAutoPlayAddonSelectionDialog,
@@ -543,6 +547,9 @@ fun PlaybackSettingsContent(
         onSetDv7HandlingMode = { mode ->
             coroutineScope.launch { viewModel.setDv7HandlingMode(mode) }
         },
+        onSetDeniedHandling = { mode ->
+            coroutineScope.launch { viewModel.setDeniedCodecHandling(mode) }
+        },
         onSetStreamAutoPlayMode = { mode ->
             coroutineScope.launch { viewModel.setStreamAutoPlayMode(mode) }
         },
@@ -576,6 +583,7 @@ fun PlaybackSettingsContent(
         onDismissDecoderPriorityDialog = ::dismissAllDialogs,
         onDismissMpvHardwareDecodeModeDialog = ::dismissAllDialogs,
         onDismissDv7HandlingModeDialog = ::dismissAllDialogs,
+        onDismissDeniedHandlingDialog = ::dismissAllDialogs,
         onDismissStreamAutoPlayModeDialog = ::dismissAllDialogs,
         onDismissStreamAutoPlaySourceDialog = ::dismissAllDialogs,
         onDismissStreamRegexDialog = ::dismissAllDialogs,

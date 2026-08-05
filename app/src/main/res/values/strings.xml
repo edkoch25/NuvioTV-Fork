@@ -729,6 +729,13 @@
     <string name="audio_passthrough_dts_sub">Off decodes DTS to PCM. Turn off if your receiver or TV cannot decode DTS - some TVs no longer license it.</string>
     <string name="audio_passthrough_dtshd">DTS-HD capable receiver</string>
     <string name="audio_passthrough_dtshd_sub">Covers DTS-HD MA, HRA and DTS:X. Off decodes to PCM and loses DTS:X. Turn off if your receiver handles DTS but not DTS-HD.</string>
+    <!-- F5: Denied Codec Handling -->
+    <string name="denied_handling_title">Denied Codec Handling</string>
+    <string name="denied_handling_dialog_subtitle">How formats switched off above are played.</string>
+    <string name="denied_mode_pcm">Decode to PCM</string>
+    <string name="denied_mode_pcm_desc">Decode on the box and output lossless multichannel PCM. Best when your receiver accepts multichannel LPCM.</string>
+    <string name="denied_mode_ac3">Transcode to AC-3</string>
+    <string name="denied_mode_ac3_desc">Re-encode to 5.1 AC-3 (lossy). Only for receivers that cannot take multichannel PCM, such as 2-channel soundbars.</string>
     <!-- DV7 Handling Mode -->
     <string name="dv7_handling_title">Dolby Vision Handling</string>
     <string name="dv7_handling_dialog_subtitle">Choose how DV streams are processed at playback time.</string>

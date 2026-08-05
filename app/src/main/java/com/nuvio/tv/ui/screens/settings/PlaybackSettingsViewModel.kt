@@ -217,6 +217,10 @@ class PlaybackSettingsViewModel @Inject constructor(
         playerSettingsDataStore.setDv5ToDv81Enabled(enabled)
     }
 
+    suspend fun setDeniedCodecHandling(mode: com.nuvio.tv.data.local.DeniedCodecHandling) {
+        playerSettingsDataStore.setDeniedCodecHandling(mode)
+    }
+
     suspend fun setDv7HandlingMode(mode: Dv7HandlingMode) {
         playerSettingsDataStore.setDv7HandlingMode(mode)
         // The conversion-mode override only applies when handling is Convert to
