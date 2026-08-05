@@ -402,6 +402,63 @@ internal fun PlayerRuntimeController.tryAudioTrackPcmFallback(
 }
 
 /**
+ * FFmpeg-preferred rebuild for ERROR_CODE_DECODER_INIT_FAILED (4001) on an audio
+ * renderer whose failing format belongs to a policy-denied group.
+ *
+ * Root cause (F5 investigation, 5 Aug 2026): a hybrid track (e.g. DTS-HD MA in
+ * Matroska) is exposed at selection time under its base MIME (audio/vnd.dts),
+ * which the user may not have denied, so the MediaCodec audio renderer wins the
+ * mapping tie. When the sample pipeline reads the extension substream it upgrades
+ * the format mid-stream to the denied MIME (audio/vnd.dts.hd); the policy
+ * abdication then leaves the already-selected renderer with no decoder (-49999),
+ * and media3 never remaps a track mid-stream, so the generic retry rebuilds into
+ * the identical trap. Retrying with FFmpeg audio preferred (the same audio-local
+ * reorder Force AC-3 uses) makes FFmpeg win the tie for the whole family; it
+ * decodes both the base and upgraded formats.
+ *
+ * Deliberate trade-off: while active (this stream only), FFmpeg wins ties for
+ * every audio format it fully supports, so a second audio track that could have
+ * passed through decodes to PCM instead. Degraded-but-playing beats the error
+ * screen.
+ */
+@androidx.annotation.OptIn(UnstableApi::class)
+internal fun PlayerRuntimeController.tryDeniedAudioFfmpegFallback(
+    error: PlaybackException
+): Boolean {
+    if (error.errorCode != PlaybackException.ERROR_CODE_DECODER_INIT_FAILED) return false
+    if (currentStreamUrl in preferFfmpegAudioStreamUrls) return false
+    if (cachedDecoderPriority == 0) return false // No FFmpeg renderer without extensions.
+    val failingMime = (error as? androidx.media3.exoplayer.ExoPlaybackException)
+        ?.rendererFormat?.sampleMimeType
+    if (failingMime == null || !androidx.media3.common.MimeTypes.isAudio(failingMime)) return false
+    val policy = currentAudioPassthroughPolicy ?: return false
+    if (!policy.deniesPassthrough(failingMime)) return false
+
+    preferFfmpegAudioStreamUrls.add(currentStreamUrl)
+
+    val paused = userPausedManually
+    val savedPosition = _exoPlayer?.currentPosition?.takeIf { it > 0L } ?: 0L
+
+    Log.d(
+        PlayerRuntimeController.TAG,
+        "Decoder init failed (4001) on policy-denied audio $failingMime - retrying with FFmpeg audio preferred, position=${savedPosition}ms"
+    )
+
+    resetErrorRetryState()
+
+    errorRetryJob = scope.launch {
+        showRecoveryOverlay()
+
+        releasePlayer(flushPlaybackState = false)
+        if (savedPosition > 0L) {
+            _uiState.update { it.copy(pendingSeekPosition = savedPosition) }
+        }
+        initializePlayer(currentStreamUrl, currentHeaders, startPaused = paused)
+    }
+    return true
+}
+
+/**
  * DV7-to-HEVC decoder fallback for ERROR_CODE_DECODER_INIT_FAILED (4003).
  *
  * When decoderPriority == 1 (EXTENSION_RENDERER_MODE_ON) and the decoder

@@ -568,6 +568,12 @@ class PlayerRuntimeController(
     // attempt is forced to libdovi mode 1 before falling back to HDR10 base layer.
     internal val dv7Mode1ForcedStreamUrls: MutableSet<String> = mutableSetOf()
     internal val vc1SoftwarePreferredStreamUrls: MutableSet<String> = mutableSetOf()
+    // F5 fix: streams that hit a 4001 on a policy-denied audio format and must be
+    // rebuilt with the FFmpeg audio renderer preferred (audio-local reorder).
+    internal val preferFfmpegAudioStreamUrls: MutableSet<String> = mutableSetOf()
+    // Policy the current player was built with; lets error recovery test denial
+    // without re-deriving settings.
+    internal var currentAudioPassthroughPolicy: com.nuvio.tv.core.player.AudioPassthroughPolicy? = null
     internal val vc1TrackSelectionBypassStreamUrls: MutableSet<String> = mutableSetOf()
     internal val safeAudioForcedStreamUrls: MutableSet<String> = mutableSetOf()
     internal val audioDisabledForcedStreamUrls: MutableSet<String> = mutableSetOf()

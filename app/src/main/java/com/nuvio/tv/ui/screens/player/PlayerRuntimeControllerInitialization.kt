@@ -187,6 +187,7 @@ internal data class ExoConstructionFingerprint(
     val initialForcePcm: Boolean,
     val audioPassthroughPolicy: com.nuvio.tv.core.player.AudioPassthroughPolicy,
     val deniedTranscodeMimes: Set<String>,
+    val preferFfmpegAudio: Boolean,
     val extensionRendererMode: Int,
     val convertToDv81Active: Boolean,
     val mapDv7ToHevc: Boolean,
@@ -969,6 +970,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                 convertToDv81Active = convertToDv81Active
             )
             val vc1SoftwareFallbackActive = vc1SoftwarePreferredStreamUrls.contains(url)
+            val preferFfmpegAudioActive = preferFfmpegAudioStreamUrls.contains(url)
             isVc1SoftwareFallbackActiveForCurrentPlayback = vc1SoftwareFallbackActive
             val isForcePassthroughActive = playerSettings.forceOpticalPassthrough && playerSettings.decoderPriority != 0
             // Audio review F4: force-AC3 no longer escalates the *global*
@@ -1023,6 +1025,8 @@ internal fun PlayerRuntimeController.initializePlayer(
                     com.nuvio.tv.data.local.DeniedCodecHandling.TRANSCODE_AC3,
                 forcePassthroughActive = isForcePassthroughActive
             )
+            // F5 fix: expose the policy to error recovery (tryDeniedAudioFfmpegFallback).
+            currentAudioPassthroughPolicy = audioPassthroughPolicy
             val renderersFactory = SubtitleOffsetRenderersFactory(
                 audioPassthroughPolicy = audioPassthroughPolicy,
                 context = context,
@@ -1045,6 +1049,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                 downmixNormalizationEnabled = !playerSettings.maintainOriginalAudioOnDownmix,
                 forceOpticalPassthrough = isForcePassthroughActive,
                 deniedTranscodeMimes = deniedTranscodeMimes,
+                preferFfmpegAudio = preferFfmpegAudioActive,
                 matPassthroughEnabled = playerSettings.matPassthroughEnabled,
                 playbackSpeedProvider = { _uiState.value.playbackSpeed },
                 initialForcePcm = hasTriedAudioPcmFallback,
@@ -1180,6 +1185,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                 initialForcePcm = hasTriedAudioPcmFallback,
                 audioPassthroughPolicy = audioPassthroughPolicy,
                 deniedTranscodeMimes = deniedTranscodeMimes,
+                preferFfmpegAudio = preferFfmpegAudioActive,
                 extensionRendererMode = effectiveDecoderPriority,
                 convertToDv81Active = convertToDv81Active,
                 mapDv7ToHevc = mapDv7ToHevcEnabled,
@@ -1864,6 +1870,14 @@ internal fun PlayerRuntimeController.initializePlayer(
                         // every 5001 previously took the heavier safe-audio
                         // ladder. Self-gating: no-op unless code=5001, first
                         // attempt, extension mode ON, tunneling off.
+                        // F5 root-cause fix: 4001 on a policy-denied audio format
+                        // (hybrid MIME upgraded mid-stream past the selection-time
+                        // abdication). Rebuild with FFmpeg audio preferred so the
+                        // whole family maps to the renderer that can decode it.
+                        if (tryDeniedAudioFfmpegFallback(error)) {
+                            return
+                        }
+
                         if (tryAudioTrackPcmFallback(error)) {
                             return
                         }
@@ -2623,6 +2637,7 @@ private class SubtitleOffsetRenderersFactory(
     private val downmixNormalizationEnabled: Boolean,
     private val forceOpticalPassthrough: Boolean,
     private val deniedTranscodeMimes: Set<String>,
+    private val preferFfmpegAudio: Boolean,
     private val matPassthroughEnabled: Boolean,
     private val audioPassthroughPolicy: com.nuvio.tv.core.player.AudioPassthroughPolicy,
     private val playbackSpeedProvider: () -> Float,
@@ -2749,7 +2764,7 @@ private class SubtitleOffsetRenderersFactory(
         // AV1 (Libgav1) ahead of the hardware decoder. Reorder audio-locally:
         // move FFmpeg audio renderers ahead of other audio renderers in the
         // block we just built, leaving video renderer order untouched.
-        if (forceOpticalPassthrough && out.size > startIndex) {
+        if ((forceOpticalPassthrough || preferFfmpegAudio) && out.size > startIndex) {
             val audioBlock = out.subList(startIndex, out.size)
             val reordered = audioBlock.sortedByDescending { it is FfmpegAudioRenderer }
             for (i in reordered.indices) audioBlock[i] = reordered[i]
