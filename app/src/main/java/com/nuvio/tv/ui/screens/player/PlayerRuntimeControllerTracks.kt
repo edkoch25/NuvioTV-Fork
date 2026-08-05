@@ -254,6 +254,58 @@ internal fun PlayerRuntimeController.updateAvailableTracks(tracks: Tracks) {
                 "pendingAddonLang=$pendingAddonSubtitleLanguage, pendingAddonTrackId=$pendingAddonSubtitleTrackId"
     )
 
+    // F5 DIAGNOSTIC #2 (temporary, remove with FFMPEG_PROBE): dump the audio
+    // group->renderer mapping the selector actually produced, and every audio
+    // renderer's LIVE supportsFormat verdict on the REAL track format. Closes the
+    // gap between the build-time FFMPEG_PROBE (synthetic format, FORMAT_HANDLED)
+    // and the render-time failure (track on MediaCodec at NO_UNSUPPORTED_TYPE).
+    runCatching {
+        val player = _exoPlayer
+        val mti = trackSelector?.currentMappedTrackInfo
+        if (player != null && mti != null) {
+            for (r in 0 until mti.rendererCount) {
+                if (mti.getRendererType(r) != C.TRACK_TYPE_AUDIO) continue
+                val groups = mti.getTrackGroups(r)
+                for (g in 0 until groups.length) {
+                    val grp = groups[g]
+                    for (t in 0 until grp.length) {
+                        val f = grp.getFormat(t)
+                        val mappedSup = androidx.media3.exoplayer.RendererCapabilities.getFormatSupport(mti.getTrackSupport(r, g, t))
+                        val live = runCatching {
+                            player.getRenderer(r).capabilities.supportsFormat(f)
+                        }.getOrDefault(-1)
+                        Log.w(
+                            PlayerRuntimeController.TAG,
+                            "MAP_PROBE r=$r name=" + player.getRenderer(r).name +
+                                " mime=" + f.sampleMimeType +
+                                " mappedSup=" + mappedSup +
+                                " liveCaps=" + live
+                        )
+                    }
+                }
+            }
+            val un = mti.unmappedTrackGroups
+            for (g in 0 until un.length) {
+                Log.w(PlayerRuntimeController.TAG, "MAP_PROBE unmapped mime=" + un[g].getFormat(0).sampleMimeType)
+            }
+            val audioFormat = player.currentTracks.groups
+                .firstOrNull { it.type == C.TRACK_TYPE_AUDIO && it.isSelected }
+                ?.getTrackFormat(0)
+            if (audioFormat != null) {
+                for (r in 0 until player.rendererCount) {
+                    if (player.getRendererType(r) != C.TRACK_TYPE_AUDIO) continue
+                    val caps = runCatching {
+                        player.getRenderer(r).capabilities.supportsFormat(audioFormat)
+                    }.getOrDefault(-1)
+                    Log.w(
+                        PlayerRuntimeController.TAG,
+                        "MAP_PROBE liveAll r=$r name=" + player.getRenderer(r).name + " caps=" + caps
+                    )
+                }
+            }
+        }
+    }
+
     val pendingAddonTrackId = pendingAddonSubtitleTrackId
     if (!pendingAddonTrackId.isNullOrBlank()) {
         if (applyAddonSubtitleOverride(pendingAddonTrackId)) {
