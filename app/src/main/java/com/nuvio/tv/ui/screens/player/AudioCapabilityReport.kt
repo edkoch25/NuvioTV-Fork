@@ -105,7 +105,7 @@ object AudioCapabilityReport {
     ): String {
         val direct = if (supported.isEmpty()) "none" else supported.joinToString(" ")
         val missing = if (absent.isEmpty()) "none" else absent.joinToString(" ")
-        return "direct: $direct · absent: $missing · negotiated: $negotiated · surround: $surroundMode"
+        return "Direct: $direct\nAbsent: $missing\nNegotiated: $negotiated\nSurround: $surroundMode"
     }
 
     /** HDMI/ARC/eARC output device types whose negotiated encodings we report. */

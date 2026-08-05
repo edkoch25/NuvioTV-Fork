@@ -230,7 +230,7 @@ internal fun LazyListScope.diagnosticsCardItems(
                     val rejected = com.nuvio.tv.ui.screens.player.AudioTrackRejectionLog
                         .snapshot().map { it.encoding }.distinct()
                     if (rejected.isEmpty()) base
-                    else "$base · rejected on open: ${rejected.joinToString(" ")}"
+                    else "$base\nRejected: ${rejected.joinToString(" ")}"
                 }
             )
             DiagnosticRow(

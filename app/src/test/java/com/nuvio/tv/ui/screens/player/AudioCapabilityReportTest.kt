@@ -9,7 +9,7 @@ class AudioCapabilityReportTest {
     @Test
     fun format_listsSupportedAndAbsentAndMode() {
         assertEquals(
-            "direct: AC3 EAC3 TrueHD · absent: DTS DTS-HD · negotiated: AC3 EAC3 PCM16 · surround: MANUAL",
+            "Direct: AC3 EAC3 TrueHD\nAbsent: DTS DTS-HD\nNegotiated: AC3 EAC3 PCM16\nSurround: MANUAL",
             AudioCapabilityReport.format(
                 supported = listOf("AC3", "EAC3", "TrueHD"),
                 absent = listOf("DTS", "DTS-HD"),
@@ -22,25 +22,29 @@ class AudioCapabilityReportTest {
     @Test
     fun format_saysNoneRatherThanEmptyList() {
         assertEquals(
-            "direct: none · absent: AC3 · negotiated: unknown · surround: NEVER",
+            "Direct: none\nAbsent: AC3\nNegotiated: unknown\nSurround: NEVER",
             AudioCapabilityReport.format(emptyList(), listOf("AC3"), "unknown", "NEVER")
         )
         assertEquals(
-            "direct: AC3 · absent: none · negotiated: AC3 · surround: AUTO",
+            "Direct: AC3\nAbsent: none\nNegotiated: AC3\nSurround: AUTO",
             AudioCapabilityReport.format(listOf("AC3"), emptyList(), "AC3", "AUTO")
         )
     }
 
     @Test
-    fun format_isSingleLineAndCompactEnoughForATvRow() {
-        val line = AudioCapabilityReport.format(
+    fun format_isOneLabelledLinePerFacet() {
+        val text = AudioCapabilityReport.format(
             listOf("AC3", "EAC3", "EAC3-JOC", "TrueHD", "DTS", "DTS-HD"),
             emptyList(),
             "AC3 EAC3 PCM16",
             "MANUAL"
         )
-        assertTrue("must stay one line", !line.contains("\n"))
-        assertTrue("unexpectedly long: ${line.length}", line.length < 160)
+        val lines = text.split("\n")
+        assertEquals(4, lines.size)
+        assertTrue(lines[0].startsWith("Direct: "))
+        assertTrue(lines[1].startsWith("Absent: "))
+        assertTrue(lines[2].startsWith("Negotiated: "))
+        assertTrue(lines[3].startsWith("Surround: "))
     }
 
     @Test
