@@ -1678,6 +1678,10 @@ internal fun PlayerRuntimeController.initializePlayer(
                         // decoder-start timeouts re-preparing an 18.5 GB moov-at-tail
                         // MP4 on every cycle). One shared budget bounds the total;
                         // when it's spent, fall through to the terminal error surface.
+                        // Build 1: record any audio-track open failure on a bitstream input
+                        // as ground-truth evidence (consumed by F2b/F3/assessment later).
+                        // Observation only - does not alter the ladder below.
+                        recordAudioTrackRejectionIfBitstream(error)
                         val autoRecoveryBudgetAvailable = consumeAutoRecoveryBudget(detailedError)
                         if (autoRecoveryBudgetAvailable) {
 
@@ -2604,11 +2608,22 @@ private class SubtitleOffsetRenderersFactory(
         // Read-only capability snapshot for the diagnostics page. Never opens an
         // AudioTrack - startup IEC61937 activity is a wedge risk on some HALs.
         AudioCapabilityReport.capture(context)
+        // Diagnostic harness (build 1): arm with
+        //   adb shell settings put global nuvio_fault_reject_mime audio/vnd.dts.hd
+        // disarm with `settings delete global nuvio_fault_reject_mime`. Read at build
+        // time, so arm it before starting playback. Inert when the setting is absent.
+        val faultInjectRejectMime = runCatching {
+            android.provider.Settings.Global.getString(context.contentResolver, "nuvio_fault_reject_mime")
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+        if (faultInjectRejectMime != null) {
+            Log.w(PlayerRuntimeController.TAG, "FAULT_INJECT armed: passthrough for $faultInjectRejectMime will be refused")
+        }
         val playbackSpeedAwareAudioSink = PlaybackSpeedAwareAudioSink(
             baseAudioSink,
             initialForcePcm,
             forceAc3Support = forceOpticalPassthrough,
-            passthroughPolicy = audioPassthroughPolicy
+            passthroughPolicy = audioPassthroughPolicy,
+            faultInjectRejectMime = faultInjectRejectMime
         )
         playbackSpeedAwareAudioSink.setInitialPlaybackSpeed(playbackSpeedProvider())
         onPlaybackSpeedAwareAudioSinkCreated(playbackSpeedAwareAudioSink)
@@ -3101,6 +3116,15 @@ private fun PlaybackException.isUnexpectedLoaderNullPointer(): Boolean {
     }
     return details.contains("unexpected nullpointerexception", ignoreCase = true) ||
             (details.contains("nullpointerexception", ignoreCase = true) && details.contains("matroskaextractor", ignoreCase = true))
+}
+
+internal fun PlayerRuntimeController.recordAudioTrackRejectionIfBitstream(error: PlaybackException) {
+    if (!error.isAudioTrackFailure()) return
+    val mime = (error as? androidx.media3.exoplayer.ExoPlaybackException)?.rendererFormat?.sampleMimeType
+    val label = AudioTrackRejectionLog.labelForMime(mime) ?: return
+    val routeKey = runCatching { AudioOutputRouteDetector.detect(context)?.key }.getOrNull()
+    AudioTrackRejectionLog.record(label, routeKey, System.currentTimeMillis())
+    Log.w(PlayerRuntimeController.TAG, "AUDIO_TRACK_REJECTION encoding=$label route=$routeKey")
 }
 
 private fun PlaybackException.isAudioTrackFailure(): Boolean {

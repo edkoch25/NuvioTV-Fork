@@ -76,7 +76,17 @@ internal class PlaybackSpeedAwareAudioSink(
      * [AudioPassthroughPolicy.ALLOW_ALL], which denies nothing - so a construction
      * site that omits it keeps the platform-report behaviour rather than changing it.
      */
-    private val passthroughPolicy: AudioPassthroughPolicy = AudioPassthroughPolicy.ALLOW_ALL
+    private val passthroughPolicy: AudioPassthroughPolicy = AudioPassthroughPolicy.ALLOW_ALL,
+    /**
+     * Diagnostic harness (build 1): when non-null, refuse to open a passthrough AudioTrack
+     * for this sample MIME by throwing InitializationException on the first buffer - a
+     * faithful stand-in for a TV/HAL that advertises an encoding via
+     * isDirectPlaybackSupported but rejects it at open() (the Skyworth DTS-HD case). Lets
+     * the 5001 recovery ladder be walked on hardware that accepts the format natively.
+     * Armed with `settings put global nuvio_fault_reject_mime <mime>`; null (the shipping
+     * default) is fully inert - one volatile read per buffer and nothing else.
+     */
+    private val faultInjectRejectMime: String? = null
 ) : ForwardingAudioSink(delegate) {
 
     private val startedWithForcedPcm: Boolean = initialForcePcm
@@ -89,6 +99,10 @@ internal class PlaybackSpeedAwareAudioSink(
 
     @Volatile
     private var currentInputFormat: Format? = null
+
+    // Diagnostic harness: one refusal per configure cycle, mirroring a real init-time
+    // failure (the track open() throws once, not on every buffer).
+    private var faultInjectFiredForCurrentConfig: Boolean = false
 
     @Volatile
     private var listener: AudioSink.Listener? = null
@@ -189,6 +203,7 @@ internal class PlaybackSpeedAwareAudioSink(
 
     override fun configure(inputFormat: Format, specifiedBufferSize: Int, outputChannels: IntArray?) {
         currentInputFormat = inputFormat
+        faultInjectFiredForCurrentConfig = false
         resetAudioMeasurements()
         markPcmFallbackIfNeeded(inputFormat, playbackSpeed)
         // Detect if this format will play in passthrough mode (bitstream, not forced to PCM)
@@ -325,6 +340,21 @@ internal class PlaybackSpeedAwareAudioSink(
         presentationTimeUs: Long,
         encodedAccessUnitCount: Int
     ): Boolean {
+        val rejectMime = faultInjectRejectMime
+        val injectFmt = currentInputFormat
+        if (rejectMime != null && isCurrentlyPassthrough && !faultInjectFiredForCurrentConfig &&
+            injectFmt != null && injectFmt.sampleMimeType == rejectMime
+        ) {
+            faultInjectFiredForCurrentConfig = true
+            Log.w(TAG, "FAULT_INJECT: refusing passthrough AudioTrack for $rejectMime (simulated HAL rejection)")
+            throw AudioSink.InitializationException(
+                "AudioTrack init failed ${AudioTrack.STATE_UNINITIALIZED} fault-injected $rejectMime",
+                AudioTrack.STATE_UNINITIALIZED,
+                injectFmt,
+                true,
+                null
+            )
+        }
         if (!isCurrentlyPassthrough) {
             // Jitter is sampled under PCM too: the audio clock still drives the video
             // renderer, and a PCM-forced stream that still stutters is diagnostic.
