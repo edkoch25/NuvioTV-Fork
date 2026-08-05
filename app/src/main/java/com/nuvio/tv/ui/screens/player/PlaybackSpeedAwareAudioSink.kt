@@ -54,6 +54,8 @@ private const val GOV_RATE_WINDOW_MS = 50L       // window for the raw-rate esti
 private const val GOV_A_CAP_US = 2_000_000L      // variant A: snap forward if >2s behind
 private const val GOV_C_FREEZE_US = 300_000L     // variant C: freeze once >300ms ahead
 private const val GOV_LOG_INTERVAL_MS = 5L       // GOV trace rate limit
+private const val GOV_TELEPORT_REJECT_X100 = 4000L  // >40x = seek/rebuffer jump, never a storm
+private const val GOV_RECURRENCE_WINDOW_MS = 800L    // 2nd in-band spike within this = storm
 
 internal class PlaybackSpeedAwareAudioSink(
     private val delegate: AudioSink,
@@ -170,6 +172,8 @@ internal class PlaybackSpeedAwareAudioSink(
     @Volatile private var govRateRefWallMs: Long = 0L
     @Volatile private var govRateX100: Long = 100L
     @Volatile private var govLogAtMs: Long = 0L
+    @Volatile private var govOldEngaged: Boolean = false  // nt17: nt16-rule latch, for old-vs-new logging
+    @Volatile private var govLastSpikeMs: Long = 0L        // nt17: last in-band spike, for recurrence
 
     fun setInitialPlaybackSpeed(speed: Float) {
         playbackSpeed = normalizeSpeed(speed)
@@ -233,13 +237,30 @@ internal class PlaybackSpeedAwareAudioSink(
             val dW = nowMs - govRateRefWallMs
             if (dW > 0L) govRateX100 = ((rawUs - govRateRefPosUs) * 100L) / (dW * 1000L)
             govRateRefPosUs = rawUs; govRateRefWallMs = nowMs
-        }
-        if (!govEngaged && playbackActive && govRateX100 > GOV_ENGAGE_RATE_X100) {
-            govEngaged = true
-            govBasePosUs = rawUs; govBaseWallMs = nowMs
-            govAPosUs = rawUs; govAWallMs = nowMs
-            govCFrozen = false; govCHoldUs = rawUs
-            Log.w(TAG, "SEEK_TRACE GOV_ENGAGE er=$nowMs atPosUs=$rawUs rate100=$govRateX100")
+            // nt17: classify this rate window once (spike-edge counting, not per-read).
+            val r = govRateX100
+            // old rule (nt16): engaged on the first >1.5x window while playing. Logged
+            // for old-vs-new comparison -- proves the refinement only drops rebuffers.
+            if (!govOldEngaged && playbackActive && r > GOV_ENGAGE_RATE_X100) {
+                govOldEngaged = true
+                Log.w(TAG, "SEEK_TRACE GOV_WOULD_ENGAGE_OLD er=$nowMs atPosUs=$rawUs rate100=$r")
+            }
+            if (r > GOV_TELEPORT_REJECT_X100) {
+                // teleport (seek/rebuffer jump) -- never a storm; reject, do not count.
+                Log.w(TAG, "SEEK_TRACE GOV_REJECT er=$nowMs rate100=$r reason=teleport")
+            } else if (r > GOV_ENGAGE_RATE_X100) {
+                // in-band spike: engage on recurrence (2nd such spike within the window).
+                if (!govEngaged && playbackActive && govLastSpikeMs != 0L &&
+                    nowMs - govLastSpikeMs <= GOV_RECURRENCE_WINDOW_MS) {
+                    govEngaged = true
+                    govBasePosUs = rawUs; govBaseWallMs = nowMs
+                    govAPosUs = rawUs; govAWallMs = nowMs
+                    govCFrozen = false; govCHoldUs = rawUs
+                    Log.w(TAG, "SEEK_TRACE GOV_ENGAGE er=$nowMs atPosUs=$rawUs rate100=$r " +
+                        "sinceLastSpikeMs=${nowMs - govLastSpikeMs}")
+                }
+                govLastSpikeMs = nowMs
+            }
         }
         var govA = rawUs
         var govB = rawUs
@@ -341,6 +362,8 @@ internal class PlaybackSpeedAwareAudioSink(
         govCFrozen = false
         govRateRefPosUs = C.TIME_UNSET
         govRateX100 = 100L
+        govOldEngaged = false
+        govLastSpikeMs = 0L
     }
 
     /**
