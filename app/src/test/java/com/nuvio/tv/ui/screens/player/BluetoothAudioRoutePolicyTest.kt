@@ -17,6 +17,11 @@ import java.nio.ByteBuffer
 /**
  * Bluetooth media policy mirrors Media3 1.8.0 AudioCapabilities:
  * when the route is Bluetooth, encoded passthrough is rejected and PCM decode is forced.
+ *
+ * Fork note: the fork's PlaybackSpeedAwareAudioSink keeps its original first
+ * constructor parameter name (delegate) rather than upstream 0.8.2's rename to
+ * sink; the named arguments below are adjusted accordingly. Behaviour under
+ * test is unchanged.
  */
 class BluetoothAudioRoutePolicyTest {
 
@@ -34,7 +39,7 @@ class BluetoothAudioRoutePolicyTest {
     @Test
     fun `bluetooth force pcm rejects eac3 truehd and dts direct sink support`() {
         val sink = PlaybackSpeedAwareAudioSink(
-            sink = AlwaysSupportedDelegateSink(),
+            delegate = AlwaysSupportedDelegateSink(),
             initialForcePcm = true,
             forcePcmForBluetooth = true
         )
@@ -57,7 +62,7 @@ class BluetoothAudioRoutePolicyTest {
     @Test
     fun `without bluetooth force pcm allows aac through`() {
         val sink = PlaybackSpeedAwareAudioSink(
-            sink = AlwaysSupportedDelegateSink(),
+            delegate = AlwaysSupportedDelegateSink(),
             initialForcePcm = false,
             forcePcmForBluetooth = false
         )
@@ -69,7 +74,7 @@ class BluetoothAudioRoutePolicyTest {
     @Test
     fun `speed change alone forces pcm for surround without bluetooth flag`() {
         val sink = PlaybackSpeedAwareAudioSink(
-            sink = AlwaysSupportedDelegateSink(),
+            delegate = AlwaysSupportedDelegateSink(),
             initialForcePcm = false,
             forcePcmForBluetooth = false
         )
