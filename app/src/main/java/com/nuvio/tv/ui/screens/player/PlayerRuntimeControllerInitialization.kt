@@ -1060,6 +1060,37 @@ internal fun PlayerRuntimeController.initializePlayer(
                     )
                     applyCenterMixLevel(_uiState.value.centerMixLevelDb)
                     updateAudioControlAvailability()
+                    // F5 DIAGNOSTIC (temporary, remove once the DTS-HD decline is
+                    // named): one W-line of ground truth at player build. Answers,
+                    // in one run, every branch left standing: library availability,
+                    // dca mapping, the renderer's own capability verdict for the
+                    // exact failing format, the sink's PCM answer, the policy state,
+                    // and whether the loaded class is the F5 build (stale-build
+                    // detector via reflection).
+                    runCatching {
+                        if (renderer != null) {
+                            val probe = androidx.media3.common.Format.Builder()
+                                .setSampleMimeType(MimeTypes.AUDIO_DTS_HD)
+                                .setChannelCount(6)
+                                .setSampleRate(48000)
+                                .build()
+                            val caps = renderer.supportsFormat(probe)
+                            val sinkPcm = playbackSpeedAwareAudioSink?.getFormatSupport(
+                                androidx.media3.common.util.Util.getPcmFormat(C.ENCODING_PCM_16BIT, 6, 48000)
+                            )
+                            val f5Setter = renderer.javaClass.methods.any { it.name == "setDeniedTranscodeMimes" }
+                            Log.w(
+                                PlayerRuntimeController.TAG,
+                                "FFMPEG_PROBE avail=" + androidx.media3.decoder.ffmpeg.FfmpegLibrary.isAvailable() +
+                                    " fmtDtsHd=" + androidx.media3.decoder.ffmpeg.FfmpegLibrary.supportsFormat(MimeTypes.AUDIO_DTS_HD) +
+                                    " caps=" + caps +
+                                    " sinkPcm16x6=" + sinkPcm +
+                                    " deniedDtsHd=" + audioPassthroughPolicy.deniesPassthrough(MimeTypes.AUDIO_DTS_HD) +
+                                    " transcodeSet=" + deniedTranscodeMimes +
+                                    " f5Setter=" + f5Setter
+                            )
+                        }
+                    }
                 }
             ).setExtensionRendererMode(effectiveDecoderPriority)
                 .setEnableDecoderFallback(true)
