@@ -84,7 +84,8 @@ object AudioCapabilityReport {
                     (if (ok) supported else absent).add(label)
                 }
                 val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-                format(supported, absent, negotiatedEncodings(audioManager), surroundModeName(audioManager))
+                val maxPcmLabel = maxPcmChannelCount(audioManager)?.let { "$it ch" } ?: "unknown"
+                format(supported, absent, negotiatedEncodings(audioManager), surroundModeName(audioManager), maxPcmLabel)
             }
         } catch (t: Throwable) {
             "unavailable (${t.javaClass.simpleName})"
@@ -101,11 +102,12 @@ object AudioCapabilityReport {
         supported: List<String>,
         absent: List<String>,
         negotiated: String,
-        surroundMode: String
+        surroundMode: String,
+        maxPcm: String
     ): String {
         val direct = if (supported.isEmpty()) "none" else supported.joinToString(" ")
         val missing = if (absent.isEmpty()) "none" else absent.joinToString(" ")
-        return "Direct: $direct\nAbsent: $missing\nNegotiated: $negotiated\nSurround: $surroundMode"
+        return "Direct: $direct\nAbsent: $missing\nNegotiated: $negotiated\nSurround: $surroundMode\nMax PCM: $maxPcm"
     }
 
     /** HDMI/ARC/eARC output device types whose negotiated encodings we report. */
@@ -138,6 +140,30 @@ object AudioCapabilityReport {
                 .mapNotNull(::encodingLabel)
         }.getOrNull().orEmpty()
         return if (labels.isEmpty()) "unknown" else labels.joinToString(" ")
+    }
+
+    /**
+     * F2c: highest PCM channel count the connected HDMI/ARC/eARC output reports via
+     * [AudioDeviceInfo.getChannelCounts]. This is the one capability no failure can
+     * ever teach: a 2 ch-LPCM chain plays multichannel PCM "successfully" - silently
+     * collapsed to stereo - so nothing errors and F3 never learns. Only a read like
+     * this can tell the assessment that Transcode-to-AC-3 is the better denied-codec
+     * handling for the chain. Null when the platform does not expose counts (common
+     * on TVs); best-effort like the negotiated-encodings read above.
+     */
+    fun readMaxPcmChannelCount(context: Context): Int? {
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        return maxPcmChannelCount(audioManager)
+    }
+
+    private fun maxPcmChannelCount(audioManager: AudioManager?): Int? {
+        if (audioManager == null) return null
+        return runCatching {
+            audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                .filter { it.type in HDMI_OUTPUT_TYPES }
+                .flatMap { it.channelCounts.asList() }
+                .maxOrNull()
+        }.getOrNull()
     }
 
     /** AudioFormat.ENCODING_* to the same short labels used in the direct/absent lists. */
