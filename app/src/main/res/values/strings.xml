@@ -3171,6 +3171,9 @@
     <string name="assessment_item_ac3">Force AC-3 Transcoding (Optical/SPDIF)</string>
     <string name="assessment_grounds_ac3_hdmi">Audio route is %1$s (%2$s) \u2014 on an HDMI chain this setting only turns lossless passthrough into lossy AC-3</string>
     <string name="assessment_grounds_ac3_unknown">Couldn\'t confirm an optical route from here \u2014 this setting only belongs on Optical/SPDIF outputs</string>
+    <string name="assessment_grounds_denied_2ch">This output negotiates at most 2-channel PCM, so decoded surround collapses to stereo \u2014 transcoding denied formats to 5.1 AC-3 keeps the channels</string>
+    <string name="assessment_grounds_denied_multich">This output accepts %1$d-channel PCM, so decoding denied formats keeps lossless multichannel audio \u2014 AC-3 transcoding would only lose quality</string>
+    <string name="assessment_grounds_denied_unknown">Couldn\'t read the output\'s PCM channel count from here \u2014 choose based on whether your receiver accepts multichannel PCM</string>
 
 
     <!-- Device Settings Assessment: Stage 2 apply/revert + polish -->

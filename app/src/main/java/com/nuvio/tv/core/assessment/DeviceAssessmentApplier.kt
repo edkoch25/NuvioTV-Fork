@@ -1,5 +1,6 @@
 package com.nuvio.tv.core.assessment
 
+import com.nuvio.tv.data.local.DeniedCodecHandling
 import com.nuvio.tv.data.local.Dv7HandlingMode
 import com.nuvio.tv.data.local.FrameRateMatchingMode
 import com.nuvio.tv.data.local.PlayerSettings
@@ -84,6 +85,7 @@ object DeviceAssessmentApplier {
         plan.dv5ToDv81Enabled?.let { step { dataStore.setDv5ToDv81Enabled(it) } }
         plan.stripHdr10PlusSei?.let { step { dataStore.setStripHdr10PlusSei(it) } }
         plan.forceOpticalPassthrough?.let { step { dataStore.setForceOpticalPassthrough(it) } }
+        plan.deniedCodecHandling?.let { step { dataStore.setDeniedCodecHandling(it) } }
 
         return ApplyOutcome(writtenCount = written)
     }
@@ -121,6 +123,13 @@ object DeviceAssessmentApplier {
         dataStore.setDv5ToDv81Enabled(snap.getBoolean("dv5ToDv81Enabled"))
         dataStore.setStripHdr10PlusSei(snap.getBoolean("stripHdr10PlusSei"))
         dataStore.setForceOpticalPassthrough(snap.getBoolean("forceOpticalPassthrough"))
+        // Guarded: snapshots written before the F5 setting existed lack this key,
+        // and an unguarded getString would abort the whole restore.
+        if (snap.has("deniedCodecHandling")) {
+            dataStore.setDeniedCodecHandling(
+                DeniedCodecHandling.fromStoredString(snap.getString("deniedCodecHandling"))
+            )
+        }
 
         dataStore.setAssessmentRevertSnapshot(null)
         return true
@@ -150,5 +159,6 @@ object DeviceAssessmentApplier {
         put("dv5ToDv81Enabled", s.dv5ToDv81Enabled)
         put("stripHdr10PlusSei", s.stripHdr10PlusSei)
         put("forceOpticalPassthrough", s.forceOpticalPassthrough)
+        put("deniedCodecHandling", s.deniedCodecHandling.name)
     }.toString()
 }

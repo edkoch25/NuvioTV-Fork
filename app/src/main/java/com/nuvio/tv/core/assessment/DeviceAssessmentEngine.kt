@@ -12,11 +12,13 @@ import com.nuvio.tv.core.player.DolbyVisionBaseLayerPolicy
 import com.nuvio.tv.core.player.DoviBridge
 import com.nuvio.tv.core.player.LastPlaybackDiagnostics
 import com.nuvio.tv.core.player.VodCacheSizing
+import com.nuvio.tv.data.local.DeniedCodecHandling
 import com.nuvio.tv.data.local.Dv7HandlingMode
 import com.nuvio.tv.data.local.FrameRateMatchingMode
 import com.nuvio.tv.data.local.InternalPlayerEngine
 import com.nuvio.tv.data.local.PlayerSettings
 import com.nuvio.tv.data.local.VodCacheSizeMode
+import com.nuvio.tv.ui.screens.player.AudioCapabilityReport
 import com.nuvio.tv.ui.screens.player.AudioOutputRouteDetector
 import com.nuvio.tv.ui.screens.player.NuvioExoPlayerPerformanceHelper
 import com.nuvio.tv.ui.screens.settings.MemoryBudget
@@ -507,6 +509,56 @@ object DeviceAssessmentEngine {
             )
         }
 
+        // F5: denied-codec handling default per chain. Keyed on the max PCM channel
+        // count the output negotiates - the one capability no playback failure can
+        // teach, because a 2 ch-LPCM chain plays multichannel PCM "successfully"
+        // (collapsed to stereo) and nothing ever errors for F3 to learn from.
+        // TRANSCODE_AC3 is only recommended when AC-3 passthrough is itself enabled;
+        // DeniedTranscodePlanner re-guards learned AC-3 rejections at build time, so
+        // a wrong recommendation degrades to PCM decode rather than stranding.
+        val maxPcmChannels = runCatching { AudioCapabilityReport.readMaxPcmChannelCount(context) }.getOrNull()
+        val deniedHandlingTarget: DeniedCodecHandling? = when {
+            audioRoute == null || !audioRoute.key.startsWith("type:hdmi") -> null
+            maxPcmChannels == null -> null
+            maxPcmChannels <= 2 && settings.allowAc3Passthrough -> DeniedCodecHandling.TRANSCODE_AC3
+            maxPcmChannels > 2 -> DeniedCodecHandling.DECODE_PCM
+            else -> null
+        }
+        val deniedCurrentLabel = if (settings.deniedCodecHandling == DeniedCodecHandling.TRANSCODE_AC3) {
+            s(R.string.denied_mode_ac3)
+        } else {
+            s(R.string.denied_mode_pcm)
+        }
+        if (deniedHandlingTarget != null) {
+            items += AssessmentItem(
+                key = "denied_handling",
+                title = s(R.string.denied_handling_title),
+                currentValue = deniedCurrentLabel,
+                recommendedValue = if (deniedHandlingTarget == DeniedCodecHandling.TRANSCODE_AC3) {
+                    s(R.string.denied_mode_ac3)
+                } else {
+                    s(R.string.denied_mode_pcm)
+                },
+                grounds = if (deniedHandlingTarget == DeniedCodecHandling.TRANSCODE_AC3) {
+                    s(R.string.assessment_grounds_denied_2ch)
+                } else {
+                    s(R.string.assessment_grounds_denied_multich, maxPcmChannels ?: 0)
+                },
+                tier = AssessmentTier.CALCULATED,
+                changeNeeded = settings.deniedCodecHandling != deniedHandlingTarget
+            )
+        } else {
+            items += AssessmentItem(
+                key = "denied_handling",
+                title = s(R.string.denied_handling_title),
+                currentValue = deniedCurrentLabel,
+                recommendedValue = s(R.string.assessment_value_leave_as_is),
+                grounds = s(R.string.assessment_grounds_denied_unknown),
+                tier = AssessmentTier.VERIFY,
+                changeNeeded = false
+            )
+        }
+
         // AFR + resolution: honest per display capability; VERIFY when the
         // display could not be inspected (no Activity, or API unsupported).
         if (display.apiSupported) {
@@ -783,6 +835,9 @@ object DeviceAssessmentEngine {
             forceOpticalPassthrough = false.takeIf {
                 audioRoute != null && audioRoute.key.startsWith("type:hdmi") &&
                     settings.forceOpticalPassthrough
+            },
+            deniedCodecHandling = deniedHandlingTarget?.takeIf {
+                settings.deniedCodecHandling != it
             }
         )
 

@@ -1,5 +1,6 @@
 package com.nuvio.tv.core.assessment
 
+import com.nuvio.tv.data.local.DeniedCodecHandling
 import com.nuvio.tv.data.local.Dv7HandlingMode
 import com.nuvio.tv.data.local.FrameRateMatchingMode
 import com.nuvio.tv.data.local.VodCacheSizeMode
@@ -104,7 +105,8 @@ data class AssessmentApplyPlan(
     val dv7HandlingMode: Dv7HandlingMode? = null,
     val dv5ToDv81Enabled: Boolean? = null,
     val stripHdr10PlusSei: Boolean? = null,
-    val forceOpticalPassthrough: Boolean? = null
+    val forceOpticalPassthrough: Boolean? = null,
+    val deniedCodecHandling: DeniedCodecHandling? = null
 ) {
     val touchedCount: Int
         get() = listOfNotNull(
@@ -113,6 +115,7 @@ data class AssessmentApplyPlan(
             maxBufferMs, useParallelConnections, parallelConnectionCount,
             parallelChunkSizeKb, enableHttp2, vodCacheEnabled, vodCacheSizeMode,
             frameRateMatchingMode, resolutionMatchingEnabled, dv7HandlingMode,
-            dv5ToDv81Enabled, stripHdr10PlusSei, forceOpticalPassthrough
+            dv5ToDv81Enabled, stripHdr10PlusSei, forceOpticalPassthrough,
+            deniedCodecHandling
         ).size
 }
