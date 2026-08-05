@@ -202,12 +202,6 @@ fun PlaybackStatsOverlay(
                 .padding(horizontal = NuvioTheme.spacing.md, vertical = NuvioTheme.spacing.sm),
             verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.xxs)
         ) {
-            Text(
-                text = "STATS \u00b7 ${sample?.engineLabel.orEmpty()}",
-                color = Color.White.copy(alpha = 0.6f),
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold
-            )
             if (sample?.isExoPlayer == false) {
                 Text(
                     text = stringResource(R.string.player_stats_unavailable_mpv),
@@ -221,8 +215,7 @@ fun PlaybackStatsOverlay(
                         color = Color.White.copy(alpha = 0.5f),
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Medium,
-                        letterSpacing = 1.5.sp,
-                        modifier = Modifier.padding(top = NuvioTheme.spacing.xxs, bottom = 2.dp)
+                        letterSpacing = 1.5.sp
                     )
                     Box(
                         modifier = Modifier
