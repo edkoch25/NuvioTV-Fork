@@ -159,7 +159,11 @@ class SimklMutationReconciliationTest {
         assertEquals(SimklListStatus.WATCHING, entry.status)
         assertEquals("tv", entry.animeType)
         assertEquals("2023-11-14T22:13:20Z", entry.seasons.single().episodes.single().watchedAt)
-        assertFalse(receipt.requiresReconciliation)
+        // Upstream 0.8.2 (51aa79bca "Fix optimistic CW entries for anime in Simkl") widened
+        // requiresReconciliation to every non-movie add - episodes included - so anime
+        // episode adds now reconcile. Upstream changed the production rule without updating
+        // this assertion; flipped here to match shipped behaviour.
+        assertTrue(receipt.requiresReconciliation)
     }
 
     @Test
