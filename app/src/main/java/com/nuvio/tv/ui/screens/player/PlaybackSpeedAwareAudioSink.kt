@@ -55,7 +55,6 @@ private const val GOV_A_CAP_US = 2_000_000L      // variant A: snap forward if >
 private const val GOV_C_FREEZE_US = 300_000L     // variant C: freeze once >300ms ahead
 private const val GOV_LOG_INTERVAL_MS = 5L       // GOV trace rate limit
 private const val GOV_TELEPORT_REJECT_X100 = 4000L  // >40x = seek/rebuffer jump, never a storm
-private const val GOV_RECURRENCE_WINDOW_MS = 800L    // 2nd in-band spike within this = storm
 
 internal class PlaybackSpeedAwareAudioSink(
     private val delegate: AudioSink,
@@ -249,9 +248,10 @@ internal class PlaybackSpeedAwareAudioSink(
                 // teleport (seek/rebuffer jump) -- never a storm; reject, do not count.
                 Log.w(TAG, "SEEK_TRACE GOV_REJECT er=$nowMs rate100=$r reason=teleport")
             } else if (r > GOV_ENGAGE_RATE_X100) {
-                // in-band spike: engage on recurrence (2nd such spike within the window).
-                if (!govEngaged && playbackActive && govLastSpikeMs != 0L &&
-                    nowMs - govLastSpikeMs <= GOV_RECURRENCE_WINDOW_MS) {
+                // nt18: in-band spike (1.5x..40x) engages directly. The recurrence
+                // gate (removed) suppressed real storms -- run5 missed 3 storms at
+                // 14-25x; teleport-reject alone separates storms from rebuffer jumps.
+                if (!govEngaged && playbackActive) {
                     govEngaged = true
                     govBasePosUs = rawUs; govBaseWallMs = nowMs
                     govAPosUs = rawUs; govAWallMs = nowMs
