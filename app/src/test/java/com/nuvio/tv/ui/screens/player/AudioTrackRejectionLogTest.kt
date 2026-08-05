@@ -1,6 +1,8 @@
 package com.nuvio.tv.ui.screens.player
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -43,5 +45,14 @@ class AudioTrackRejectionLogTest {
         AudioTrackRejectionLog.record("DTS", "type:hdmi_earc", 1L)
         assertEquals(setOf("DTS-HD"), AudioTrackRejectionLog.encodingsRejectedOn("type:hdmi_arc"))
         assertEquals(setOf("DTS-HD", "DTS"), AudioTrackRejectionLog.encodingsRejectedOn(null))
+    }
+
+    @Test
+    fun markGroupFirstThisSession_trueOnce_thenFalse_untilReset() {
+        assertTrue(AudioTrackRejectionLog.markGroupFirstThisSession("r::DTS_HD"))
+        assertFalse(AudioTrackRejectionLog.markGroupFirstThisSession("r::DTS_HD"))
+        assertTrue(AudioTrackRejectionLog.markGroupFirstThisSession("r::DTS"))
+        AudioTrackRejectionLog.reset()
+        assertTrue(AudioTrackRejectionLog.markGroupFirstThisSession("r::DTS_HD"))
     }
 }

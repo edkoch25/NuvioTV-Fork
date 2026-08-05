@@ -989,6 +989,19 @@ internal fun PlayerRuntimeController.initializePlayer(
             // denying passthrough could leave a format with no decoder. In that state the
             // policy denies nothing. Hoisted to a local val because the reuse fingerprint
             // below must see the same value the sink is built with.
+            // F3: correct the policy with codecs this chain has been observed to reject at
+            // AudioTrack open() (confirmed across two sessions), keyed to the current route
+            // so an ARC->eARC change starts clean.
+            val currentAudioRouteKey = runCatching { AudioOutputRouteDetector.detect(context)?.key }.getOrNull()
+            val learnedDeniedGroups = playerSettings.audioRejectionsConfirmed
+                .mapNotNull { entry ->
+                    val parts = entry.split("::")
+                    if (parts.size != 2) return@mapNotNull null
+                    val (route, groupName) = parts
+                    if (currentAudioRouteKey == null || route != currentAudioRouteKey) return@mapNotNull null
+                    runCatching { com.nuvio.tv.core.player.AudioPassthroughPolicy.Group.valueOf(groupName) }.getOrNull()
+                }
+                .toSet()
             val audioPassthroughPolicy = com.nuvio.tv.core.player.AudioPassthroughPolicy(
                 allowAc3 = playerSettings.allowAc3Passthrough,
                 allowEac3 = playerSettings.allowEac3Passthrough,
@@ -996,7 +1009,8 @@ internal fun PlayerRuntimeController.initializePlayer(
                 allowDts = playerSettings.allowDtsPassthrough,
                 allowDtsHd = playerSettings.allowDtsHdPassthrough,
                 softwareDecodersAvailable =
-                    effectiveDecoderPriority != DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF
+                    effectiveDecoderPriority != DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF,
+                learnedDeniedGroups = learnedDeniedGroups
             )
             val renderersFactory = SubtitleOffsetRenderersFactory(
                 audioPassthroughPolicy = audioPassthroughPolicy,
@@ -3125,6 +3139,17 @@ internal fun PlayerRuntimeController.recordAudioTrackRejectionIfBitstream(error:
     val routeKey = runCatching { AudioOutputRouteDetector.detect(context)?.key }.getOrNull()
     AudioTrackRejectionLog.record(label, routeKey, System.currentTimeMillis())
     Log.w(PlayerRuntimeController.TAG, "AUDIO_TRACK_REJECTION encoding=$label route=$routeKey")
+    // F3: persist for cross-session learning, keyed by policy group and route, at most once
+    // per session per group (the two-session confirm guard lives in the datastore).
+    if (routeKey != null) {
+        val group = com.nuvio.tv.core.player.AudioPassthroughPolicy.groupOf(mime)
+        if (group != null) {
+            val entry = "$routeKey::${group.name}"
+            if (AudioTrackRejectionLog.markGroupFirstThisSession(entry)) {
+                scope.launch { playerSettingsDataStore.recordAudioRejection(entry) }
+            }
+        }
+    }
 }
 
 private fun PlaybackException.isAudioTrackFailure(): Boolean {

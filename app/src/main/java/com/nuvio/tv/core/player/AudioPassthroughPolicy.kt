@@ -44,7 +44,16 @@ data class AudioPassthroughPolicy(
     val allowTrueHd: Boolean = true,
     val allowDts: Boolean = true,
     val allowDtsHd: Boolean = true,
-    val softwareDecodersAvailable: Boolean = true
+    val softwareDecodersAvailable: Boolean = true,
+    /**
+     * Groups the app has learned to deny from repeated AudioTrack-open rejections on this
+     * chain (F3), independent of the user switches above. A platform that advertises a
+     * codec via isDirectPlaybackSupported but refuses it at open() is corrected here so the
+     * format decodes from the first play rather than failing then recovering each time.
+     * Only groups confirmed across two separate sessions land here, so a one-off 5001
+     * never denies a working codec.
+     */
+    val learnedDeniedGroups: Set<Group> = emptySet()
 ) {
 
     /** The format families this policy can act on. */
@@ -56,19 +65,20 @@ data class AudioPassthroughPolicy(
      */
     fun deniesPassthrough(mimeType: String?): Boolean {
         if (!softwareDecodersAvailable) return false
-        return when (groupOf(mimeType)) {
+        val group = groupOf(mimeType) ?: return false
+        if (group in learnedDeniedGroups) return true
+        return when (group) {
             Group.AC3 -> !allowAc3
             Group.EAC3 -> !allowEac3
             Group.TRUEHD -> !allowTrueHd
             Group.DTS -> !allowDts
             Group.DTS_HD -> !allowDtsHd
-            null -> false
         }
     }
 
     /** True when this policy is inert - every format delegates to the platform report. */
     fun allowsEverything(): Boolean =
-        allowAc3 && allowEac3 && allowTrueHd && allowDts && allowDtsHd
+        allowAc3 && allowEac3 && allowTrueHd && allowDts && allowDtsHd && learnedDeniedGroups.isEmpty()
 
     companion object {
         /** The default: deny nothing, behave exactly as the platform report dictates. */

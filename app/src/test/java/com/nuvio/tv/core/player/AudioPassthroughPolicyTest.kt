@@ -177,4 +177,32 @@ class AudioPassthroughPolicyTest {
         assertNull(AudioPassthroughPolicy.groupOf(MimeTypes.AUDIO_RAW))
         assertNull(AudioPassthroughPolicy.groupOf(null))
     }
+
+    // ── F3: learned rejections deny independently of the user switches ──
+
+    @Test
+    fun learnedRejection_deniesGroup_evenWhenUserSwitchIsOn() {
+        val policy = AudioPassthroughPolicy(learnedDeniedGroups = setOf(Group.DTS_HD))
+        assertTrue(policy.deniesPassthrough(MimeTypes.AUDIO_DTS_HD))
+        assertFalse(policy.deniesPassthrough(MimeTypes.AUDIO_AC3))
+        assertFalse(policy.allowsEverything())
+    }
+
+    @Test
+    fun learnedRejection_respectsNoSoftwareDecoders() {
+        val policy = AudioPassthroughPolicy(
+            learnedDeniedGroups = setOf(Group.DTS_HD),
+            softwareDecodersAvailable = false
+        )
+        assertFalse(policy.deniesPassthrough(MimeTypes.AUDIO_DTS_HD))
+    }
+
+    @Test
+    fun learnedRejection_andUserSwitch_denyIndependently() {
+        val policy = AudioPassthroughPolicy(allowDts = false, learnedDeniedGroups = setOf(Group.EAC3))
+        assertTrue(policy.deniesPassthrough(MimeTypes.AUDIO_DTS))
+        assertTrue(policy.deniesPassthrough(MimeTypes.AUDIO_E_AC3))
+        assertTrue(policy.deniesPassthrough(MimeTypes.AUDIO_E_AC3_JOC))
+        assertFalse(policy.deniesPassthrough(MimeTypes.AUDIO_AC3))
+    }
 }

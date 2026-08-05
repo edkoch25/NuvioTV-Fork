@@ -243,6 +243,12 @@ data class PlayerSettings(
     val allowTrueHdPassthrough: Boolean = true,
     val allowDtsPassthrough: Boolean = true,
     val allowDtsHdPassthrough: Boolean = true,
+    // F3: learned AudioTrack-open rejections, keyed "routeKey::GROUP". `seen` holds groups
+    // rejected in one session; a group rejected again in a later session is promoted to
+    // `confirmed`, which is what actually denies passthrough - so a one-off 5001 never
+    // permanently denies a working codec.
+    val audioRejectionsSeen: Set<String> = emptySet(),
+    val audioRejectionsConfirmed: Set<String> = emptySet(),
     // §9.5: route TrueHD through the app-side MAT/IEC61937 packer instead of the
     // vendor HAL. Off by default; only takes effect on boxes that accept an
     // ENCODING_IEC61937 AudioTrack (falls back to normal passthrough otherwise).
@@ -495,6 +501,8 @@ class PlayerSettingsDataStore @Inject constructor(
     private val allowTrueHdPassthroughKey = booleanPreferencesKey("allow_truehd_passthrough")
     private val allowDtsPassthroughKey = booleanPreferencesKey("allow_dts_passthrough")
     private val allowDtsHdPassthroughKey = booleanPreferencesKey("allow_dts_hd_passthrough")
+    private val audioRejectionsSeenKey = stringSetPreferencesKey("audio_rejections_seen")
+    private val audioRejectionsConfirmedKey = stringSetPreferencesKey("audio_rejections_confirmed")
     private val matPassthroughEnabledKey = booleanPreferencesKey("mat_passthrough_enabled")
     private val skipSilenceKey = booleanPreferencesKey("skip_silence")
     private val audioAmplificationDbKey = intPreferencesKey("audio_amplification_db")
@@ -861,6 +869,8 @@ class PlayerSettingsDataStore @Inject constructor(
                 allowTrueHdPassthrough = prefs[allowTrueHdPassthroughKey] ?: true,
                 allowDtsPassthrough = prefs[allowDtsPassthroughKey] ?: true,
                 allowDtsHdPassthrough = prefs[allowDtsHdPassthroughKey] ?: true,
+                audioRejectionsSeen = prefs[audioRejectionsSeenKey] ?: emptySet(),
+                audioRejectionsConfirmed = prefs[audioRejectionsConfirmedKey] ?: emptySet(),
                 matPassthroughEnabled = prefs[matPassthroughEnabledKey] ?: false,
                 skipSilence = prefs[skipSilenceKey] ?: false,
                 audioAmplificationDb = (prefs[audioAmplificationDbKey] ?: 0).coerceIn(
@@ -1122,6 +1132,23 @@ class PlayerSettingsDataStore @Inject constructor(
     suspend fun setAllowDtsHdPassthrough(allowed: Boolean) {
         store().edit { prefs ->
             prefs[allowDtsHdPassthroughKey] = allowed
+        }
+    }
+
+    /**
+     * F3: records one learned AudioTrack-open rejection, entry = "routeKey::GROUP". First
+     * time seen it lands in `seen`; seen again in a later session it is promoted to
+     * `confirmed`, the set that actually denies passthrough. The caller gates on the
+     * in-memory session marker so each session contributes at most one occurrence.
+     */
+    suspend fun recordAudioRejection(entry: String) {
+        store().edit { prefs ->
+            val seen = prefs[audioRejectionsSeenKey] ?: emptySet()
+            if (entry in seen) {
+                prefs[audioRejectionsConfirmedKey] = (prefs[audioRejectionsConfirmedKey] ?: emptySet()) + entry
+            } else {
+                prefs[audioRejectionsSeenKey] = seen + entry
+            }
         }
     }
 

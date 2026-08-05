@@ -46,6 +46,7 @@ internal object AudioTrackRejectionLog {
 
     private val lock = Any()
     private val entries = mutableListOf<AudioTrackRejection>()
+    private val groupsPersistedThisSession = mutableSetOf<String>()
 
     fun deviceFingerprint(): String = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
 
@@ -78,8 +79,20 @@ internal object AudioTrackRejectionLog {
             .toSet()
     }
 
+    /**
+     * True the first time [routeGroupKey] ("routeKey::GROUP") is offered this session; used
+     * to persist each (route, group) rejection at most once per session, so the datastore's
+     * two-session confirmation guard counts distinct sessions rather than retries within one.
+     */
+    fun markGroupFirstThisSession(routeGroupKey: String): Boolean = synchronized(lock) {
+        groupsPersistedThisSession.add(routeGroupKey)
+    }
+
     /** Clears the log. Used by tests and by a future "re-detect chain" action. */
     fun reset() {
-        synchronized(lock) { entries.clear() }
+        synchronized(lock) {
+            entries.clear()
+            groupsPersistedThisSession.clear()
+        }
     }
 }
