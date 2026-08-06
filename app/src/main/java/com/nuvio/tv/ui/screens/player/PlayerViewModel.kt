@@ -662,10 +662,17 @@ class PlayerViewModel @Inject constructor(
             val channels = format.channelCount.takeIf { it > 0 }?.let { "${it}ch" }
             val rate = format.sampleRate.takeIf { it > 0 }?.let { "${it / 1000} kHz" }
             val passthrough = controller.playbackSpeedAwareAudioSink?.isDirectPlaybackActive()
-            val mode = when (passthrough) {
-                true -> "passthrough"
-                false -> "PCM out"
-                null -> null
+            // Same layer-honesty rule as the diagnostics card: when the sink is in
+            // direct mode carrying AC-3 for a non-AC-3 source, the bitstream is our
+            // own transcode - "passthrough" hides the conversion. AC-3 is the only
+            // transcode this app performs, so the special case is exhaustive.
+            val sinkMime = controller.playbackSpeedAwareAudioSink?.lastConfiguredInputFormat?.sampleMimeType
+            val mode = when {
+                passthrough == true && sinkMime == MimeTypes.AUDIO_AC3 &&
+                    format.sampleMimeType != MimeTypes.AUDIO_AC3 -> "AC-3 transcode"
+                passthrough == true -> "passthrough"
+                passthrough == false -> "PCM out"
+                else -> null
             }
             val losslessMime = format.sampleMimeType?.let {
                 it.contains("true-hd") || it.contains("truehd") || it.contains("dts")
@@ -835,7 +842,9 @@ class PlayerViewModel @Inject constructor(
      */
     private fun audioCodecLabel(mimeType: String?): String? = when (mimeType) {
         MimeTypes.AUDIO_TRUEHD -> "TrueHD"
-        MimeTypes.AUDIO_DTS_HD -> "DTS-HD MA"
+        // MIME-honest: vnd.dts.hd covers both MA and HRA; the container label may
+        // say MA but the MIME cannot confirm it. Matches the diagnostics card.
+        MimeTypes.AUDIO_DTS_HD -> "DTS-HD"
         MimeTypes.AUDIO_DTS_EXPRESS -> "DTS Express"
         MimeTypes.AUDIO_DTS_X -> "DTS:X"
         MimeTypes.AUDIO_DTS -> "DTS"
