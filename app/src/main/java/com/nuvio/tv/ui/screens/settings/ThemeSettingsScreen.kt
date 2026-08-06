@@ -205,6 +205,82 @@ fun ThemeSettingsContent(
 
             SettingsGroupCard(
                 modifier = Modifier.fillMaxWidth(),
+                title = stringResource(R.string.appearance_screensaver_group_title),
+                subtitle = stringResource(R.string.appearance_screensaver_group_subtitle)
+            ) {
+                var showScreensaverTimeoutDialog by remember { mutableStateOf(false) }
+                var showScreensaverDimDialog by remember { mutableStateOf(false) }
+                SettingsToggleRow(
+                    title = stringResource(R.string.appearance_screensaver_enabled),
+                    subtitle = stringResource(R.string.appearance_screensaver_enabled_subtitle),
+                    checked = uiState.screensaverEnabled,
+                    onToggle = {
+                        viewModel.onEvent(ThemeSettingsEvent.ToggleScreensaver(!uiState.screensaverEnabled))
+                    }
+                )
+                if (uiState.screensaverEnabled) {
+                    SettingsActionRow(
+                        title = stringResource(R.string.appearance_screensaver_timeout),
+                        subtitle = stringResource(R.string.appearance_screensaver_timeout_subtitle),
+                        value = stringResource(R.string.appearance_screensaver_timeout_option, uiState.screensaverTimeoutMinutes),
+                        onClick = { showScreensaverTimeoutDialog = true }
+                    )
+                    SettingsActionRow(
+                        title = stringResource(R.string.appearance_screensaver_dim),
+                        subtitle = stringResource(R.string.appearance_screensaver_dim_subtitle),
+                        value = stringResource(R.string.appearance_screensaver_dim_option, uiState.screensaverDimPercent),
+                        onClick = { showScreensaverDimDialog = true }
+                    )
+                }
+                if (showScreensaverTimeoutDialog) {
+                    SettingsSingleChoiceDialog(
+                        title = stringResource(R.string.appearance_screensaver_timeout),
+                        options = listOf(2, 5, 10).map { minutes ->
+                            SettingsPickerOption(
+                                minutes,
+                                stringResource(R.string.appearance_screensaver_timeout_option, minutes)
+                            )
+                        },
+                        selectedValue = uiState.screensaverTimeoutMinutes,
+                        onOptionSelected = { minutes ->
+                            viewModel.onEvent(ThemeSettingsEvent.SelectScreensaverTimeout(minutes))
+                            showScreensaverTimeoutDialog = false
+                        },
+                        onDismiss = { showScreensaverTimeoutDialog = false }
+                    )
+                }
+                if (showScreensaverDimDialog) {
+                    SettingsSingleChoiceDialog(
+                        title = stringResource(R.string.appearance_screensaver_dim),
+                        options = listOf(
+                            SettingsPickerOption(
+                                50,
+                                stringResource(R.string.appearance_screensaver_dim_option, 50),
+                                stringResource(R.string.appearance_screensaver_dim_gentle)
+                            ),
+                            SettingsPickerOption(
+                                70,
+                                stringResource(R.string.appearance_screensaver_dim_option, 70),
+                                stringResource(R.string.appearance_screensaver_dim_balanced)
+                            ),
+                            SettingsPickerOption(
+                                85,
+                                stringResource(R.string.appearance_screensaver_dim_option, 85),
+                                stringResource(R.string.appearance_screensaver_dim_strong)
+                            )
+                        ),
+                        selectedValue = uiState.screensaverDimPercent,
+                        onOptionSelected = { percent ->
+                            viewModel.onEvent(ThemeSettingsEvent.SelectScreensaverDim(percent))
+                            showScreensaverDimDialog = false
+                        },
+                        onDismiss = { showScreensaverDimDialog = false }
+                    )
+                }
+            }
+
+            SettingsGroupCard(
+                modifier = Modifier.fillMaxWidth(),
                 title = stringResource(R.string.appearance_settings_style),
                 subtitle = stringResource(R.string.appearance_settings_style_subtitle)
             ) {

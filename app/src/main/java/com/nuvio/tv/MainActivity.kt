@@ -99,7 +99,9 @@ import androidx.compose.ui.unit.sp
 import androidx.core.os.ConfigurationCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
@@ -148,6 +150,7 @@ import com.nuvio.tv.domain.model.SettingsUiStyle
 import com.nuvio.tv.domain.deeplink.AppDeepLink
 import com.nuvio.tv.domain.repository.AddonRepository
 import com.nuvio.tv.ui.components.NuvioScrollDefaults
+import com.nuvio.tv.ui.components.ScreensaverOverlay
 import com.nuvio.tv.ui.components.LocalCardDepthStyle
 import com.nuvio.tv.ui.components.ProfileAvatarCircle
 import com.nuvio.tv.ui.navigation.NuvioNavHost
@@ -174,6 +177,7 @@ import java.util.Locale
 import javax.inject.Inject
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -264,6 +268,9 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var deepLinkHandler: DeepLinkHandler
 
+    @Inject
+    lateinit var screensaverController: com.nuvio.tv.core.player.ScreensaverController
+
     private val pendingDeepLinkUrl = MutableStateFlow<String?>(null)
 
     private lateinit var jankStats: JankStats
@@ -278,6 +285,9 @@ class MainActivity : ComponentActivity() {
 
     /** True until the first onResume after onCreate completes. */
     private var isFirstResumeAfterCreate = false
+
+    /** True after a screensaver wake until the waking press's ACTION_UP has been swallowed. */
+    private var swallowKeysUntilUp = false
 
     @OptIn(ExperimentalTvMaterial3Api::class, ExperimentalFoundationApi::class)
     override fun attachBaseContext(newBase: Context) {
@@ -308,6 +318,29 @@ class MainActivity : ComponentActivity() {
         externalPlaybackTracker.activityLauncher = externalPlayerLauncher
 
         PluginRuntimeHooks.onActivityCreate(this)
+
+        // OLED screensaver: 1 Hz idle ticker while STARTED. collectLatest restarts the
+        // loop (and the idle clock) whenever the enable/timeout settings change, and the
+        // clock also restarts every time the activity returns to STARTED.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                combine(
+                    themeDataStore.screensaverEnabled,
+                    themeDataStore.screensaverTimeoutMinutes
+                ) { enabled, minutes -> enabled to minutes }
+                    .collectLatest { (enabled, minutes) ->
+                        if (!enabled) {
+                            screensaverController.notifyWake()
+                            return@collectLatest
+                        }
+                        screensaverController.notifyInteraction()
+                        while (true) {
+                            delay(1_000)
+                            screensaverController.maybeEngage(minutes * 60_000L)
+                        }
+                    }
+            }
+        }
 
         window?.decorView?.post {
             val snapshot = com.nuvio.tv.core.player.DisplayCapabilities.detect(this)
@@ -498,6 +531,15 @@ class MainActivity : ComponentActivity() {
                         containerColor = NuvioTheme.colors.Background
                     )
                 ) {
+                    val screensaverVisible by screensaverController.overlayVisible.collectAsState()
+                    val screensaverDimPercent by themeDataStore.screensaverDimPercent.collectAsState(
+                        initial = ThemeDataStore.DEFAULT_SCREENSAVER_DIM_PERCENT
+                    )
+                    ScreensaverOverlay(
+                        visible = screensaverVisible,
+                        dimPercent = screensaverDimPercent
+                    )
+
                     if (hasSeenAuthQrOnFirstLaunch == null) {
                         Box(
                             modifier = Modifier
@@ -939,6 +981,24 @@ class MainActivity : ComponentActivity() {
     // can always be dismissed. Compose back-dispatch ordering kept putting the destination screen's
     // handler above the loader's, so Back never reached it.
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // OLED screensaver: while the dim overlay is visible, the first key press wakes
+        // it and the whole press (down, repeats, and the matching up) is swallowed so
+        // waking never also navigates. Stray key-ups after wake are swallowed too, so
+        // ACTION_UP handlers below never see an up without its down.
+        if (screensaverController.overlayVisible.value) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                screensaverController.notifyWake()
+                swallowKeysUntilUp = true
+            }
+            return true
+        }
+        if (swallowKeysUntilUp) {
+            if (event.action == KeyEvent.ACTION_UP) {
+                swallowKeysUntilUp = false
+            }
+            return true
+        }
+        screensaverController.notifyInteraction()
         if (event.keyCode == KeyEvent.KEYCODE_BACK &&
             externalPlaybackTracker.autoNextOverlay.value != null
         ) {
@@ -949,6 +1009,14 @@ class MainActivity : ComponentActivity() {
             return true
         }
         return super.dispatchKeyEvent(event)
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // Compose Dialogs are separate platform windows: their keys never reach this
+        // Activity, so idle detection is blind while one is focused. Pause screensaver
+        // eligibility while this window lacks focus; refocus restarts the idle clock.
+        screensaverController.setWindowFocused(hasFocus)
     }
 
     override fun onStart() {

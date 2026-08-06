@@ -24,7 +24,10 @@ data class ThemeSettingsUiState(
     val amoledMode: Boolean = false,
     val amoledSurfacesMode: Boolean = false,
     val settingsUiStyle: SettingsUiStyle = SettingsUiStyle.CLASSIC,
-    val availableSettingsUiStyles: List<SettingsUiStyle> = SettingsUiStyle.entries.toList()
+    val availableSettingsUiStyles: List<SettingsUiStyle> = SettingsUiStyle.entries.toList(),
+    val screensaverEnabled: Boolean = true,
+    val screensaverTimeoutMinutes: Int = ThemeDataStore.DEFAULT_SCREENSAVER_TIMEOUT_MINUTES,
+    val screensaverDimPercent: Int = ThemeDataStore.DEFAULT_SCREENSAVER_DIM_PERCENT
 )
 
 sealed class ThemeSettingsEvent {
@@ -33,6 +36,9 @@ sealed class ThemeSettingsEvent {
     data class ToggleAmoledMode(val enabled: Boolean) : ThemeSettingsEvent()
     data class ToggleAmoledSurfacesMode(val enabled: Boolean) : ThemeSettingsEvent()
     data class SelectSettingsUiStyle(val style: SettingsUiStyle) : ThemeSettingsEvent()
+    data class ToggleScreensaver(val enabled: Boolean) : ThemeSettingsEvent()
+    data class SelectScreensaverTimeout(val minutes: Int) : ThemeSettingsEvent()
+    data class SelectScreensaverDim(val percent: Int) : ThemeSettingsEvent()
 }
 
 @HiltViewModel
@@ -97,6 +103,33 @@ class ThemeSettingsViewModel @Inject constructor(
                     }
                 }
         }
+        viewModelScope.launch {
+            themeDataStore.screensaverEnabled
+                .distinctUntilChanged()
+                .collectLatest { enabled ->
+                    _uiState.update { state ->
+                        if (state.screensaverEnabled == enabled) state else state.copy(screensaverEnabled = enabled)
+                    }
+                }
+        }
+        viewModelScope.launch {
+            themeDataStore.screensaverTimeoutMinutes
+                .distinctUntilChanged()
+                .collectLatest { minutes ->
+                    _uiState.update { state ->
+                        if (state.screensaverTimeoutMinutes == minutes) state else state.copy(screensaverTimeoutMinutes = minutes)
+                    }
+                }
+        }
+        viewModelScope.launch {
+            themeDataStore.screensaverDimPercent
+                .distinctUntilChanged()
+                .collectLatest { percent ->
+                    _uiState.update { state ->
+                        if (state.screensaverDimPercent == percent) state else state.copy(screensaverDimPercent = percent)
+                    }
+                }
+        }
     }
 
     private fun currentTheme(): AppTheme {
@@ -110,6 +143,9 @@ class ThemeSettingsViewModel @Inject constructor(
             is ThemeSettingsEvent.ToggleAmoledMode -> setAmoledMode(event.enabled)
             is ThemeSettingsEvent.ToggleAmoledSurfacesMode -> setAmoledSurfacesMode(event.enabled)
             is ThemeSettingsEvent.SelectSettingsUiStyle -> selectSettingsUiStyle(event.style)
+            is ThemeSettingsEvent.ToggleScreensaver -> setScreensaverEnabled(event.enabled)
+            is ThemeSettingsEvent.SelectScreensaverTimeout -> setScreensaverTimeout(event.minutes)
+            is ThemeSettingsEvent.SelectScreensaverDim -> setScreensaverDim(event.percent)
         }
     }
 
@@ -146,6 +182,27 @@ class ThemeSettingsViewModel @Inject constructor(
         restoreStyleFocus = true
         viewModelScope.launch {
             themeDataStore.setSettingsUiStyle(style)
+        }
+    }
+
+    private fun setScreensaverEnabled(enabled: Boolean) {
+        if (_uiState.value.screensaverEnabled == enabled) return
+        viewModelScope.launch {
+            themeDataStore.setScreensaverEnabled(enabled)
+        }
+    }
+
+    private fun setScreensaverTimeout(minutes: Int) {
+        if (_uiState.value.screensaverTimeoutMinutes == minutes) return
+        viewModelScope.launch {
+            themeDataStore.setScreensaverTimeoutMinutes(minutes)
+        }
+    }
+
+    private fun setScreensaverDim(percent: Int) {
+        if (_uiState.value.screensaverDimPercent == percent) return
+        viewModelScope.launch {
+            themeDataStore.setScreensaverDimPercent(percent)
         }
     }
 }

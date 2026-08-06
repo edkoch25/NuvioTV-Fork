@@ -43,13 +43,16 @@ class TrailerPlayerPool @Inject constructor(
     private var _player: ExoPlayer? = null
     private val yielded = AtomicBoolean(false)
     private val released = AtomicBoolean(false)
+    private val screensaverSuppressed = AtomicBoolean(false)
 
     /**
      * Returns the shared trailer ExoPlayer, creating it lazily if needed.
-     * Returns null only if [release] was called (process shutdown).
+     * Returns null if [release] was called (process shutdown) or while the OLED
+     * screensaver has suppressed trailer playback via [setScreensaverSuppressed].
      */
     fun acquire(): ExoPlayer? {
         if (released.get()) return null
+        if (screensaverSuppressed.get()) return null
         if (yielded.get()) {
             // Reclaim was not called yet but someone wants the player — rebuild.
             reclaim()
@@ -69,6 +72,15 @@ class TrailerPlayerPool @Inject constructor(
                 player.clearMediaItems()
             }
         }
+    }
+
+    /**
+     * While suppressed, [acquire] returns null so every trailer start silently no-ops.
+     * Set by the OLED screensaver on engage (together with [stop]) and cleared on wake.
+     * Trailers resume on their next natural trigger (focus change or hero rotation).
+     */
+    fun setScreensaverSuppressed(suppressed: Boolean) {
+        screensaverSuppressed.set(suppressed)
     }
 
     /**

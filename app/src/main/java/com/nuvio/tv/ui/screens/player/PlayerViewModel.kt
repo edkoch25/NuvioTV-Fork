@@ -40,6 +40,8 @@ import com.nuvio.tv.data.local.TmdbSettingsDataStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
@@ -80,6 +82,7 @@ class PlayerViewModel @Inject constructor(
     private val externalPlaybackTracker: com.nuvio.tv.core.player.ExternalPlaybackTracker,
     private val subtitleFileCache: com.nuvio.tv.core.player.SubtitleFileCache,
     private val prefetchSelectionSupplier: com.nuvio.tv.core.stream.PrefetchSelectionSupplier,
+    private val screensaverController: com.nuvio.tv.core.player.ScreensaverController,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -127,6 +130,18 @@ class PlayerViewModel @Inject constructor(
 
     val uiState: StateFlow<PlayerUiState>
         get() = controller.uiState
+
+    init {
+        // OLED screensaver: mirror playback-active (playing or buffering) so the idle
+        // dimmer never engages during playback, restarts its clock on pause, and
+        // auto-wakes on resume (including MediaSession resumes).
+        viewModelScope.launch {
+            controller.uiState
+                .map { it.isPlaying || it.isBuffering }
+                .distinctUntilChanged()
+                .collect { active -> screensaverController.setPlaybackActive(active) }
+        }
+    }
 
     val playbackTimeline: StateFlow<PlaybackTimelineState>
         get() = controller.playbackTimeline
@@ -896,6 +911,7 @@ class PlayerViewModel @Inject constructor(
     }
 
     override fun onCleared() {
+        screensaverController.setPlaybackActive(false)
         controller.onCleared()
         // Allow the trailer player to be re-created when returning to home screen.
         trailerPlayerPool.reclaim()
