@@ -17,9 +17,12 @@ import javax.inject.Singleton
 
 private const val TRAKT_ACCESS_TOKEN_MAX_LIFETIME_SECONDS = 86_400
 
+// TRAKT_ACCESS_TOKEN_MAX_LIFETIME_SECONDS is only a fallback for an absent or
+// non-positive expires_in. The server-provided lifetime is otherwise trusted
+// as-is: clamping below the real expiry forces premature refresh attempts.
 internal fun normalizeTraktTokenLifetimeSeconds(expiresIn: Int): Int {
     if (expiresIn <= 0) return TRAKT_ACCESS_TOKEN_MAX_LIFETIME_SECONDS
-    return expiresIn.coerceAtMost(TRAKT_ACCESS_TOKEN_MAX_LIFETIME_SECONDS)
+    return expiresIn
 }
 
 data class TraktAuthState(
