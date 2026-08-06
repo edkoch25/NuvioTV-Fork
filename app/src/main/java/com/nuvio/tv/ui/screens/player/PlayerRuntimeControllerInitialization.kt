@@ -359,6 +359,11 @@ internal fun PlayerRuntimeController.initializePlayer(
                 hasTriedAudioPcmFallback = false
             }
             hasTriedDv7HevcFallback = false
+            // F9: fresh stream, fresh Audio Path row. Without this the field was
+            // write-once per controller, so a stream whose track-init event never
+            // fires inherited the previous stream's row - a wrong answer, worse
+            // than the dash.
+            currentAudioPathDescription = null
             forceDv7ToHevc = false
             mpvDelayStartAfterAfrSwitch = false
             // nt6 AFR option 1: fresh stream, fresh track-AFR state.
@@ -2080,6 +2085,38 @@ internal fun PlayerRuntimeController.initializePlayer(
 
                     override fun onIsPlayingChanged(eventTime: AnalyticsListener.EventTime, isPlaying: Boolean) {
                         playbackAnalyticsDiagnostics.onIsPlayingChanged(eventTime, isPlaying)
+                        // F9 fallback: the extension-renderer (FFmpeg) path never
+                        // delivers onAudioTrackInitialized (boundary unnamed - see
+                        // 2026-08-05 handover), so once audio is actually playing and
+                        // the row is still empty, derive it from what the app owns:
+                        // renderer input format (source) vs the format the sink was
+                        // configured with. PCM at the sink = decode; same compressed
+                        // MIME = passthrough; different compressed MIME = transcode.
+                        // The null guard keeps the richer F9 event authoritative
+                        // whenever it does fire, and the per-stream reset keeps this
+                        // one-shot per stream.
+                        if (isPlaying && currentAudioPathDescription == null) {
+                            runCatching {
+                                val source = this@apply.audioFormat
+                                val sinkFormat = playbackSpeedAwareAudioSink?.lastConfiguredInputFormat
+                                if (source?.sampleMimeType != null && sinkFormat?.sampleMimeType != null) {
+                                    val src = describeAudioMime(source.sampleMimeType)
+                                    val detail = buildString {
+                                        when {
+                                            sinkFormat.sampleMimeType == MimeTypes.AUDIO_RAW -> append("PCM")
+                                            sinkFormat.sampleMimeType == source.sampleMimeType ->
+                                                append("Passthrough (").append(src).append(')')
+                                            else -> append(describeAudioMime(sinkFormat.sampleMimeType)).append(" transcode")
+                                        }
+                                        append(" (")
+                                        if (sinkFormat.sampleRate > 0) append(sinkFormat.sampleRate / 1000).append(" kHz")
+                                        if (sinkFormat.channelCount > 0) append(", ").append(sinkFormat.channelCount).append("ch")
+                                        append(')')
+                                    }
+                                    currentAudioPathDescription = "$src \u2192 $detail"
+                                }
+                            }
+                        }
                     }
 
                     override fun onIsLoadingChanged(eventTime: AnalyticsListener.EventTime, isLoading: Boolean) {

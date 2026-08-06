@@ -135,6 +135,16 @@ internal class PlaybackSpeedAwareAudioSink(
     private var isCurrentlyPassthrough: Boolean = false
 
     /**
+     * F9 fallback: the format this sink was last configured with - post-decode
+     * (PCM) or post-transcode (AC-3) on the FFmpeg path, the original bitstream
+     * on passthrough. Lets the controller derive the Audio Path diagnostics row
+     * without depending on the renderer-side track-init event, which never
+     * arrives on the extension-renderer path.
+     */
+    internal val lastConfiguredInputFormat: Format?
+        get() = currentInputFormat
+
+    /**
      * Set to true when pause() is called during passthrough playback.
      * On the next play() call, we force a media time resync to compensate for
      * audio the HDMI receiver played from its internal buffer during the pause.
