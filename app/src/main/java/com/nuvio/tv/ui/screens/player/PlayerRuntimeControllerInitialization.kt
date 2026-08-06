@@ -2038,8 +2038,21 @@ internal fun PlayerRuntimeController.initializePlayer(
                         // Audio review F9: the single cheapest observability win.
                         // Whether audio is passed through, decoded to PCM, or
                         // transcoded was previously invisible everywhere in-app.
-                        val sourceCodec = describeAudioMime(this@apply.audioFormat?.sampleMimeType)
-                        val sinkPath = describeAudioEncoding(audioTrackConfig.encoding)
+                        val sourceMime = this@apply.audioFormat?.sampleMimeType
+                        val sourceCodec = describeAudioMime(sourceMime)
+                        // F9 label polish: the only transcode this app performs is
+                        // x -> AC-3 (F5 denied-codec handling / Force AC-3). When the
+                        // sink opened AC-3 for a non-AC-3 source, "Passthrough (AC-3)"
+                        // is true at the sink layer but hides the conversion - name it.
+                        val sinkPath = if (
+                            audioTrackConfig.encoding == C.ENCODING_AC3 &&
+                            sourceMime != null &&
+                            sourceMime != MimeTypes.AUDIO_AC3
+                        ) {
+                            "AC-3 transcode"
+                        } else {
+                            describeAudioEncoding(audioTrackConfig.encoding)
+                        }
                         val detail = buildString {
                             append(sinkPath)
                             append(" (")
@@ -2103,7 +2116,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                                     val src = describeAudioMime(source.sampleMimeType)
                                     val detail = buildString {
                                         when {
-                                            sinkFormat.sampleMimeType == MimeTypes.AUDIO_RAW -> append("PCM")
+                                            sinkFormat.sampleMimeType == MimeTypes.AUDIO_RAW -> append("PCM decode")
                                             sinkFormat.sampleMimeType == source.sampleMimeType ->
                                                 append("Passthrough (").append(src).append(')')
                                             else -> append(describeAudioMime(sinkFormat.sampleMimeType)).append(" transcode")
