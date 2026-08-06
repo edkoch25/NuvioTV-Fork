@@ -6,25 +6,25 @@ import org.junit.Test
 class PlayerScrubRatesTest {
 
     @Test
-    fun stepMsForKeyRepeat_rampsWithHold() {
-        assertEquals(PlayerScrubRates.STEP_SHORT_MS, PlayerScrubRates.stepMsForKeyRepeat(0))
-        assertEquals(PlayerScrubRates.STEP_SHORT_MS, PlayerScrubRates.stepMsForKeyRepeat(2))
-        assertEquals(PlayerScrubRates.STEP_MEDIUM_MS, PlayerScrubRates.stepMsForKeyRepeat(3))
-        assertEquals(PlayerScrubRates.STEP_MEDIUM_MS, PlayerScrubRates.stepMsForKeyRepeat(7))
-        assertEquals(PlayerScrubRates.STEP_LONG_MS, PlayerScrubRates.stepMsForKeyRepeat(8))
-        assertEquals(PlayerScrubRates.STEP_LONG_MS, PlayerScrubRates.stepMsForKeyRepeat(14))
-        assertEquals(PlayerScrubRates.STEP_VERY_LONG_MS, PlayerScrubRates.stepMsForKeyRepeat(15))
-        assertEquals(PlayerScrubRates.STEP_VERY_LONG_MS, PlayerScrubRates.stepMsForKeyRepeat(100))
+    fun stepMsForHold_baseStepBeforeThreshold() {
+        assertEquals(PlayerScrubRates.STEP_SHORT_MS, PlayerScrubRates.stepMsForHold(0L))
+        assertEquals(PlayerScrubRates.STEP_SHORT_MS, PlayerScrubRates.stepMsForHold(2_999L))
     }
 
     @Test
-    fun deltaMsForKeyRepeat_appliesDirection() {
-        assertEquals(-PlayerScrubRates.STEP_SHORT_MS, PlayerScrubRates.deltaMsForKeyRepeat(0, forward = false))
-        assertEquals(PlayerScrubRates.STEP_LONG_MS, PlayerScrubRates.deltaMsForKeyRepeat(8, forward = true))
+    fun stepMsForHold_doublesAtThreshold() {
+        assertEquals(PlayerScrubRates.STEP_MEDIUM_MS, PlayerScrubRates.stepMsForHold(3_000L))
+        assertEquals(PlayerScrubRates.STEP_MEDIUM_MS, PlayerScrubRates.stepMsForHold(600_000L))
     }
 
     @Test
-    fun stepMsForKeyRepeat_clampsNegativeRepeatCount() {
-        assertEquals(PlayerScrubRates.STEP_SHORT_MS, PlayerScrubRates.stepMsForKeyRepeat(-1))
+    fun deltaMsForHold_appliesDirection() {
+        assertEquals(-PlayerScrubRates.STEP_SHORT_MS, PlayerScrubRates.deltaMsForHold(0L, forward = false))
+        assertEquals(PlayerScrubRates.STEP_MEDIUM_MS, PlayerScrubRates.deltaMsForHold(5_000L, forward = true))
+    }
+
+    @Test
+    fun stepMsForHold_negativeHoldUsesBaseStep() {
+        assertEquals(PlayerScrubRates.STEP_SHORT_MS, PlayerScrubRates.stepMsForHold(-1L))
     }
 }

@@ -637,8 +637,8 @@ fun PlayerScreen(
                             if (!uiState.showControls && !overlayButtonsCoexist) {
                                 val isLeft =
                                     keyEvent.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_LEFT
-                                val deltaMs = PlayerScrubRates.deltaMsForKeyRepeat(
-                                    repeatCount = keyEvent.nativeKeyEvent.repeatCount,
+                                val deltaMs = PlayerScrubRates.deltaMsForHold(
+                                    holdDurationMs = keyEvent.nativeKeyEvent.eventTime - keyEvent.nativeKeyEvent.downTime,
                                     forward = !isLeft
                                 )
                                 viewModel.onEvent(PlayerEvent.OnPreviewSeekBy(deltaMs))
@@ -704,8 +704,8 @@ fun PlayerScreen(
                         KeyEvent.KEYCODE_MEDIA_REWIND -> {
                             val isRewind =
                                 keyEvent.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_MEDIA_REWIND
-                            val deltaMs = PlayerScrubRates.deltaMsForKeyRepeat(
-                                repeatCount = keyEvent.nativeKeyEvent.repeatCount,
+                            val deltaMs = PlayerScrubRates.deltaMsForHold(
+                                holdDurationMs = keyEvent.nativeKeyEvent.eventTime - keyEvent.nativeKeyEvent.downTime,
                                 forward = !isRewind
                             )
                             viewModel.onEvent(PlayerEvent.OnPreviewSeekBy(deltaMs))
@@ -2360,8 +2360,8 @@ private fun ProgressBar(
                         // DPAD path accelerated - now both use the shared ramp.
                         KeyEvent.KEYCODE_DPAD_LEFT -> {
                             onSeekPreview(
-                                PlayerScrubRates.deltaMsForKeyRepeat(
-                                    repeatCount = keyEvent.nativeKeyEvent.repeatCount,
+                                PlayerScrubRates.deltaMsForHold(
+                                    holdDurationMs = keyEvent.nativeKeyEvent.eventTime - keyEvent.nativeKeyEvent.downTime,
                                     forward = false
                                 )
                             )
@@ -2369,8 +2369,8 @@ private fun ProgressBar(
                         }
                         KeyEvent.KEYCODE_DPAD_RIGHT -> {
                             onSeekPreview(
-                                PlayerScrubRates.deltaMsForKeyRepeat(
-                                    repeatCount = keyEvent.nativeKeyEvent.repeatCount,
+                                PlayerScrubRates.deltaMsForHold(
+                                    holdDurationMs = keyEvent.nativeKeyEvent.eventTime - keyEvent.nativeKeyEvent.downTime,
                                     forward = true
                                 )
                             )
