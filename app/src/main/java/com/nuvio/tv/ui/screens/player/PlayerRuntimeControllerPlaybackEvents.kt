@@ -41,6 +41,9 @@ internal const val WATCH_PROGRESS_SAVE_INTERVAL_MS = 90_000L
 // Chosen > the D >=3s spacing so a normal 2-attempt cluster cannot self-reset
 // mid-cluster; < the gap that separated the run-2 clusters (~10.7s).
 internal const val TRUEHD_STORM_ATTEMPT_RESET_MS = 6_000L
+// nt11 (0.8.2): shadow lock-snap classifier -- minimum one-tick forward stride
+// treated as a snap suspect (10x a normal ~500 ms tick's advance).
+internal const val SNAP_SHADOW_MIN_STRIDE_MS = 5_000L
 
 internal fun PlayerRuntimeController.applyAudioDelay(
     delayMs: Int,
@@ -349,6 +352,38 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                     }
                 }
                 val displayPosition = pendingPreviewSeekPosition ?: pos
+                // nt11 (0.8.2): SHADOW lock-snap classifier -- log-only, acts on
+                // nothing. A class-3 MS12 lock-snap steps the player timeline
+                // forward in one stride with NO discontinuity event (media3 is
+                // following the poisoned master clock); every legitimate jump
+                // (seek, scrub, auto-transition) announces itself via
+                // onPositionDiscontinuity first. Wiring to the existing recovery
+                // machinery is a later build, gated on this shadow's capture.
+                run {
+                    val snapNowWall = android.os.SystemClock.elapsedRealtime()
+                    val snapLastPos = snapShadowLastTickPosMs
+                    val snapLastWall = snapShadowLastTickWallMs
+                    if (snapLastPos >= 0L && snapLastWall != 0L) {
+                        val strideMs = pos - snapLastPos
+                        val wallMs = snapNowWall - snapLastWall
+                        val discExplained = snapShadowLastDiscontinuityWallMs >= snapLastWall
+                        if (strideMs >= SNAP_SHADOW_MIN_STRIDE_MS &&
+                            wallMs in 50L..5_000L &&
+                            !discExplained &&
+                            _uiState.value.playbackSpeed == 1.0f
+                        ) {
+                            Log.w(
+                                PlayerRuntimeController.TAG,
+                                "SNAP_TRACE SUSPECT pos=${pos}ms last=${snapLastPos}ms " +
+                                    "strideMs=$strideMs wallMs=$wallMs " +
+                                    "sinceDiscMs=${snapNowWall - snapShadowLastDiscontinuityWallMs} " +
+                                    "buffering=${_uiState.value.isBuffering}"
+                            )
+                        }
+                    }
+                    snapShadowLastTickPosMs = pos
+                    snapShadowLastTickWallMs = snapNowWall
+                }
                 updatePlaybackTimeline(
                     currentPosition = displayPosition,
                     duration = playerDuration.coerceAtLeast(0L),

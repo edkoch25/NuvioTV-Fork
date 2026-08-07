@@ -518,6 +518,9 @@ internal fun PlayerRuntimeController.initializePlayer(
             truehdStormRecoveryAttempts = 0
             truehdStormLastRecoveryAtMs = 0L
             truehdStormOnsetPosMs = -1L
+            snapShadowLastTickPosMs = -1L
+            snapShadowLastTickWallMs = 0L
+            snapShadowLastDiscontinuityWallMs = 0L
             rebufferTotalMs = 0L
             rebufferStartedAtMs = 0L
 
@@ -2326,6 +2329,9 @@ internal fun PlayerRuntimeController.initializePlayer(
                                 "oldMs=${oldPosition.positionMs} newMs=${newPosition.positionMs} " +
                                 "eventRealtimeMs=${eventTime.realtimeMs}"
                         )
+                        // nt11 (0.8.2): stamp for the shadow snap classifier --
+                        // a stride NOT preceded by this stamp is a snap suspect.
+                        snapShadowLastDiscontinuityWallMs = SystemClock.elapsedRealtime()
                     }
                 }
                 currentExoAnalyticsListener = exoAnalyticsListenerForStream

@@ -390,6 +390,10 @@ class PlayerRuntimeController(
     // an un-consumed storm, so recovery rolls back to onset, not the raced pos.
     // -1L = no storm currently latched.
     internal var truehdStormOnsetPosMs: Long = -1L
+    // nt11 (0.8.2): SHADOW lock-snap classifier state (log-only; no behaviour).
+    internal var snapShadowLastTickPosMs: Long = -1L
+    internal var snapShadowLastTickWallMs: Long = 0L
+    internal var snapShadowLastDiscontinuityWallMs: Long = 0L
     internal var rebufferTotalMs: Long = 0L
     internal var rebufferStartedAtMs: Long = 0L
     /** Back buffer (ms) currently in force, after the first-frame DV7/low-RAM resolution. */
