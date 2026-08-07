@@ -36,7 +36,17 @@ private const val JITTER_MIN_SAMPLES = 25
 // 192 KiB is 3.5+ s of a near-silent (~0.3 Mbps) TrueHD head — comfortably past the
 // Amlogic MS12 startup draw that emptied a ~55 KB prefill on device — while a typical
 // (>= 1 Mbps) track has written this much before play() is ever called and never defers.
-private const val TRUEHD_START_MIN_BYTES = 196_608L
+// EXPERIMENT (nt16, 0.8.2): TrueHD start floor deepened 192 KiB -> 768 KiB.
+// Hypothesis [unverified]: dense-pipeline starts are the strongest clean-start
+// correlate on record (warm replays with multi-MB heads storm least); giving
+// MS12 ~4 s of contiguous bitstream (~1.45 Mbps measured average) before the
+// track starts may span its lock window (every measured storm onset lies at
+// ~1.3-1.5 s). Measured costs: ~250-300 ms added start latency at the observed
+// ~2.3 MB/s burst fill; recovery restarts inherit the same deeper floor, so
+// each cure blip lengthens ~250 ms. The 1,500 ms wall cap is unchanged and
+// releases with floorMet=false if a source cannot fill in time. Judged over a
+// week of normal viewing; revert = restore 196_608L.
+private const val TRUEHD_START_MIN_BYTES = 786_432L
 private const val TRUEHD_START_DEFER_CAP_MS = 1_500L
 
 // nt8: TrueHD startup-storm detector (see truehdStormLeadAccumMs). Storm lead was
