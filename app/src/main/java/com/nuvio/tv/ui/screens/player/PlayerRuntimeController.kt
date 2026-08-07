@@ -394,6 +394,12 @@ class PlayerRuntimeController(
     internal var snapShadowLastTickPosMs: Long = -1L
     internal var snapShadowLastTickWallMs: Long = 0L
     internal var snapShadowLastDiscontinuityWallMs: Long = 0L
+
+    // nt12 (0.8.2): pending snap-recovery latch -- the pre-snap tick position
+    // (-1L when none) and the wall time it was latched, consumed through the
+    // shared storm recovery budget with a freshness TTL.
+    internal var snapRecoveryPendingPosMs: Long = -1L
+    internal var snapRecoveryPendingAtWallMs: Long = 0L
     internal var rebufferTotalMs: Long = 0L
     internal var rebufferStartedAtMs: Long = 0L
     /** Back buffer (ms) currently in force, after the first-frame DV7/low-RAM resolution. */

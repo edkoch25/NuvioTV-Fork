@@ -45,6 +45,11 @@ internal const val TRUEHD_STORM_ATTEMPT_RESET_MS = 6_000L
 // treated as a snap suspect (10x a normal ~500 ms tick's advance).
 internal const val SNAP_SHADOW_MIN_STRIDE_MS = 5_000L
 
+// nt12 (0.8.2): a pending snap-recovery latch older than this is dropped --
+// covers the 6 s budget reset plus spacing with margin, while guaranteeing a
+// long-blocked recovery can never fire as a surprise rollback much later.
+internal const val SNAP_RECOVERY_PENDING_TTL_MS = 15_000L
+
 internal fun PlayerRuntimeController.applyAudioDelay(
     delayMs: Int,
     persistForCurrentRoute: Boolean = true
@@ -379,10 +384,56 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                                     "sinceDiscMs=${snapNowWall - snapShadowLastDiscontinuityWallMs} " +
                                     "buffering=${_uiState.value.isBuffering}"
                             )
+                            // nt12: latch the pre-snap position for recovery, gated
+                            // to the TrueHD passthrough context and deferring to the
+                            // sink detector whenever it saw the event itself. First
+                            // flag wins; consumed below through the shared budget.
+                            if (snapRecoveryPendingPosMs < 0L &&
+                                truehdStormOnsetPosMs < 0L &&
+                                playbackSpeedAwareAudioSink?.isTruehdStormDetected() != true &&
+                                playbackSpeedAwareAudioSink?.isTruehdPassthroughActive() == true
+                            ) {
+                                snapRecoveryPendingPosMs = snapLastPos
+                                snapRecoveryPendingAtWallMs = snapNowWall
+                            }
                         }
                     }
                     snapShadowLastTickPosMs = pos
                     snapShadowLastTickWallMs = snapNowWall
+                }
+
+                // nt12 (0.8.2): drop a stale pending latch before consuming.
+                if (snapRecoveryPendingPosMs >= 0L &&
+                    android.os.SystemClock.elapsedRealtime() - snapRecoveryPendingAtWallMs > SNAP_RECOVERY_PENDING_TTL_MS
+                ) {
+                    Log.w(
+                        PlayerRuntimeController.TAG,
+                        "SNAP_RECOVERY_EXPIRED latchedPos=${snapRecoveryPendingPosMs}ms"
+                    )
+                    snapRecoveryPendingPosMs = -1L
+                }
+                // nt12 (0.8.2): consume a pending snap-recovery latch through the
+                // SHARED storm budget -- same cap (2), same nt15 6 s reset (already
+                // applied earlier this tick), same >=3 s spacing, same rollback
+                // shape. The recovery seek is the proven cure (in-place seek,
+                // AudioTrack recreated, MS12 locks instantly), and its
+                // discontinuity stamps the classifier token, so the rollback
+                // itself can never re-flag.
+                if (snapRecoveryPendingPosMs >= 0L &&
+                    _uiState.value.error.isNullOrBlank() &&
+                    truehdStormRecoveryAttempts < 2 &&
+                    android.os.SystemClock.elapsedRealtime() - truehdStormLastRecoveryAtMs >= 3_000L
+                ) {
+                    truehdStormRecoveryAttempts += 1
+                    truehdStormLastRecoveryAtMs = android.os.SystemClock.elapsedRealtime()
+                    val snapTarget = (snapRecoveryPendingPosMs - 500L).coerceAtLeast(0L)
+                    Log.w(
+                        PlayerRuntimeController.TAG,
+                        "SNAP_RECOVERY: attempt=$truehdStormRecoveryAttempts " +
+                            "latchedPos=${snapRecoveryPendingPosMs}ms pos=${pos}ms seekTo=${snapTarget}ms"
+                    )
+                    snapRecoveryPendingPosMs = -1L
+                    player.seekTo(snapTarget)
                 }
                 updatePlaybackTimeline(
                     currentPosition = displayPosition,

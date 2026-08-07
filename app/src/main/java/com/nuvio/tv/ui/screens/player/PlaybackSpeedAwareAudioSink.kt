@@ -1068,6 +1068,13 @@ internal class PlaybackSpeedAwareAudioSink(
     fun isTruehdStormDetected(): Boolean = truehdStormDetected
 
     /**
+     * nt12 (0.8.2): observing accessor for the controller's snap-recovery gate --
+     * true while the active sink format is TrueHD in passthrough mode.
+     */
+    fun isTruehdPassthroughActive(): Boolean =
+        isCurrentlyPassthrough && currentInputFormat?.sampleMimeType == MimeTypes.AUDIO_TRUEHD
+
+    /**
      * nt8: one-shot storm verdict for the controller's progress tick. Returns the
      * accumulated clock lead in ms once per detection, then clears.
      */

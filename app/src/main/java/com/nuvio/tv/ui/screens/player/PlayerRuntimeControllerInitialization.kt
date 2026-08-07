@@ -521,6 +521,8 @@ internal fun PlayerRuntimeController.initializePlayer(
             snapShadowLastTickPosMs = -1L
             snapShadowLastTickWallMs = 0L
             snapShadowLastDiscontinuityWallMs = 0L
+            snapRecoveryPendingPosMs = -1L
+            snapRecoveryPendingAtWallMs = 0L
             rebufferTotalMs = 0L
             rebufferStartedAtMs = 0L
 
