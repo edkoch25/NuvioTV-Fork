@@ -197,24 +197,7 @@ internal fun PlayerRuntimeController.maybeRunTrackFormatAfr(rawFps: Float, forma
                             PlayerRuntimeController.TAG,
                             "Track AFR: display mode switched; holding playback start ${TRACK_AFR_SETTLE_HOLD_MS}ms"
                         )
-                        // nt18 EXPERIMENT: MS12 silent-primer trial. The settle hold is
-                        // dead time with the audio track-type disabled, so a short-lived
-                        // direct TrueHD track cannot conflict with the real one. Self-
-                        // bounded (~1.0-1.3 s) inside the 2 s hold; the join timeout
-                        // below guarantees the real start is never stalled. Trial build:
-                        // unconditional under these gates; a user-facing toggle ships
-                        // only if the trial passes.
-                        val primerJob = if (audioQuiesced && !playerSettings.tunnelingEnabled) {
-                            kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-                                TruehdPrimer.prime(activity.applicationContext)
-                            }
-                        } else {
-                            null
-                        }
                         delay(TRACK_AFR_SETTLE_HOLD_MS)
-                        if (primerJob != null && withTimeoutOrNull(1_500L) { primerJob.join() } == null) {
-                            Log.w(PlayerRuntimeController.TAG, "PRIMER_TRACE join OVERRUN -- proceeding with start")
-                        }
                         val sinceSwitchMs = if (switchStartElapsedMs > 0L) {
                             android.os.SystemClock.elapsedRealtime() - switchStartElapsedMs
                         } else {
