@@ -523,6 +523,9 @@ internal fun PlayerRuntimeController.initializePlayer(
             snapShadowLastDiscontinuityWallMs = 0L
             snapRecoveryPendingPosMs = -1L
             snapRecoveryPendingAtWallMs = 0L
+            snapLastSuspectWallMs = 0L
+            snapEarlyResetLastAtMs = 0L
+            stormRecoveryTotalThisPlayback = 0
             rebufferTotalMs = 0L
             rebufferStartedAtMs = 0L
 

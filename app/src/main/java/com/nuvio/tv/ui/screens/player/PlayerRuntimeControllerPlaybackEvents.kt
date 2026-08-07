@@ -336,11 +336,36 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                 ) {
                     truehdStormRecoveryAttempts = 0
                 }
+                // nt14: corroborated early budget reset. SNAP_GATE proved the
+                // spent cap was the only constraint holding back a cure in the
+                // R2 warm-switch capture while both instruments already agreed
+                // the failure was live. When the sink holds a preserved
+                // detection AND the timeline classifier flagged a suspect
+                // within 5 s AND the budget is spent, open the budget now
+                // instead of waiting out the 6 s reset. Bounds: once per 15 s,
+                // stand-down after 8 total recoveries this playback; the >=3 s
+                // D-spacing still applies to the consume itself.
+                if (truehdStormRecoveryAttempts >= 2 &&
+                    playbackSpeedAwareAudioSink?.isTruehdStormDetected() == true &&
+                    android.os.SystemClock.elapsedRealtime() - snapLastSuspectWallMs <= 5_000L &&
+                    android.os.SystemClock.elapsedRealtime() - snapEarlyResetLastAtMs >= 15_000L &&
+                    stormRecoveryTotalThisPlayback < 8
+                ) {
+                    truehdStormRecoveryAttempts = 0
+                    snapEarlyResetLastAtMs = android.os.SystemClock.elapsedRealtime()
+                    Log.w(
+                        PlayerRuntimeController.TAG,
+                        "SNAP_EARLY_RESET corroborated: " +
+                            "sinceSuspectMs=${android.os.SystemClock.elapsedRealtime() - snapLastSuspectWallMs} " +
+                            "total=$stormRecoveryTotalThisPlayback"
+                    )
+                }
                 if (_uiState.value.error.isNullOrBlank() && truehdStormRecoveryAttempts < 2 &&
                     android.os.SystemClock.elapsedRealtime() - truehdStormLastRecoveryAtMs >= 3_000L
                 ) {
                     playbackSpeedAwareAudioSink?.consumeTruehdStormRecoverySignal()?.let { leadMs ->
                         truehdStormRecoveryAttempts += 1
+                        stormRecoveryTotalThisPlayback += 1
                         truehdStormLastRecoveryAtMs = android.os.SystemClock.elapsedRealtime()
                         // nt11: roll back to the latched storm onset, not the raced
                         // consume-time pos. leadMs retained in the log for continuity.
@@ -384,6 +409,9 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                                     "sinceDiscMs=${snapNowWall - snapShadowLastDiscontinuityWallMs} " +
                                     "buffering=${_uiState.value.isBuffering}"
                             )
+                            // nt14: stamp every suspect verdict (any disposition)
+                            // -- the early-reset corroboration window reads this.
+                            snapLastSuspectWallMs = snapNowWall
                             // nt12: latch the pre-snap position for recovery, gated
                             // to the TrueHD passthrough context and deferring to the
                             // sink detector whenever its signal is live. First flag
@@ -453,6 +481,7 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                     android.os.SystemClock.elapsedRealtime() - truehdStormLastRecoveryAtMs >= 3_000L
                 ) {
                     truehdStormRecoveryAttempts += 1
+                    stormRecoveryTotalThisPlayback += 1
                     truehdStormLastRecoveryAtMs = android.os.SystemClock.elapsedRealtime()
                     val snapTarget = (snapRecoveryPendingPosMs - 500L).coerceAtLeast(0L)
                     Log.w(

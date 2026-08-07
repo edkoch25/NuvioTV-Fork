@@ -400,6 +400,13 @@ class PlayerRuntimeController(
     // shared storm recovery budget with a freshness TTL.
     internal var snapRecoveryPendingPosMs: Long = -1L
     internal var snapRecoveryPendingAtWallMs: Long = 0L
+
+    // nt14 (0.8.2): corroborated early budget reset state -- wall time of the
+    // last classifier SUSPECT (any disposition), wall time of the last early
+    // reset, and the total recoveries this playback (stand-down ceiling).
+    internal var snapLastSuspectWallMs: Long = 0L
+    internal var snapEarlyResetLastAtMs: Long = 0L
+    internal var stormRecoveryTotalThisPlayback: Int = 0
     internal var rebufferTotalMs: Long = 0L
     internal var rebufferStartedAtMs: Long = 0L
     /** Back buffer (ms) currently in force, after the first-frame DV7/low-RAM resolution. */
