@@ -538,7 +538,20 @@ internal class PlaybackSpeedAwareAudioSink(
                     presentationTimeUs - firstUs > TRUEHD_PRESTART_SPAN_CAP_MS * 1000L
                 ) {
                     if (passthroughDeferredPlayPending) {
-                        maybeReleaseDeferredPlay()
+                        // nt24: once the span cap is the binding constraint the
+                        // deferral has nothing left to wait for -- the queue
+                        // saturated at the cap within the first buffers and the
+                        // byte floor is unreachable behind it, so every start
+                        // burned the full 1.5 s wall cap for a byte-identical
+                        // queue (proven: bytes=15404 at elapsedMs~1500 on all
+                        // of tonight's silent-head releases, and PTS
+                        // granularity means a span-denominated floor would
+                        // never be met either). Release immediately on the
+                        // first cap rejection via the same force path
+                        // playToEndOfStream() already uses; the wall cap
+                        // remains as the fail-safe for streams that never
+                        // reach the cap.
+                        maybeReleaseDeferredPlay(force = true)
                     }
                     maybeLogCeiling("prestart", presentationTimeUs - firstUs)
                     return false
