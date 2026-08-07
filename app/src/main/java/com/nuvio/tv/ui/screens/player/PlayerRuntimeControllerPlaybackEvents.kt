@@ -386,14 +386,26 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                             )
                             // nt12: latch the pre-snap position for recovery, gated
                             // to the TrueHD passthrough context and deferring to the
-                            // sink detector whenever it saw the event itself. First
-                            // flag wins; consumed below through the shared budget.
+                            // sink detector whenever its signal is live. First flag
+                            // wins; consumed below through the shared budget.
+                            // nt13: claim an ORPHANED onset latch -- onset >= 0 with
+                            // the detection flag false means the storm path can never
+                            // consume (its signal was wiped); roll back to the onset,
+                            // which is earlier than the tick latch and so safer.
                             if (snapRecoveryPendingPosMs < 0L &&
-                                truehdStormOnsetPosMs < 0L &&
                                 playbackSpeedAwareAudioSink?.isTruehdStormDetected() != true &&
                                 playbackSpeedAwareAudioSink?.isTruehdPassthroughActive() == true
                             ) {
-                                snapRecoveryPendingPosMs = snapLastPos
+                                if (truehdStormOnsetPosMs >= 0L) {
+                                    snapRecoveryPendingPosMs = truehdStormOnsetPosMs
+                                    truehdStormOnsetPosMs = -1L
+                                    Log.w(
+                                        PlayerRuntimeController.TAG,
+                                        "SNAP_ORPHAN_CLAIM onsetPos=${snapRecoveryPendingPosMs}ms"
+                                    )
+                                } else {
+                                    snapRecoveryPendingPosMs = snapLastPos
+                                }
                                 snapRecoveryPendingAtWallMs = snapNowWall
                             }
                         }
@@ -402,6 +414,22 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                     snapShadowLastTickWallMs = snapNowWall
                 }
 
+                // nt13: consume-gate visibility while anything is pending --
+                // names the blocker on any future stall instead of leaving it
+                // inferred. Strip with the rest of the diagnostics.
+                run {
+                    val snapDetectedNow = playbackSpeedAwareAudioSink?.isTruehdStormDetected() == true
+                    if (snapDetectedNow || truehdStormOnsetPosMs >= 0L || snapRecoveryPendingPosMs >= 0L) {
+                        Log.w(
+                            PlayerRuntimeController.TAG,
+                            "SNAP_GATE attempts=$truehdStormRecoveryAttempts " +
+                                "sinceRecMs=${android.os.SystemClock.elapsedRealtime() - truehdStormLastRecoveryAtMs} " +
+                                "errBlank=${_uiState.value.error.isNullOrBlank()} " +
+                                "detected=$snapDetectedNow onsetMs=$truehdStormOnsetPosMs " +
+                                "snapPendMs=$snapRecoveryPendingPosMs pos=${pos}ms"
+                        )
+                    }
+                }
                 // nt12 (0.8.2): drop a stale pending latch before consuming.
                 if (snapRecoveryPendingPosMs >= 0L &&
                     android.os.SystemClock.elapsedRealtime() - snapRecoveryPendingAtWallMs > SNAP_RECOVERY_PENDING_TTL_MS

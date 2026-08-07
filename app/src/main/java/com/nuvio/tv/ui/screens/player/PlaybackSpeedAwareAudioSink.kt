@@ -1051,10 +1051,19 @@ internal class PlaybackSpeedAwareAudioSink(
     // not) -- mode-switch storms are independent of head density.
     private fun armTruehdStormMonitor() {
         if (isCurrentlyPassthrough && currentInputFormat?.sampleMimeType == MimeTypes.AUDIO_TRUEHD) {
-            truehdStormLeadAccumMs = 0L
-            truehdStormDetected = false
+            // nt13 (0.8.2): arming must not destroy an undelivered verdict. Every
+            // rebuffer-resume play() re-arms; clearing the detection here wiped
+            // verdicts that the controller's spacing/cap gates had deferred across
+            // a rebuffer boundary, leaving the storm path dead with an orphaned
+            // onset latch (proven, 7 Aug capture: R1 wiped 343 ms into its consume
+            // window; R3 wiped three times before the budget reset opened). A
+            // pending detection now survives re-arm and is cleared only by
+            // consume or by resetAudioMeasurements() (seek/flush/configure).
+            if (!truehdStormDetected) {
+                truehdStormLeadAccumMs = 0L
+            }
             truehdStormMonitorUntilMs = SystemClock.elapsedRealtime() + TRUEHD_STORM_MONITOR_WINDOW_MS
-            Log.w(TAG, "ORD_TRACE monitor ARMED windowMs=$TRUEHD_STORM_MONITOR_WINDOW_MS")
+            Log.w(TAG, "ORD_TRACE monitor ARMED windowMs=$TRUEHD_STORM_MONITOR_WINDOW_MS detectedPending=$truehdStormDetected")
         } else {
             Log.w(TAG, "ORD_TRACE monitor arm SKIPPED ${ordState()}")
         }
