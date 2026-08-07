@@ -237,12 +237,34 @@ internal class PlaybackSpeedAwareAudioSink(
 
     fun isBluetoothForcePcm(): Boolean = bluetoothForcePcm
 
+    // ORD_TRACE (log-only ordering probe, strip before publication): an R2-class
+    // cold start proved the play()-side gate logic can be bypassed while the
+    // AudioTrack still starts. These entry logs name the real call order at the
+    // wrapper boundary. Zero behaviour change.
+    private var ordFirstHandleBufferPending = false
+
+    private fun ordState(): String =
+        "mime=${currentInputFormat?.sampleMimeType} pt=$isCurrentlyPassthrough " +
+            "bytes=$encodedAudioBytes defer=$passthroughDeferredPlayPending " +
+            "startPend=$passthroughStartupCompensationPending " +
+            "pausePend=$passthroughPauseCompensationPending " +
+            "armed=${truehdStormMonitorUntilMs != 0L}"
+
+    // ORD_TRACE: the AFR quiesce's renderer disable/re-enable traverses reset()
+    // with no wrapper override, invisibly to every existing log. Observe it.
+    override fun reset() {
+        Log.w(TAG, "ORD_TRACE reset() ${ordState()}")
+        super.reset()
+    }
+
     override fun setListener(listener: AudioSink.Listener) {
         this.listener = listener
         super.setListener(listener)
     }
 
     override fun configure(inputFormat: Format, specifiedBufferSize: Int, outputChannels: IntArray?) {
+        Log.w(TAG, "ORD_TRACE configure(in=${inputFormat.sampleMimeType}) ${ordState()}")
+        ordFirstHandleBufferPending = true
         currentInputFormat = inputFormat
         faultInjectFiredForCurrentConfig = false
         resetAudioMeasurements()
@@ -257,6 +279,7 @@ internal class PlaybackSpeedAwareAudioSink(
     }
 
     override fun flush() {
+        Log.w(TAG, "ORD_TRACE flush() ${ordState()}")
         passthroughPauseCompensationPending = false
         passthroughStartupCompensationPending = false
         passthroughDeferredPlayPending = false
@@ -381,6 +404,10 @@ internal class PlaybackSpeedAwareAudioSink(
         presentationTimeUs: Long,
         encodedAccessUnitCount: Int
     ): Boolean {
+        if (ordFirstHandleBufferPending) {
+            ordFirstHandleBufferPending = false
+            Log.w(TAG, "ORD_TRACE first handleBuffer after configure ${ordState()}")
+        }
         val rejectMime = faultInjectRejectMime
         val injectFmt = currentInputFormat
         if (rejectMime != null && isCurrentlyPassthrough && !faultInjectFiredForCurrentConfig &&
@@ -889,6 +916,7 @@ internal class PlaybackSpeedAwareAudioSink(
     }
 
     override fun pause() {
+        Log.w(TAG, "ORD_TRACE pause() ${ordState()}")
         if (isCurrentlyPassthrough) {
             passthroughPauseCompensationPending = true
             Log.d(TAG, "Passthrough pause: compensation armed for ${currentInputFormat?.sampleMimeType}")
@@ -900,6 +928,7 @@ internal class PlaybackSpeedAwareAudioSink(
     }
 
     override fun play() {
+        Log.w(TAG, "ORD_TRACE play() ${ordState()}")
         // nt7: byte-gate TrueHD passthrough starts. ExoPlayer's start decision is
         // duration-based (~1.5 s buffered), but the Amlogic MS12 TrueHD path fails on
         // BYTE starvation: a near-silent VBR head (~0.3 Mbps, measured on device)
@@ -978,6 +1007,9 @@ internal class PlaybackSpeedAwareAudioSink(
             truehdStormLeadAccumMs = 0L
             truehdStormDetected = false
             truehdStormMonitorUntilMs = SystemClock.elapsedRealtime() + TRUEHD_STORM_MONITOR_WINDOW_MS
+            Log.w(TAG, "ORD_TRACE monitor ARMED windowMs=$TRUEHD_STORM_MONITOR_WINDOW_MS")
+        } else {
+            Log.w(TAG, "ORD_TRACE monitor arm SKIPPED ${ordState()}")
         }
     }
 
