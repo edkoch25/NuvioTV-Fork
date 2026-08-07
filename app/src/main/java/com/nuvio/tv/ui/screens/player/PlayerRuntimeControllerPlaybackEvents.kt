@@ -345,8 +345,15 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                 // instead of waiting out the 6 s reset. Bounds: once per 15 s,
                 // stand-down after 8 total recoveries this playback; the >=3 s
                 // D-spacing still applies to the consume itself.
+                // nt15: a LATCHED snap verdict (snapRecoveryPendingPosMs >= 0)
+                // with a fresh suspect also opens the budget -- the undetected-
+                // snap class queued 2.0 s behind the spent cap in the nt14
+                // acceptance capture (SNAP_GATE, four consecutive ticks), and
+                // the classifier's five-capture zero-false-positive record plus
+                // the bounded consume make single-instrument opening safe.
                 if (truehdStormRecoveryAttempts >= 2 &&
-                    playbackSpeedAwareAudioSink?.isTruehdStormDetected() == true &&
+                    (playbackSpeedAwareAudioSink?.isTruehdStormDetected() == true ||
+                        snapRecoveryPendingPosMs >= 0L) &&
                     android.os.SystemClock.elapsedRealtime() - snapLastSuspectWallMs <= 5_000L &&
                     android.os.SystemClock.elapsedRealtime() - snapEarlyResetLastAtMs >= 15_000L &&
                     stormRecoveryTotalThisPlayback < 8
@@ -357,6 +364,8 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                         PlayerRuntimeController.TAG,
                         "SNAP_EARLY_RESET corroborated: " +
                             "sinceSuspectMs=${android.os.SystemClock.elapsedRealtime() - snapLastSuspectWallMs} " +
+                            "detected=${playbackSpeedAwareAudioSink?.isTruehdStormDetected() == true} " +
+                            "snapPendMs=$snapRecoveryPendingPosMs " +
                             "total=$stormRecoveryTotalThisPlayback"
                     )
                 }
@@ -367,6 +376,11 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                         truehdStormRecoveryAttempts += 1
                         stormRecoveryTotalThisPlayback += 1
                         truehdStormLastRecoveryAtMs = android.os.SystemClock.elapsedRealtime()
+                        // nt15: a storm rollback supersedes any pending snap latch --
+                        // stale pre-rollback timeline evidence must not fire a second
+                        // rollback for the same event. Fresh events re-flag (proven
+                        // across five captures).
+                        snapRecoveryPendingPosMs = -1L
                         // nt11: roll back to the latched storm onset, not the raced
                         // consume-time pos. leadMs retained in the log for continuity.
                         val onsetPos = if (truehdStormOnsetPosMs >= 0L) truehdStormOnsetPosMs else pos
