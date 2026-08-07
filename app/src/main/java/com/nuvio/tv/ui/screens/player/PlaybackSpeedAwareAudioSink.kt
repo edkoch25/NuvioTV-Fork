@@ -48,6 +48,19 @@ private const val JITTER_MIN_SAMPLES = 25
 private const val TRUEHD_START_MIN_BYTES = 196_608L
 private const val TRUEHD_START_DEFER_CAP_MS = 1_500L
 
+// nt20: content-time write-ahead ceiling for TrueHD passthrough. The 7 Aug 2026
+// content-position work proved every storm cluster's primary trigger (31/31
+// events, nine captures) is the byte-density collapse of lossless silence
+// (26-30 B access units vs ~130 B steady state): any byte-paced consumer
+// sprints through silent content far faster than real time, and every
+// byte-denominated buffer silently holds many seconds of content-time there.
+// The ceiling bounds the sprint at the source, content-agnostically: never
+// accept audio more than this far ahead, in presentation time, of the
+// accumulated playing wall clock. Kept below TRUEHD_STORM_LEAD_THRESHOLD_MS
+// so the nt8 detector remains a pure safety net rather than a participant.
+private const val TRUEHD_WRITE_AHEAD_CEILING_MS = 800L
+private const val CEIL_TRACE_LOG_INTERVAL_MS = 1_000L
+
 // nt8: TrueHD startup-storm detector (see truehdStormLeadAccumMs). Storm lead was
 // measured on device at ~550 ms of clock lead per wall second (and the storm never
 // self-recovered); clean-playback noise is symmetric, and signed accumulation with
@@ -179,6 +192,22 @@ internal class PlaybackSpeedAwareAudioSink(
 
     @Volatile
     private var passthroughDeferredPlaySinceMs: Long = 0L
+
+    // nt20: PTS-vs-wall ceiling anchor. Wall side set at every real TrueHD
+    // start/restart (armTruehdStormMonitor -- the lifecycle nt8/nt13 already
+    // hardened); PTS side latched on the first buffer offered after that.
+    // Cleared by resetAudioMeasurements() (flush/seek/configure) and reset().
+    @Volatile
+    private var ceilAnchorWallMs: Long = 0L
+
+    @Volatile
+    private var ceilAnchorPtsUs: Long = C.TIME_UNSET
+
+    @Volatile
+    private var ceilRejects: Long = 0L
+
+    @Volatile
+    private var ceilLogAtMs: Long = 0L
 
     // nt8: TrueHD startup-storm detector. After a display-mode switch the Amlogic
     // MS12 TrueHD bypass parser can start misaligned and hunt for a major sync
@@ -453,6 +482,45 @@ internal class PlaybackSpeedAwareAudioSink(
             maybeSampleAudioClockJitter()
             return handledPcm
         }
+        // nt20: content-time write-ahead ceiling (TrueHD passthrough only).
+        // Leg 1 (pre-start): while the nt7 deferral holds, cap the queued PTS
+        // span -- a silent head banks ~5 s of content-time inside the 192 KiB
+        // byte floor otherwise. maybeReleaseDeferredPlay() runs first so the
+        // 1.5 s wall cap can never deadlock behind the rejection. Leg 2
+        // (paused): accept nothing while the anchor is armed but playback is
+        // paused, so a pause cannot bank content either. Leg 3 (playing):
+        // never run more than the ceiling ahead of wall time since the last
+        // start/resume anchor. All legs reject non-blockingly; the renderer
+        // retries, exactly as for a full AudioTrack. sourceEnded needs no
+        // special case -- the tail simply drains at real-time pace.
+        if (currentInputFormat?.sampleMimeType == MimeTypes.AUDIO_TRUEHD) {
+            if (passthroughDeferredPlayPending) {
+                val firstUs = encodedAudioFirstPtsUs
+                if (firstUs != C.TIME_UNSET &&
+                    presentationTimeUs - firstUs > TRUEHD_WRITE_AHEAD_CEILING_MS * 1000L
+                ) {
+                    maybeReleaseDeferredPlay()
+                    maybeLogCeiling("prestart", presentationTimeUs - firstUs)
+                    return false
+                }
+            } else if (ceilAnchorWallMs != 0L) {
+                if (!playRequested) {
+                    maybeLogCeiling("paused", 0L)
+                    return false
+                }
+                if (ceilAnchorPtsUs == C.TIME_UNSET) {
+                    ceilAnchorPtsUs = presentationTimeUs
+                }
+                val aheadUs = presentationTimeUs - ceilAnchorPtsUs
+                val allowedUs = ((SystemClock.elapsedRealtime() - ceilAnchorWallMs) *
+                    playbackSpeed).toLong() * 1000L +
+                    TRUEHD_WRITE_AHEAD_CEILING_MS * 1000L
+                if (aheadUs > allowedUs) {
+                    maybeLogCeiling("ahead", aheadUs - allowedUs)
+                    return false
+                }
+            }
+        }
         // The sink consumes from the caller's buffer and may take only part of it, asking
         // to be called again with the remainder — so count the position delta, not the
         // buffer's size, or a partially consumed buffer is counted twice.
@@ -469,6 +537,20 @@ internal class PlaybackSpeedAwareAudioSink(
         maybeReleaseDeferredPlay()
         maybeSampleAudioClockJitter()
         return handled
+    }
+
+    // nt20: rate-limited ceiling diagnostic (CEIL_TRACE; strip before publication).
+    private fun maybeLogCeiling(leg: String, overUs: Long) {
+        ceilRejects++
+        val nowMs = SystemClock.elapsedRealtime()
+        if (nowMs - ceilLogAtMs >= CEIL_TRACE_LOG_INTERVAL_MS) {
+            ceilLogAtMs = nowMs
+            Log.w(
+                TAG,
+                "CEIL_TRACE leg=$leg overUs=$overUs rejects=$ceilRejects " +
+                    "anchorPtsUs=$ceilAnchorPtsUs pt=$isCurrentlyPassthrough"
+            )
+        }
     }
 
     private fun resetAudioMeasurements() {
@@ -492,6 +574,8 @@ internal class PlaybackSpeedAwareAudioSink(
         truehdStormMonitorUntilMs = 0L
         truehdStormDetected = false
         skipNextStormSampleAfterResync = false
+        ceilAnchorWallMs = 0L
+        ceilAnchorPtsUs = C.TIME_UNSET
         // nt16: disengage the shadow governor on flush/configure.
         govEngaged = false
         govCFrozen = false
@@ -1071,6 +1155,8 @@ internal class PlaybackSpeedAwareAudioSink(
             if (!truehdStormDetected) {
                 truehdStormLeadAccumMs = 0L
             }
+            ceilAnchorWallMs = SystemClock.elapsedRealtime()
+            ceilAnchorPtsUs = C.TIME_UNSET
             truehdStormMonitorUntilMs = SystemClock.elapsedRealtime() + TRUEHD_STORM_MONITOR_WINDOW_MS
             Log.w(TAG, "ORD_TRACE monitor ARMED windowMs=$TRUEHD_STORM_MONITOR_WINDOW_MS detectedPending=$truehdStormDetected")
         } else {
