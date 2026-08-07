@@ -58,7 +58,13 @@ private const val TRUEHD_START_DEFER_CAP_MS = 1_500L
 // accept audio more than this far ahead, in presentation time, of the
 // accumulated playing wall clock. Kept below TRUEHD_STORM_LEAD_THRESHOLD_MS
 // so the nt8 detector remains a pure safety net rather than a participant.
-private const val TRUEHD_WRITE_AHEAD_CEILING_MS = 800L
+// nt25: 800 -> 700. The nt24 earlier start (force release at the first span-cap
+// rejection) shifted the patch-2 silence crossing back inside the latch
+// settle window, and one borderline detection returned (lead 1038 vs the
+// 1000 ms threshold, 7 Aug 22:56:40). The trim applies to both the pre-latch
+// budget and the post-latch bound, restoring the detector margin the earlier
+// start consumed; liveness is untouched (pre-latch wall growth remains).
+private const val TRUEHD_WRITE_AHEAD_CEILING_MS = 700L
 private const val CEIL_TRACE_LOG_INTERVAL_MS = 1_000L
 // nt21: the pre-start queue must be strictly smaller than the ceiling so the
 // post-start budget (ceiling minus queued-at-arm) leaves a real cushion --
