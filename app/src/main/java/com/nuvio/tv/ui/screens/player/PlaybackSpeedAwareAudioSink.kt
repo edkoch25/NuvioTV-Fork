@@ -243,6 +243,12 @@ internal class PlaybackSpeedAwareAudioSink(
     // wrapper boundary. Zero behaviour change.
     private var ordFirstHandleBufferPending = false
 
+    // nt10: the renderer's most recent play/pause intent. configure() uses it to
+    // detect a play() that arrived before the sink knew its format (the
+    // quiesce-ordering hole proven by the ORD_TRACE capture, 7 Aug 2026).
+    private var playRequested = false
+
+
     private fun ordState(): String =
         "mime=${currentInputFormat?.sampleMimeType} pt=$isCurrentlyPassthrough " +
             "bytes=$encodedAudioBytes defer=$passthroughDeferredPlayPending " +
@@ -252,8 +258,15 @@ internal class PlaybackSpeedAwareAudioSink(
 
     // ORD_TRACE: the AFR quiesce's renderer disable/re-enable traverses reset()
     // with no wrapper override, invisibly to every existing log. Observe it.
+    // nt10: make reset() truthful. The AFR quiesce's renderer disable lands here;
+    // leaving the previous stream's format flags in place made every post-quiesce
+    // play() gate on stale state (correct only by luck) and defeated configure()'s
+    // wasPassthrough transition check, silently losing the startup resync.
     override fun reset() {
         Log.w(TAG, "ORD_TRACE reset() ${ordState()}")
+        currentInputFormat = null
+        isCurrentlyPassthrough = false
+        playRequested = false
         super.reset()
     }
 
@@ -276,6 +289,7 @@ internal class PlaybackSpeedAwareAudioSink(
             passthroughStartupCompensationPending = true
         }
         super.configure(inputFormat, specifiedBufferSize, outputChannels)
+        maybeEngageLateStartGate()
     }
 
     override fun flush() {
@@ -917,6 +931,7 @@ internal class PlaybackSpeedAwareAudioSink(
 
     override fun pause() {
         Log.w(TAG, "ORD_TRACE pause() ${ordState()}")
+        playRequested = false
         if (isCurrentlyPassthrough) {
             passthroughPauseCompensationPending = true
             Log.d(TAG, "Passthrough pause: compensation armed for ${currentInputFormat?.sampleMimeType}")
@@ -929,6 +944,7 @@ internal class PlaybackSpeedAwareAudioSink(
 
     override fun play() {
         Log.w(TAG, "ORD_TRACE play() ${ordState()}")
+        playRequested = true
         // nt7: byte-gate TrueHD passthrough starts. ExoPlayer's start decision is
         // duration-based (~1.5 s buffered), but the Amlogic MS12 TrueHD path fails on
         // BYTE starvation: a near-silent VBR head (~0.3 Mbps, measured on device)
@@ -959,6 +975,37 @@ internal class PlaybackSpeedAwareAudioSink(
         firePendingPassthroughResync()
         armTruehdStormMonitor()
         super.play()
+    }
+
+    // nt10: play() can precede the first configure on the AFR-quiesced path (the
+    // renderer is re-enabled and its start consumed before the decoder re-delivers
+    // a format), so the play()-side byte-gate, monitor arm and startup resync all
+    // silently miss -- proven by the ORD_TRACE capture (7 Aug 2026). Re-evaluate
+    // here, where the format is finally known. The byte-floor condition makes this
+    // a no-op on any warm pipeline; the deferral, release, resync and arm are all
+    // the existing nt7/nt8 machinery. A user pause still cancels the deferral via
+    // pause() exactly as on the play()-side path.
+    private fun maybeEngageLateStartGate() {
+        if (!playRequested || !isCurrentlyPassthrough ||
+            currentInputFormat?.sampleMimeType != MimeTypes.AUDIO_TRUEHD ||
+            passthroughDeferredPlayPending
+        ) {
+            return
+        }
+        if (encodedAudioBytes < TRUEHD_START_MIN_BYTES) {
+            passthroughDeferredPlayPending = true
+            passthroughDeferredPlaySinceMs = SystemClock.elapsedRealtime()
+            super.pause()
+            Log.d(
+                TAG,
+                "Passthrough late deferred start (configure after play): " +
+                    "$encodedAudioBytes B < $TRUEHD_START_MIN_BYTES B floor for audio/true-hd"
+            )
+        } else {
+            Log.d(TAG, "Passthrough late start gate (configure after play): pipeline warm; resync + arm applied")
+            firePendingPassthroughResync()
+            armTruehdStormMonitor()
+        }
     }
 
     override fun playToEndOfStream() {
