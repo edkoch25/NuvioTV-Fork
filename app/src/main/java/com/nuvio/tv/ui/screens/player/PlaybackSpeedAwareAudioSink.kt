@@ -227,6 +227,16 @@ internal class PlaybackSpeedAwareAudioSink(
     @Volatile
     private var ceilFrontierLogAtMs: Long = 0L
 
+    // nt23: presentation-latch state. ceilPrevPosUs feeds the two-sample
+    // advance test; ceilPresentLatched arms once per stream segment and is
+    // cleared by resetAudioMeasurements() and by every re-arm so a resume
+    // re-tightens shortly after it loosens.
+    @Volatile
+    private var ceilPrevPosUs: Long = Long.MIN_VALUE
+
+    @Volatile
+    private var ceilPresentLatched: Boolean = false
+
     // nt8: TrueHD startup-storm detector. After a display-mode switch the Amlogic
     // MS12 TrueHD bypass parser can start misaligned and hunt for a major sync
     // indefinitely, consuming input 3-4x faster than real time; under passthrough
@@ -512,22 +522,45 @@ internal class PlaybackSpeedAwareAudioSink(
         // retries, exactly as for a full AudioTrack. sourceEnded needs no
         // special case -- the tail simply drains at real-time pace.
         if (currentInputFormat?.sampleMimeType == MimeTypes.AUDIO_TRUEHD) {
-            if (passthroughDeferredPlayPending) {
+            if (ceilAnchorWallMs == 0L) {
+                // nt23: the span cap now covers EVERY unanchored queueing path
+                // -- the nt7 deferral AND the configure-before-play transition
+                // window where fast delivery meets the byte floor before
+                // play(), so nt21's deferral-only cap never engaged (proven:
+                // E2's silent head banked ~3.4 s unceilinged and stormed at
+                // onset 1580 ms). The deferral-release check still runs first
+                // so the 1.5 s wall cap can never deadlock behind the
+                // rejection; on the transition path the arm arrives via
+                // play() independently of acceptance, so no circular wait
+                // exists (the nt22 deadlock is structurally excluded).
                 val firstUs = encodedAudioFirstPtsUs
                 if (firstUs != C.TIME_UNSET &&
                     presentationTimeUs - firstUs > TRUEHD_PRESTART_SPAN_CAP_MS * 1000L
                 ) {
-                    maybeReleaseDeferredPlay()
+                    if (passthroughDeferredPlayPending) {
+                        maybeReleaseDeferredPlay()
+                    }
                     maybeLogCeiling("prestart", presentationTimeUs - firstUs)
                     return false
                 }
-            } else if (ceilAnchorWallMs != 0L) {
+            } else {
                 if (!playRequested) {
                     maybeLogCeiling("paused", 0L)
                     return false
                 }
                 if (ceilAnchorPtsUs == C.TIME_UNSET) {
                     ceilAnchorPtsUs = presentationTimeUs
+                }
+                // nt23: once per stream (and per resume re-arm), tighten the
+                // budget to the playhead when presentation is first observed
+                // advancing -- the nt21 arm-time anchor leaves delivery a
+                // standing ~3.3 s ahead across the track spin-up, and the
+                // HAL's AudioTimestamp adoption (~10 s) snaps the reported
+                // clock across exactly that gap (measured, CEIL_FRONTIER
+                // 7 Aug). If the latch never fires, behaviour degrades to
+                // plain nt21 -- liveness is never conditioned on it.
+                if (!ceilPresentLatched) {
+                    maybeLatchPresentation()
                 }
                 val aheadUs = presentationTimeUs - ceilAnchorPtsUs
                 val allowedUs = ((SystemClock.elapsedRealtime() - ceilAnchorWallMs) *
@@ -572,8 +605,32 @@ internal class PlaybackSpeedAwareAudioSink(
                 TAG,
                 "CEIL_FRONTIER er=$nowMs lastPtsUs=$encodedAudioLastPtsUs " +
                     "anchorPtsUs=$ceilAnchorPtsUs queuedAtArmUs=$ceilQueuedAtArmUs " +
-                    "anchorWallMs=$ceilAnchorWallMs rejects=$ceilRejects"
+                    "anchorWallMs=$ceilAnchorWallMs latched=$ceilPresentLatched " +
+                    "rejects=$ceilRejects"
             )
+        }
+    }
+
+    // nt23: latch on the first observed advance of the delegate's reported
+    // position (Long.MIN_VALUE is AudioSink.CURRENT_POSITION_NOT_SET). Uses
+    // super directly so the SEEK_TRACE POS override's rate limiter is not
+    // disturbed. On fire, re-anchor the budget at the playhead origin: ahead
+    // is measured from the stream's first accepted PTS with a fresh wall
+    // anchor and no queued credit, so the already-delivered spin-up excess is
+    // worked off (intake holds while the queued material plays) and the
+    // standing gap at timestamp adoption shrinks to the ceiling.
+    private fun maybeLatchPresentation() {
+        val p = super.getCurrentPositionUs(false)
+        if (p == Long.MIN_VALUE) return
+        val prev = ceilPrevPosUs
+        ceilPrevPosUs = p
+        if (prev != Long.MIN_VALUE && p > prev) {
+            ceilPresentLatched = true
+            if (encodedAudioFirstPtsUs != C.TIME_UNSET) {
+                ceilAnchorPtsUs = encodedAudioFirstPtsUs
+            }
+            ceilAnchorWallMs = SystemClock.elapsedRealtime()
+            ceilQueuedAtArmUs = 0L
         }
     }
 
@@ -615,6 +672,8 @@ internal class PlaybackSpeedAwareAudioSink(
         ceilAnchorWallMs = 0L
         ceilAnchorPtsUs = C.TIME_UNSET
         ceilQueuedAtArmUs = 0L
+        ceilPrevPosUs = Long.MIN_VALUE
+        ceilPresentLatched = false
         // nt16: disengage the shadow governor on flush/configure.
         govEngaged = false
         govCFrozen = false
@@ -1199,6 +1258,10 @@ internal class PlaybackSpeedAwareAudioSink(
                     (encodedAudioLastPtsUs - encodedAudioFirstPtsUs)
                         .coerceIn(0L, TRUEHD_PRESTART_SPAN_CAP_MS * 1000L)
                 } else 0L
+            // nt23: a fresh arm re-opens the presentation latch so the budget
+            // re-tightens after each resume's transient nt21-style looseness.
+            ceilPresentLatched = false
+            ceilPrevPosUs = Long.MIN_VALUE
             ceilAnchorWallMs = SystemClock.elapsedRealtime()
             ceilAnchorPtsUs = C.TIME_UNSET
             truehdStormMonitorUntilMs = SystemClock.elapsedRealtime() + TRUEHD_STORM_MONITOR_WINDOW_MS
