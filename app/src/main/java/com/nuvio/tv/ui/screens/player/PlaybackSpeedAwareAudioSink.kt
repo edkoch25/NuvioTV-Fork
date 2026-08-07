@@ -60,6 +60,13 @@ private const val TRUEHD_START_DEFER_CAP_MS = 1_500L
 // so the nt8 detector remains a pure safety net rather than a participant.
 private const val TRUEHD_WRITE_AHEAD_CEILING_MS = 800L
 private const val CEIL_TRACE_LOG_INTERVAL_MS = 1_000L
+// nt21: the pre-start queue must be strictly smaller than the ceiling so the
+// post-start budget (ceiling minus queued-at-arm) leaves a real cushion --
+// nt20 latched the anchor past the queued span, giving ~1.6 s effective
+// headroom and letting the classic 1.4 s detection fire over the 1.0 s
+// threshold (proven by CEIL_TRACE, 7 Aug evening).
+private const val TRUEHD_PRESTART_SPAN_CAP_MS = 400L
+private const val CEIL_FRONTIER_LOG_INTERVAL_MS = 1_000L
 
 // nt8: TrueHD startup-storm detector (see truehdStormLeadAccumMs). Storm lead was
 // measured on device at ~550 ms of clock lead per wall second (and the storm never
@@ -208,6 +215,17 @@ internal class PlaybackSpeedAwareAudioSink(
 
     @Volatile
     private var ceilLogAtMs: Long = 0L
+
+    // nt21: PTS span already queued when the anchor armed; the post-start
+    // budget is (ceiling - this), so total content ahead of the playhead is
+    // bounded by the ceiling regardless of how much the deferral banked.
+    // Clamped to the pre-start cap so a resume re-arm (where first/last span
+    // the whole session) cannot zero the budget.
+    @Volatile
+    private var ceilQueuedAtArmUs: Long = 0L
+
+    @Volatile
+    private var ceilFrontierLogAtMs: Long = 0L
 
     // nt8: TrueHD startup-storm detector. After a display-mode switch the Amlogic
     // MS12 TrueHD bypass parser can start misaligned and hunt for a major sync
@@ -497,7 +515,7 @@ internal class PlaybackSpeedAwareAudioSink(
             if (passthroughDeferredPlayPending) {
                 val firstUs = encodedAudioFirstPtsUs
                 if (firstUs != C.TIME_UNSET &&
-                    presentationTimeUs - firstUs > TRUEHD_WRITE_AHEAD_CEILING_MS * 1000L
+                    presentationTimeUs - firstUs > TRUEHD_PRESTART_SPAN_CAP_MS * 1000L
                 ) {
                     maybeReleaseDeferredPlay()
                     maybeLogCeiling("prestart", presentationTimeUs - firstUs)
@@ -514,11 +532,12 @@ internal class PlaybackSpeedAwareAudioSink(
                 val aheadUs = presentationTimeUs - ceilAnchorPtsUs
                 val allowedUs = ((SystemClock.elapsedRealtime() - ceilAnchorWallMs) *
                     playbackSpeed).toLong() * 1000L +
-                    TRUEHD_WRITE_AHEAD_CEILING_MS * 1000L
+                    (TRUEHD_WRITE_AHEAD_CEILING_MS * 1000L - ceilQueuedAtArmUs)
                 if (aheadUs > allowedUs) {
                     maybeLogCeiling("ahead", aheadUs - allowedUs)
                     return false
                 }
+                maybeLogFrontier()
             }
         }
         // The sink consumes from the caller's buffer and may take only part of it, asking
@@ -537,6 +556,25 @@ internal class PlaybackSpeedAwareAudioSink(
         maybeReleaseDeferredPlay()
         maybeSampleAudioClockJitter()
         return handled
+    }
+
+    // nt21: CEIL_FRONTIER (strip before publication) -- the discriminating
+    // instrument for the phantom-lead class seen on nt20 (leads 2551/2694 with
+    // baseline parse-fail). Logs the delivered-PTS frontier against wall time;
+    // read with SEEK_TRACE POS to test whether reported position overtakes what
+    // the sink has actually delivered (starvation padding) or tracks it (the
+    // racing is elsewhere, including possibly this gate).
+    private fun maybeLogFrontier() {
+        val nowMs = SystemClock.elapsedRealtime()
+        if (nowMs - ceilFrontierLogAtMs >= CEIL_FRONTIER_LOG_INTERVAL_MS) {
+            ceilFrontierLogAtMs = nowMs
+            Log.w(
+                TAG,
+                "CEIL_FRONTIER er=$nowMs lastPtsUs=$encodedAudioLastPtsUs " +
+                    "anchorPtsUs=$ceilAnchorPtsUs queuedAtArmUs=$ceilQueuedAtArmUs " +
+                    "anchorWallMs=$ceilAnchorWallMs rejects=$ceilRejects"
+            )
+        }
     }
 
     // nt20: rate-limited ceiling diagnostic (CEIL_TRACE; strip before publication).
@@ -576,6 +614,7 @@ internal class PlaybackSpeedAwareAudioSink(
         skipNextStormSampleAfterResync = false
         ceilAnchorWallMs = 0L
         ceilAnchorPtsUs = C.TIME_UNSET
+        ceilQueuedAtArmUs = 0L
         // nt16: disengage the shadow governor on flush/configure.
         govEngaged = false
         govCFrozen = false
@@ -1155,6 +1194,11 @@ internal class PlaybackSpeedAwareAudioSink(
             if (!truehdStormDetected) {
                 truehdStormLeadAccumMs = 0L
             }
+            ceilQueuedAtArmUs =
+                if (encodedAudioFirstPtsUs != C.TIME_UNSET && encodedAudioLastPtsUs != C.TIME_UNSET) {
+                    (encodedAudioLastPtsUs - encodedAudioFirstPtsUs)
+                        .coerceIn(0L, TRUEHD_PRESTART_SPAN_CAP_MS * 1000L)
+                } else 0L
             ceilAnchorWallMs = SystemClock.elapsedRealtime()
             ceilAnchorPtsUs = C.TIME_UNSET
             truehdStormMonitorUntilMs = SystemClock.elapsedRealtime() + TRUEHD_STORM_MONITOR_WINDOW_MS
