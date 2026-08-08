@@ -79,7 +79,19 @@ private const val CEIL_FRONTIER_LOG_INTERVAL_MS = 1_000L
 // self-recovered); clean-playback noise is symmetric, and signed accumulation with
 // a floor at zero random-walks near zero, so a 1 s accumulated lead inside the 60 s
 // startup window separates cleanly.
-private const val TRUEHD_STORM_LEAD_THRESHOLD_MS = 1_000L
+// nt26: 1000 -> 1500. With the nt20-nt25 ceiling bounding delivery at
+// ~700 ms ahead of the playing wall clock, physical over-consumption can no
+// longer produce the original storm class on this path; the only event left
+// at the old threshold is the HAL's discrete clock re-step at or after the
+// presentation latch -- measured at a constant 1019-1057 ms across four
+// events in three builds (invariant under ceiling 800 vs 700: the step is
+// delivered-unpresented plus early position-estimate drift, not banked
+// content -- a stream's fatal second step is byte-identical to a harmless
+// first one). The detector's role is now backstop: the artefact tops out at
+// ~1.06 s (440 ms clear margin, no false trips at cold starts or
+// transitions), while genuine failures routinely hit the 2000 ms sample
+// clamp and remain caught; the >=5 s snap classifier is unchanged behind it.
+private const val TRUEHD_STORM_LEAD_THRESHOLD_MS = 1_500L
 private const val TRUEHD_STORM_SAMPLE_CAP_MS = 2_000L
 private const val TRUEHD_STORM_MONITOR_WINDOW_MS = 60_000L
 
