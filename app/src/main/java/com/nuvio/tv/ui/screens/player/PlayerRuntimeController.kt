@@ -245,6 +245,27 @@ class PlayerRuntimeController(
     fun getCurrentHeaders(): Map<String, String> = currentHeaders
 
     fun stopAndRelease() {
+        // nt33: the diagnostics record persists at FIRST FRAME, and on a mid-episode
+        // back-out no later persist runs at all (BUFFER_SUMMARY absent across the
+        // 8 Aug captures proves the natural-end path is skipped), so under AFR -
+        // where the first frame renders during the settle, before MAT engages - the
+        // card's audioPath could never be anything but null however it was written.
+        // Re-persist once at teardown from the tick-filled field, guarded to the
+        // clean-playback case so an error record is never clobbered by a stale
+        // 'Played' one.
+        val audioPathAtTeardown = currentAudioPathDescription
+        val lastRecord = lastPlaybackDiagnosticsForReport
+        if (audioPathAtTeardown != null &&
+            lastRecord.result == "Played" &&
+            lastRecord.audioPath == null &&
+            lastPlaybackIssueError == null
+        ) {
+            val updated = lastRecord.copy(audioPath = audioPathAtTeardown)
+            lastPlaybackDiagnosticsForReport = updated
+            scope.launch {
+                runCatching { playerSettingsDataStore.setLastPlaybackDiagnostics(updated) }
+            }
+        }
         releasePlayer()
     }
 

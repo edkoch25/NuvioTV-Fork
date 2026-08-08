@@ -766,6 +766,9 @@ internal fun SettingsActionRow(
     title: String,
     subtitle: String?,
     value: String? = null,
+    /** Overrides the style-derived row shape (and the focus ring that follows it).
+     *  Null keeps settingsRowShape() - the default pill in the CLASSIC style. */
+    shape: RoundedCornerShape? = null,
     subtitleContent: (@Composable (focused: Boolean, contentAlpha: Float) -> Unit)? = null,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -811,11 +814,11 @@ internal fun SettingsActionRow(
             CardDefaults.border(
                 focusedBorder = Border(
                     border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing.copy(alpha = contentAlpha)),
-                    shape = RoundedCornerShape(SettingsPillRadius)
+                    shape = shape ?: RoundedCornerShape(SettingsPillRadius)
                 )
             )
         },
-        shape = CardDefaults.shape(settingsRowShape()),
+        shape = CardDefaults.shape(shape ?: settingsRowShape()),
         scale = CardDefaults.scale(focusedScale = 1f, pressedScale = 1f)
     ) {
         Row(

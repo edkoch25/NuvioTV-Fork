@@ -181,6 +181,9 @@ internal fun LazyListScope.deviceAssessmentItems(
         val hasStream = !diagnostics.streamUrl.isNullOrBlank()
         SettingsGroupCard(modifier = Modifier.fillMaxWidth()) {
             SettingsActionRow(
+                // The three-line subtitle crowds the CLASSIC pill's curved corner;
+                // match the screen's own 12 dp results-card shape instead.
+                shape = assessmentCardShape(),
                 title = stringResource(
                     if (state.running) R.string.assessment_run_running else R.string.assessment_run_title
                 ),
