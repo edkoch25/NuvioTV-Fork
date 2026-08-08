@@ -39,6 +39,16 @@ object Gate0Probe {
     // ~500 ms of the parameterised burst, to see whether the HAL clocks the carrier.
     private const val HEAD_ADVANCE_WRITE_MS = 500
 
+    // §9.5 receiver-lock matrix (nt29): the burst cells above proved the HAL clocks the
+    // carrier but never gave the RECEIVER time to lock, and never varied the channel/rate
+    // arrangement. Extended LE-TrueHD cells, each long enough for the soundbar front
+    // panel to react - the panel is the receiver-side instrument. 8 Aug evidence: the
+    // 192k/8ch config reaches CT_MAT with an advancing head yet the receiver shows no
+    // lock; the vendor MS12 path's spdifout config is (per vintage-matched Khadas
+    // source, unverified on this fork) stereo with a driver-side x4 clock.
+    private const val RLOCK_BURST_MS = 2500
+    private const val RLOCK_GAP_MS = 3000L
+
     // IEC61937 burst-preamble sync words (verified against FFmpeg spdifenc.c): Pa=0xF872,
     // Pb=0x4E1F. nt39 wrote raw zeros (no sync words) so the receiver never locked and the head
     // stayed at 0 despite 1.5 MB accepted; nt41 varies byte order and data-type per cell.
@@ -145,6 +155,11 @@ object Gate0Probe {
                 "leDtsHd=$cLeDtsHd beDtsHd=$cBeDtsHd any_iec_advanced=$anyAdvanced " +
                 "=> pass=${primaryQuery.contains("SUPPORTED") && anyAdvanced}"
         )
+        Log.i(TAG, "----- receiver-lock matrix (nt29) - WATCH THE SOUNDBAR PANEL per cell -----")
+        val rCtrl = runReceiverLockCell(am, attrs, "ctrl 192k/8ch", IEC_RATE_HZ, PRIMARY_CHANNEL_MASK, 8)
+        val r768 = runReceiverLockCell(am, attrs, "hbr 768k/2ch", 768_000, AudioFormat.CHANNEL_OUT_STEREO, 2)
+        val r192st = runReceiverLockCell(am, attrs, "ms12cfg 192k/2ch", 192_000, AudioFormat.CHANNEL_OUT_STEREO, 2)
+        Log.i(TAG, "RLOCK VERDICT ctrl_192k8ch=$rCtrl hbr_768k2ch=$r768 ms12cfg_192k2ch=$r192st")
         probeMatEncodingBuilds(am, attrs)
         Log.i(TAG, "===== Gate 0 probe complete =====")
     }
@@ -287,6 +302,85 @@ object Gate0Probe {
                 track?.release()
             } catch (_: Throwable) {
             }
+        }
+    }
+
+    /**
+     * One receiver-lock cell: an IEC61937 track at the given rate/mask carrying an
+     * extended LE MAT-wrapped-TrueHD burst (Pc=0x16, Pd=61424 bytes, 61440-byte
+     * periods - the Gate 0 nt41-validated parameters). ~2.5 s of wall time per cell so
+     * the receiver's format detector has time to lock; the observer watches the
+     * soundbar panel while the cell runs. 3 s of silence follows each cell (track
+     * fully released) so the panel visibly resets between cells. The 192k/2ch cell is
+     * deliberately bandwidth-starved relative to MAT (content runs at quarter speed) -
+     * it exists to reveal whether the stereo arrangement alone changes the panel
+     * behaviour, not to carry a coherent stream. Build failure is itself the datum for
+     * the 768 kHz cell (framework validation may reject the rate). Never throws.
+     */
+    private fun runReceiverLockCell(
+        am: AudioManager,
+        attrs: AudioAttributes,
+        label: String,
+        sampleRate: Int,
+        channelMask: Int,
+        channelCount: Int
+    ): Boolean {
+        val cell = Cell("RLOCK $label", AudioFormat.ENCODING_IEC61937, sampleRate, channelMask)
+        Log.i(TAG, "RLOCK [$label] query={${queryStrings(am, attrs, cell)}}")
+        var track: AudioTrack? = null
+        try {
+            val minBuf = try {
+                AudioTrack.getMinBufferSize(sampleRate, channelMask, AudioFormat.ENCODING_IEC61937)
+            } catch (t: Throwable) { -99 }
+            if (minBuf <= 0) {
+                Log.w(TAG, "RLOCK [$label] minBuffer=$minBuf, config rejected at query")
+                return false
+            }
+            val format = AudioFormat.Builder()
+                .setEncoding(AudioFormat.ENCODING_IEC61937)
+                .setSampleRate(sampleRate)
+                .setChannelMask(channelMask)
+                .build()
+            track = AudioTrack.Builder()
+                .setAudioAttributes(attrs)
+                .setAudioFormat(format)
+                .setBufferSizeInBytes(minBuf.coerceAtLeast(256 * 1024))
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .build()
+            if (track.state != AudioTrack.STATE_INITIALIZED) {
+                Log.w(TAG, "RLOCK [$label] not INITIALIZED (state=${track.state})")
+                return false
+            }
+            Log.i(TAG, "RLOCK [$label] START ${RLOCK_BURST_MS}ms burst - WATCH THE SOUNDBAR PANEL NOW")
+            track.play()
+            val payload = buildBurst(
+                bigEndian = false, dataType = 0x16, pdLength = 61424,
+                unitBytes = 61440, totalBytes = 61440 * 4
+            )
+            val totalToWrite = sampleRate * channelCount * 2 * RLOCK_BURST_MS / 1000
+            var written = 0
+            while (written < totalToWrite) {
+                val n = track.write(payload, 0, payload.size)
+                if (n <= 0) break
+                written += n
+            }
+            val h0 = track.playbackHeadPosition
+            Thread.sleep(400)
+            val h1 = track.playbackHeadPosition
+            val adv = h1 > h0
+            Log.i(
+                TAG,
+                "RLOCK [$label] END wrote=$written head $h0 -> $h1 (advanced=$adv)" +
+                    " playState=${track.playState}"
+            )
+            return adv
+        } catch (t: Throwable) {
+            Log.w(TAG, "RLOCK [$label] threw ${t.javaClass.simpleName}: ${t.message}")
+            return false
+        } finally {
+            try { track?.pause(); track?.flush(); track?.stop() } catch (_: Throwable) {}
+            try { track?.release() } catch (_: Throwable) {}
+            try { Thread.sleep(RLOCK_GAP_MS) } catch (_: Throwable) {}
         }
     }
 
