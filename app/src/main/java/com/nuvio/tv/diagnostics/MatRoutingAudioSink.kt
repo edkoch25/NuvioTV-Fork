@@ -237,11 +237,22 @@ class MatRoutingAudioSink(
     // --- transport / position --------------------------------------------------------
 
     override fun play() {
-        if (matMode) { isPlaying = true; matSink.play() } else super.play()
+        // media3 contract: play() may arrive BEFORE configure() (a renderer enabled on
+        // an already-playing player starts first, then configures - observed on-device
+        // via the AFR quiesce/re-enable cycle, 8 Aug capture 2). DefaultAudioSink
+        // latches a playing flag unconditionally and starts its track later; mirror
+        // that: latch isPlaying regardless of matMode so the configure()/flush()
+        // restore paths can start the MAT track, and always forward to the delegate so
+        // its own play-state machine stays truthful for a later MAT disengage.
+        isPlaying = true
+        super.play()
+        if (matMode) matSink.play()
     }
 
     override fun pause() {
-        if (matMode) { isPlaying = false; matSink.pause() } else super.pause()
+        isPlaying = false
+        super.pause()
+        if (matMode) matSink.pause()
     }
 
     override fun flush() {
