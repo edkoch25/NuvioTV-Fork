@@ -3778,7 +3778,16 @@ private fun PlayerRuntimeController.recordFirstFrameDiagnostics(
             currentDiagnostics.dv7ModeEffective,
             dvConversionOccurred
         ),
-        audioPath = currentAudioPathDescription,
+        // nt33: the record is finalised AT FIRST FRAME, which under AFR precedes MAT
+        // engagement entirely (the first frame renders during the settle, proven in
+        // the 8 Aug capture), so no writer running at or after engagement can ever
+        // land in this snapshot. Evaluate the MAT fallback at the snapshot itself -
+        // ordering-proof by construction, reading the same live wrapper state the
+        // HUD row already proves readable.
+        audioPath = currentAudioPathDescription
+            ?: if (matRoutingAudioSink?.isMatActive() == true)
+                "TrueHD \u2192 MAT passthrough, app-packed (IEC61937 192 kHz, 8ch)"
+            else null,
         audioCapabilities = AudioCapabilityReport.latest,
         videoBitrate = run {
             val durationMsVal = player.duration.takeIf { it != C.TIME_UNSET } ?: 0L
