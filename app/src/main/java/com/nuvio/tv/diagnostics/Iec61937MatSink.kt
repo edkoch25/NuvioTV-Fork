@@ -16,7 +16,10 @@
  *   - A start threshold defers output until a stable initial burst is buffered.
  *
  *  Preamble bytes source-verified (FFmpeg spdif.h/spdifenc.c) AND empirically proven on the
- *  Homatics in Gate 0 nt41 (LE TrueHD cell). No payload byte-swap on LE ARM.
+ *  Homatics in Gate 0 nt41 (LE TrueHD cell). PAYLOAD words are byte-swapped to wire
+ *  order before write (see swapPayloadWords) - the earlier "no payload byte-swap on
+ *  LE ARM" claim was validated only on zero-stuffed bursts, where a swap is invisible,
+ *  and was falsified 8 Aug 2026 by the Kodi control on the same box.
  *
  *  NOTE: playbackHeadPosition is a 32-bit frame counter; at 192 kHz it wraps after ~3.1 h.
  */
@@ -176,6 +179,31 @@ class Iec61937MatSink {
          * Pure function: overwrite the first 8 bytes of a MAT frame with the IEC61937
          * preamble, little-endian. MatPacker leaves those bytes zeroed for this purpose.
          */
+        /**
+         * Pairwise 16-bit byte swap of the whole MAT frame, mirroring Kodi's
+         * CAEPackIEC61937::PackTrueHD on little-endian systems (SwapEndian over the
+         * payload, AEPackIEC61937.cpp): the IEC61937 payload's 16-bit words travel
+         * big-endian on the wire while the four preamble words are little-endian.
+         * MatPacker leaves bytes 0..7 zeroed, so swapping the ENTIRE frame and then
+         * stamping the preamble (writeIecPreamble overwrites 0..7) is equivalent to
+         * Kodi's payload-only swap. Call BEFORE writeIecPreamble. Why every earlier
+         * probe missed this: the HAL's format detector and Gate 0's head-advance
+         * cells read only the preamble, and zero-stuffed burst payloads are
+         * endianness-invariant - the claim was untestable until the Kodi control
+         * (locks the receiver on this box) was run against verbatim payload (no
+         * lock), 8 Aug 2026.
+         */
+        fun swapPayloadWords(frame: ByteArray) {
+            var i = 0
+            val n = frame.size - 1
+            while (i < n) {
+                val t = frame[i]
+                frame[i] = frame[i + 1]
+                frame[i + 1] = t
+                i += 2
+            }
+        }
+
         fun writeIecPreamble(frame: ByteArray) {
             putLe16(frame, 0, PA)
             putLe16(frame, 2, PB)

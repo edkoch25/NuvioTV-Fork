@@ -155,6 +155,9 @@ class MatRoutingAudioSink(
             if (packer.packTrueHD(au, au.size)) {
                 var frame = packer.getOutputFrame()
                 while (frame != null) {
+                    // Kodi parity (nt30): payload words to wire byte order, THEN the
+                    // LE preamble stamp over bytes 0..7.
+                    Iec61937MatSink.swapPayloadWords(frame)
                     Iec61937MatSink.writeIecPreamble(frame)
                     pendingFrames.addLast(ByteBuffer.wrap(frame))
                     dbgFramesEnq += 1
