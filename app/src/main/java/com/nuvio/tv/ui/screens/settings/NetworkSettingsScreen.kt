@@ -545,21 +545,6 @@ fun AdvancedSettingsContent(
             }
         }
 
-        item(key = "mat_passthrough") {
-            SettingsGroupCard(modifier = Modifier.fillMaxWidth()) {
-                SettingsToggleRow(
-                    title = stringResource(R.string.audio_mat_passthrough),
-                    subtitle = stringResource(R.string.audio_mat_passthrough_sub),
-                    checked = dvPlayerSettings.matPassthroughEnabled,
-                    onToggle = {
-                        scope.launch {
-                            playbackVm.setMatPassthroughEnabled(!dvPlayerSettings.matPassthroughEnabled)
-                        }
-                    }
-                )
-            }
-        }
-
         item(key = "speed_test") {
             SettingsGroupCard(modifier = Modifier.fillMaxWidth()) {
                 val isRunning = testState == NetworkTestState.TestingLatency ||

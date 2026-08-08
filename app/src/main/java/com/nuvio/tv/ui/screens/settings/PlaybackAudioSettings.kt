@@ -80,6 +80,7 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
     onSetAllowAc3Passthrough: (Boolean) -> Unit,
     onSetAllowEac3Passthrough: (Boolean) -> Unit,
     onSetAllowTrueHdPassthrough: (Boolean) -> Unit,
+    onSetMatPassthroughEnabled: (Boolean) -> Unit,
     onSetAllowDtsPassthrough: (Boolean) -> Unit,
     onSetAllowDtsHdPassthrough: (Boolean) -> Unit,
     onSetDv5ToDv81Enabled: (Boolean) -> Unit,
@@ -313,6 +314,24 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
                     subtitle = stringResource(R.string.audio_passthrough_truehd_sub),
                     isChecked = playerSettings.allowTrueHdPassthrough,
                     onCheckedChange = onSetAllowTrueHdPassthrough,
+                    onFocused = onItemFocused,
+                    enabled = enabled
+                )
+            }
+        }
+
+        // MAT lives directly under the TrueHD switch it depends on, and only shows
+        // while that switch is on: with per-format TrueHD off (or F3-learned denial)
+        // the renderer decodes upstream and the MAT wrapper never sees the format,
+        // so surfacing the toggle in that state would advertise a dead control.
+        if (isExoEngine && playerSettings.allowTrueHdPassthrough) {
+            item(key = "mat_passthrough") {
+                ToggleSettingsItem(
+                    icon = Icons.Default.VolumeUp,
+                    title = stringResource(R.string.audio_mat_passthrough),
+                    subtitle = stringResource(R.string.audio_mat_passthrough_sub),
+                    isChecked = playerSettings.matPassthroughEnabled,
+                    onCheckedChange = onSetMatPassthroughEnabled,
                     onFocused = onItemFocused,
                     enabled = enabled
                 )

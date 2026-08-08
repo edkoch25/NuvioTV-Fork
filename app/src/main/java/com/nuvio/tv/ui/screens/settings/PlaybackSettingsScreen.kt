@@ -301,6 +301,7 @@ fun PlaybackSettingsContent(
                 onSetAllowAc3Passthrough = { allowed -> coroutineScope.launch { viewModel.setAllowAc3Passthrough(allowed) } },
                 onSetAllowEac3Passthrough = { allowed -> coroutineScope.launch { viewModel.setAllowEac3Passthrough(allowed) } },
                 onSetAllowTrueHdPassthrough = { allowed -> coroutineScope.launch { viewModel.setAllowTrueHdPassthrough(allowed) } },
+                onSetMatPassthroughEnabled = { enabled -> coroutineScope.launch { viewModel.setMatPassthroughEnabled(enabled) } },
                 onSetAllowDtsPassthrough = { allowed -> coroutineScope.launch { viewModel.setAllowDtsPassthrough(allowed) } },
                 onSetAllowDtsHdPassthrough = { allowed -> coroutineScope.launch { viewModel.setAllowDtsHdPassthrough(allowed) } },
                 onShowDv7HandlingModeDialog = { openDialog { showDv7HandlingModeDialog = true } },
