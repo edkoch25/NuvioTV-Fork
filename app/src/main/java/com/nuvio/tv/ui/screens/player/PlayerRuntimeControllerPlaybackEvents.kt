@@ -208,6 +208,18 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
     progressJob?.cancel()
     progressJob = scope.launch {
         while (isActive) {
+            // nt32: the MAT wrapper engages AFTER isPlaying flips true under AFR
+            // (the play-before-configure ordering, third confirmed instance), so the
+            // one-shot analytics writers evaluate isMatActive() while it is still
+            // false and never re-fire. Lazily fill on the tick instead - ordering-
+            // immune, lands within one tick of engagement, and the null guard keeps
+            // any earlier writer authoritative.
+            if (currentAudioPathDescription == null &&
+                matRoutingAudioSink?.isMatActive() == true
+            ) {
+                currentAudioPathDescription =
+                    "TrueHD \u2192 MAT passthrough, app-packed (IEC61937 192 kHz, 8ch)"
+            }
             if (isUsingMpvEngine()) {
                 val view = mpvView
                 if (view != null) {
