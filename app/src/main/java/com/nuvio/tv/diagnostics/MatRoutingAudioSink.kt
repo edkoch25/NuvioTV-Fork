@@ -58,6 +58,13 @@ class MatRoutingAudioSink(
 
     // Position anchoring: PTS of the first buffer handled since the last flush.
     private var startPtsUs = C.TIME_UNSET
+
+    // nt31 observability: windowed average of consumed TrueHD input bytes, read by
+    // the HUD's A-bitrate row while MAT is active. Null until the first ~2 s window.
+    private var rateWindowStartMs = 0L
+    private var rateWindowBytes = 0L
+    @Volatile
+    private var lastInputRateBps = -1L
     private var playToEndCalled = false
 
     // nt48/nt51 diagnostics (throttled ~1/sec; strip once MAT is proven).
@@ -103,6 +110,7 @@ class MatRoutingAudioSink(
             startPtsUs = C.TIME_UNSET
             playToEndCalled = false
             resetDiag()
+            resetInputRate()
             // A reconfigure may arrive on an already-playing sink; restore play state.
             if (isPlaying) matSink.play()
             Log.i(TAG, "configure: MAT mode ON  mime=${inputFormat.sampleMimeType}" +
@@ -173,11 +181,32 @@ class MatRoutingAudioSink(
 
         // 4. Input fully consumed.
         buffer.position(buffer.position() + len)
+        val rateNowMs = android.os.SystemClock.elapsedRealtime()
+        if (rateWindowStartMs == 0L) rateWindowStartMs = rateNowMs
+        rateWindowBytes += len
+        val rateWinMs = rateNowMs - rateWindowStartMs
+        if (rateWinMs >= 2000L) {
+            lastInputRateBps = rateWindowBytes * 8000L / rateWinMs
+            rateWindowStartMs = rateNowMs
+            rateWindowBytes = 0L
+        }
         maybeLogDiag(len, backlogged = false)
         return true
     }
 
-    /** Write as many queued frames as the AudioTrack will accept, NON-BLOCKING. */
+    /** True while TrueHD is actively routed through the app-side MAT path. */
+    fun isMatActive(): Boolean = matMode
+
+    /** Windowed input bitrate while MAT is active, or null before the first window. */
+    fun measuredInputBitrateBps(): Long? = lastInputRateBps.takeIf { it > 0L }
+
+    private fun resetInputRate() {
+        rateWindowStartMs = 0L
+        rateWindowBytes = 0L
+        lastInputRateBps = -1L
+    }
+
+    /** Drain as many queued frames as the AudioTrack will accept, NON-BLOCKING. */
     private fun drainPending() {
         while (pendingFrames.isNotEmpty()) {
             val head = pendingFrames.peekFirst()
@@ -271,6 +300,7 @@ class MatRoutingAudioSink(
             startPtsUs = C.TIME_UNSET
             playToEndCalled = false
             resetDiag()
+            resetInputRate()
         } else {
             super.flush()
         }
@@ -285,6 +315,7 @@ class MatRoutingAudioSink(
         isPlaying = false
         startPtsUs = C.TIME_UNSET
         playToEndCalled = false
+        resetInputRate()
         super.reset()
     }
 

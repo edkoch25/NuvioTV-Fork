@@ -1096,6 +1096,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                 initialForcePcm = hasTriedAudioPcmFallback || isBluetoothAudioOutput,
                 preferSoftwareAudioOnly = isBluetoothAudioOutput && !vc1SoftwareFallbackActive,
                 onPlaybackSpeedAwareAudioSinkCreated = { playbackSpeedAwareAudioSink = it },
+                onMatRoutingAudioSinkCreated = { matRoutingAudioSink = it },
                 onFfmpegAudioRendererChanged = { renderer ->
                     ffmpegAudioRenderer = renderer
                     renderer?.applyDownmixSettings(
@@ -2116,6 +2117,16 @@ internal fun PlayerRuntimeController.initializePlayer(
                         // The null guard keeps the richer F9 event authoritative
                         // whenever it does fire, and the per-stream reset keeps this
                         // one-shot per stream.
+                        // nt31: the MAT wrapper never configures the delegate and
+                        // emits no track-init event, so both existing writers miss it
+                        // (proven: the '-' row, 8 Aug captures). Name the path from
+                        // the wrapper's own state.
+                        if (isPlaying && currentAudioPathDescription == null &&
+                            matRoutingAudioSink?.isMatActive() == true
+                        ) {
+                            currentAudioPathDescription =
+                                "TrueHD \u2192 MAT passthrough, app-packed (IEC61937 192 kHz, 8ch)"
+                        }
                         if (isPlaying && currentAudioPathDescription == null) {
                             runCatching {
                                 val source = this@apply.audioFormat
@@ -2715,6 +2726,7 @@ private class SubtitleOffsetRenderersFactory(
      */
     private val preferSoftwareAudioOnly: Boolean = false,
     private val onPlaybackSpeedAwareAudioSinkCreated: (PlaybackSpeedAwareAudioSink) -> Unit,
+    private val onMatRoutingAudioSinkCreated: (com.nuvio.tv.diagnostics.MatRoutingAudioSink?) -> Unit,
     private val onFfmpegAudioRendererChanged: (FfmpegAudioRenderer?) -> Unit
 ) : DefaultRenderersFactory(context) {
 
@@ -2819,11 +2831,16 @@ private class SubtitleOffsetRenderersFactory(
         // §9.5: only wrap when the MAT toggle is on. When off, the wrapper is never
         // constructed - zero app-side MAT code is in the audio path (not merely dormant).
         return if (matPassthroughEnabled) {
-            com.nuvio.tv.diagnostics.MatRoutingAudioSink(
+            val matSink = com.nuvio.tv.diagnostics.MatRoutingAudioSink(
                 playbackSpeedAwareAudioSink,
                 matPassthroughEnabled
             )
+            onMatRoutingAudioSinkCreated(matSink)
+            matSink
         } else {
+            // A rebuild with the toggle off must clear any stale wrapper reference so
+            // the HUD/Audio Path never read MAT state from a released sink.
+            onMatRoutingAudioSinkCreated(null)
             playbackSpeedAwareAudioSink
         }
     }

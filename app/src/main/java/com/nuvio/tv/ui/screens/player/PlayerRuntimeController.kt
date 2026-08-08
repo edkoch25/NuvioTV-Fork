@@ -318,6 +318,7 @@ class PlayerRuntimeController(
     @Volatile var exoPlayerView: androidx.media3.ui.PlayerView? = null
     internal var _loadControl: DefaultLoadControl? = null
     internal var playbackSpeedAwareAudioSink: PlaybackSpeedAwareAudioSink? = null
+    internal var matRoutingAudioSink: com.nuvio.tv.diagnostics.MatRoutingAudioSink? = null
 
     internal var progressJob: Job? = null
     internal var vodTelemetryJob: Job? = null

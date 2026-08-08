@@ -661,6 +661,7 @@ class PlayerViewModel @Inject constructor(
             val codec = audioCodecLabel(format.sampleMimeType)
             val channels = format.channelCount.takeIf { it > 0 }?.let { "${it}ch" }
             val rate = format.sampleRate.takeIf { it > 0 }?.let { "${it / 1000} kHz" }
+            val matActive = controller.matRoutingAudioSink?.isMatActive() == true
             val passthrough = controller.playbackSpeedAwareAudioSink?.isDirectPlaybackActive()
             // Same layer-honesty rule as the diagnostics card: when the sink is in
             // direct mode carrying AC-3 for a non-AC-3 source, the bitstream is our
@@ -668,6 +669,7 @@ class PlayerViewModel @Inject constructor(
             // transcode this app performs, so the special case is exhaustive.
             val sinkMime = controller.playbackSpeedAwareAudioSink?.lastConfiguredInputFormat?.sampleMimeType
             val mode = when {
+                matActive -> "MAT out (app-packed)"
                 passthrough == true && sinkMime == MimeTypes.AUDIO_AC3 &&
                     format.sampleMimeType != MimeTypes.AUDIO_AC3 -> "AC-3 transcode"
                 passthrough == true -> "passthrough"
@@ -678,6 +680,7 @@ class PlayerViewModel @Inject constructor(
                 it.contains("true-hd") || it.contains("truehd") || it.contains("dts")
             } == true
             val dot = when {
+                matActive -> StatsDot.GOOD
                 passthrough == true -> StatsDot.GOOD
                 passthrough == false && losslessMime -> StatsDot.WARN
                 else -> StatsDot.NONE
@@ -689,7 +692,10 @@ class PlayerViewModel @Inject constructor(
             // measures the encoded bitstream on its way out.
             val declaredAudioBitrate = (if (format.bitrate > 0) format.bitrate.toLong() else null)
                 ?: (if (format.averageBitrate > 0) format.averageBitrate.toLong() else null)
-            val measuredAudioBitrate = controller.playbackSpeedAwareAudioSink?.measuredAudioBitrateBps()
+            val matMeasuredBitrate =
+                if (matActive) controller.matRoutingAudioSink?.measuredInputBitrateBps() else null
+            val measuredAudioBitrate = matMeasuredBitrate
+                ?: controller.playbackSpeedAwareAudioSink?.measuredAudioBitrateBps()
             rows += StatsRow(
                 "A bitrate",
                 when {
