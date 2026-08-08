@@ -72,6 +72,8 @@ private const val CEIL_TRACE_LOG_INTERVAL_MS = 1_000L
 // headroom and letting the classic 1.4 s detection fire over the 1.0 s
 // threshold (proven by CEIL_TRACE, 7 Aug evening).
 private const val TRUEHD_PRESTART_SPAN_CAP_MS = 400L
+// nt27: hard cap on cumulative post-latch step credits per stream segment.
+private const val TRUEHD_STEP_CREDIT_CAP_MS = 3_000L
 private const val CEIL_FRONTIER_LOG_INTERVAL_MS = 1_000L
 
 // nt8: TrueHD startup-storm detector (see truehdStormLeadAccumMs). Storm lead was
@@ -254,6 +256,9 @@ internal class PlaybackSpeedAwareAudioSink(
 
     @Volatile
     private var ceilPresentLatched: Boolean = false
+
+    @Volatile
+    private var ceilStepCreditUs: Long = 0L
 
     // nt8: TrueHD startup-storm detector. After a display-mode switch the Amlogic
     // MS12 TrueHD bypass parser can start misaligned and hunt for a major sync
@@ -592,11 +597,29 @@ internal class PlaybackSpeedAwareAudioSink(
                 // plain nt21 -- liveness is never conditioned on it.
                 if (!ceilPresentLatched) {
                     maybeLatchPresentation()
+                } else {
+                    // nt27: post-latch step credit. A mid-stream clock re-step
+                    // advances presentation instantly; without a matching
+                    // budget credit the steady 700 ms pipeline drains by the
+                    // step size and the HAL pays its ~3 s re-prime. Credit
+                    // only observed presented-position strides (>500 ms),
+                    // hard-capped: presented <= delivered, so credits cannot
+                    // feed back into unbounded delivery.
+                    val pNow = super.getCurrentPositionUs(false)
+                    if (pNow != Long.MIN_VALUE) {
+                        val prevP = ceilPrevPosUs
+                        ceilPrevPosUs = pNow
+                        if (prevP != Long.MIN_VALUE && pNow - prevP > 500_000L) {
+                            ceilStepCreditUs = (ceilStepCreditUs + (pNow - prevP))
+                                .coerceAtMost(TRUEHD_STEP_CREDIT_CAP_MS * 1000L)
+                        }
+                    }
                 }
                 val aheadUs = presentationTimeUs - ceilAnchorPtsUs
                 val allowedUs = ((SystemClock.elapsedRealtime() - ceilAnchorWallMs) *
                     playbackSpeed).toLong() * 1000L +
-                    (TRUEHD_WRITE_AHEAD_CEILING_MS * 1000L - ceilQueuedAtArmUs)
+                    (TRUEHD_WRITE_AHEAD_CEILING_MS * 1000L - ceilQueuedAtArmUs) +
+                    ceilStepCreditUs
                 if (aheadUs > allowedUs) {
                     maybeLogCeiling("ahead", aheadUs - allowedUs)
                     return false
@@ -636,7 +659,7 @@ internal class PlaybackSpeedAwareAudioSink(
                 TAG,
                 "CEIL_FRONTIER er=$nowMs lastPtsUs=$encodedAudioLastPtsUs " +
                     "anchorPtsUs=$ceilAnchorPtsUs queuedAtArmUs=$ceilQueuedAtArmUs " +
-                    "anchorWallMs=$ceilAnchorWallMs latched=$ceilPresentLatched " +
+                    "anchorWallMs=$ceilAnchorWallMs latched=$ceilPresentLatched creditUs=$ceilStepCreditUs " +
                     "rejects=$ceilRejects"
             )
         }
@@ -657,9 +680,16 @@ internal class PlaybackSpeedAwareAudioSink(
         ceilPrevPosUs = p
         if (prev != Long.MIN_VALUE && p > prev) {
             ceilPresentLatched = true
-            if (encodedAudioFirstPtsUs != C.TIME_UNSET) {
-                ceilAnchorPtsUs = encodedAudioFirstPtsUs
-            }
+            // nt27: rebase to the OBSERVED position, not firstPts. The latch
+            // step means presentation runs ahead of the firstPts model by the
+            // step size, so a firstPts-based freeze over-freezes by exactly
+            // that amount and drives the pipeline to zero ~1 s early --
+            // measured on nt26: frontier-minus-position hit -0.03 s at the
+            // stall onset, followed by the HAL's ~3 s re-prime (the 3.4 s
+            // stall at pos ~4.9 in every step-taking run; no-step runs, where
+            // p ~= firstPts, were cluster-free). Basing at p makes the freeze
+            // end when the pipeline reaches the ceiling in presented terms.
+            ceilAnchorPtsUs = p
             ceilAnchorWallMs = SystemClock.elapsedRealtime()
             ceilQueuedAtArmUs = 0L
         }
@@ -705,6 +735,7 @@ internal class PlaybackSpeedAwareAudioSink(
         ceilQueuedAtArmUs = 0L
         ceilPrevPosUs = Long.MIN_VALUE
         ceilPresentLatched = false
+        ceilStepCreditUs = 0L
         // nt16: disengage the shadow governor on flush/configure.
         govEngaged = false
         govCFrozen = false
