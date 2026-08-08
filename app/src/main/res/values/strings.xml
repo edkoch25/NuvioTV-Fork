@@ -719,7 +719,7 @@
     <string name="audio_force_optical_passthrough">Force AC-3 Transcoding (Optical/SPDIF)</string>
     <string name="audio_force_optical_passthrough_sub">Transcodes multichannel formats (TrueHD, DTS, AAC, etc.) to Dolby Digital 5.1 in real-time for Optical/SPDIF connections.</string>
     <string name="audio_mat_passthrough">TrueHD MAT passthrough (experimental)</string>
-    <string name="audio_mat_passthrough_sub">Packs TrueHD into MAT/IEC61937 in-app (Kodi-style) instead of handing it to the platform. Bypasses the vendor decode path entirely. Requires a receiver that decodes Dolby MAT. Working on tested hardware; experimental across other devices and chains.</string>
+    <string name="audio_mat_passthrough_sub">Packs TrueHD into MAT/IEC61937 in-app (Kodi-style), bypassing the vendor decode path. Requires a receiver that decodes Dolby MAT.</string>
     <!--
       Per-format passthrough labels.
 
