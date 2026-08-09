@@ -436,12 +436,7 @@ internal fun SubtitleSelectionOverlay(
         }
 
         Column(verticalArrangement = Arrangement.Bottom) {
-            Text(
-                text = stringResource(R.string.subtitle_dialog_title),
-                style = MaterialTheme.typography.headlineMedium,
-                color = Color.White,
-                modifier = Modifier.padding(bottom = NuvioTheme.spacing.md)
-            )
+            PanelEyebrow(text = stringResource(R.string.subtitle_dialog_title))
 
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 SubtitleLanguageRail(

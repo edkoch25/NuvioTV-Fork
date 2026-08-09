@@ -84,29 +84,23 @@ internal fun StreamSourcesSidePanel(
             .background(NuvioTheme.colors.BackgroundElevated)
     ) {
         Column(modifier = Modifier.padding(NuvioTheme.spacing.xl)) {
+            PanelEyebrow(text = stringResource(R.string.sources_title))
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.sm, Alignment.End),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = stringResource(R.string.sources_title),
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = NuvioTheme.colors.TextPrimary
+                DialogButton(
+                    text = stringResource(R.string.sources_reload),
+                    onClick = onReload,
+                    isPrimary = false
                 )
-
-                Row(horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.sm)) {
-                    DialogButton(
-                        text = stringResource(R.string.sources_reload),
-                        onClick = onReload,
-                        isPrimary = false
-                    )
-                    DialogButton(
-                        text = stringResource(R.string.sources_close),
-                        onClick = onClose,
-                        isPrimary = false
-                    )
-                }
+                DialogButton(
+                    text = stringResource(R.string.sources_close),
+                    onClick = onClose,
+                    isPrimary = false
+                )
             }
 
             Spacer(modifier = Modifier.height(NuvioTheme.spacing.lg))

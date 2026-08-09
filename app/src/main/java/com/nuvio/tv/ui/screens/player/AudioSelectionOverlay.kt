@@ -2,6 +2,8 @@
 
 package com.nuvio.tv.ui.screens.player
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Spacer
 import com.nuvio.tv.ui.theme.NuvioTheme
 
 import androidx.compose.foundation.BorderStroke
@@ -152,71 +154,73 @@ internal fun AudioSelectionOverlay(
         onDismiss = onDismiss,
         modifier = modifier,
         captureKeys = false,
-        contentPadding = PaddingValues(start = 44.dp, end = 44.dp, top = 28.dp, bottom = 64.dp)
+        contentPadding = PaddingValues(start = 44.dp, end = 44.dp, top = 28.dp, bottom = 28.dp)
     ) {
+        var editorOpen by remember { mutableStateOf(false) }
+
+        LaunchedEffect(editorOpen) {
+            if (editorOpen) {
+                runCatching { delayMinusFocusRequester.requestFocus() }
+            } else {
+                runCatching { tracksFocusRequester.requestFocus() }
+            }
+        }
+
         Column(
             modifier = Modifier
-                .width(724.dp)
-                .align(Alignment.BottomStart)
-                .fillMaxHeight(),
-            verticalArrangement = Arrangement.Bottom
+                .width(430.dp)
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .background(Color(0xF0181820), RoundedCornerShape(20.dp))
+                .padding(horizontal = 16.dp, vertical = 20.dp)
         ) {
-            Text(
-                text = stringResource(R.string.audio_dialog_title),
-                style = MaterialTheme.typography.headlineMedium,
-                color = Color.White,
-                modifier = Modifier.padding(bottom = NuvioTheme.spacing.sm)
+            PanelEyebrow(text = stringResource(R.string.audio_dialog_title))
+
+            PanelActionRow(
+                label = if (editorOpen) {
+                    stringResource(R.string.panel_audio_back_to_tracks)
+                } else {
+                    stringResource(R.string.panel_audio_adjustments)
+                },
+                onClick = { editorOpen = !editorOpen }
             )
 
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.md),
-                verticalAlignment = Alignment.Top,
-                modifier = Modifier.padding(bottom = NuvioTheme.spacing.sm)
-            ) {
-                Column(modifier = Modifier.width(444.dp)) {
-                    AudioTracksContent(
-                        tracks = tracks,
-                        selectedIndex = selectedIndex,
-                        listState = listState,
-                        initialFocusRequester = tracksFocusRequester,
-                        rightFocusRequester = when {
-                            canDecreaseDelay -> delayMinusFocusRequester
-                            canIncreaseDelay -> delayPlusFocusRequester
-                            canDecreaseAmp -> ampMinusFocusRequester
-                            canIncreaseAmp -> ampPlusFocusRequester
-                            canDecreaseCenterMix -> centerMinusFocusRequester
-                            canIncreaseCenterMix -> centerPlusFocusRequester
-                            else -> persistFocusRequester
-                        },
-                        onTrackFocused = { lastFocusedAudioIndex = it },
-                        onTrackSelected = onTrackSelected
-                    )
-                }
-                Column(modifier = Modifier.width(268.dp)) {
-                    AudioControlsContent(
-                        audioDelayMs = audioDelayMs,
-                        audioAmplificationDb = audioAmplificationDb,
-                        isAmplificationAvailable = isAmplificationAvailable,
-                        centerMixLevelDb = centerMixLevelDb,
-                        isCenterMixAvailable = isCenterMixAvailable,
-                        persistAmplification = persistAmplification,
-                        delayMinusFocusRequester = delayMinusFocusRequester,
-                        delayPlusFocusRequester = delayPlusFocusRequester,
-                        ampMinusFocusRequester = ampMinusFocusRequester,
-                        ampPlusFocusRequester = ampPlusFocusRequester,
-                        centerMinusFocusRequester = centerMinusFocusRequester,
-                        centerPlusFocusRequester = centerPlusFocusRequester,
-                        persistFocusRequester = persistFocusRequester,
-                        leftFocusRequester = tracksFocusRequester,
-                        onAudioDelayChange = onAudioDelayChange,
-                        onAmplificationChange = { nextDb, focusTarget ->
-                            pendingControlFocusTarget = focusTarget
-                            onAmplificationChange(nextDb)
-                        },
-                        onCenterMixLevelChange = onCenterMixLevelChange,
-                        onPersistAmplificationChange = onPersistAmplificationChange
-                    )
-                }
+            Spacer(modifier = Modifier.height(NuvioTheme.spacing.sm))
+
+            if (editorOpen) {
+                AudioControlsContent(
+                    audioDelayMs = audioDelayMs,
+                    audioAmplificationDb = audioAmplificationDb,
+                    isAmplificationAvailable = isAmplificationAvailable,
+                    centerMixLevelDb = centerMixLevelDb,
+                    isCenterMixAvailable = isCenterMixAvailable,
+                    persistAmplification = persistAmplification,
+                    delayMinusFocusRequester = delayMinusFocusRequester,
+                    delayPlusFocusRequester = delayPlusFocusRequester,
+                    ampMinusFocusRequester = ampMinusFocusRequester,
+                    ampPlusFocusRequester = ampPlusFocusRequester,
+                    centerMinusFocusRequester = centerMinusFocusRequester,
+                    centerPlusFocusRequester = centerPlusFocusRequester,
+                    persistFocusRequester = persistFocusRequester,
+                    leftFocusRequester = FocusRequester.Default,
+                    onAudioDelayChange = onAudioDelayChange,
+                    onAmplificationChange = { nextDb, focusTarget ->
+                        pendingControlFocusTarget = focusTarget
+                        onAmplificationChange(nextDb)
+                    },
+                    onCenterMixLevelChange = onCenterMixLevelChange,
+                    onPersistAmplificationChange = onPersistAmplificationChange
+                )
+            } else {
+                AudioTracksContent(
+                    tracks = tracks,
+                    selectedIndex = selectedIndex,
+                    listState = listState,
+                    initialFocusRequester = tracksFocusRequester,
+                    rightFocusRequester = FocusRequester.Default,
+                    onTrackFocused = { lastFocusedAudioIndex = it },
+                    onTrackSelected = onTrackSelected
+                )
             }
         }
     }
