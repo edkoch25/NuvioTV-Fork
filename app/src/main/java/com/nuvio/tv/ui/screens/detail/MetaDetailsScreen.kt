@@ -70,7 +70,6 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -422,13 +421,8 @@ fun MetaDetailsScreen(
                 if (!heroBackdropUrl.isNullOrBlank()) {
                     val localContext = LocalContext.current
                     val localDensity = LocalDensity.current
-                    val configuration = LocalConfiguration.current
-                    val loadingBackdropWidthPx = remember(configuration, localDensity) {
-                        with(localDensity) { configuration.screenWidthDp.dp.roundToPx() }
-                    }
-                    val loadingBackdropHeightPx = remember(configuration, localDensity) {
-                        with(localDensity) { configuration.screenHeightDp.dp.roundToPx() }
-                    }
+                    val loadingBackdropWidthPx = remember(localContext) { localContext.resources.displayMetrics.widthPixels.coerceAtLeast(1) }
+                    val loadingBackdropHeightPx = remember(localContext) { localContext.resources.displayMetrics.heightPixels.coerceAtLeast(1) }
                     val loadingBackdropRequest = remember(localContext, heroBackdropUrl, loadingBackdropWidthPx, loadingBackdropHeightPx) {
                         ImageRequest.Builder(localContext)
                             .data(heroBackdropUrl)
@@ -1487,18 +1481,11 @@ private fun MetaDetailsContent(
     }
 
     // Pre-compute screen dimensions to avoid BoxWithConstraints subcomposition overhead
-    val configuration = LocalConfiguration.current
     val localContext = LocalContext.current
     val localDensity = LocalDensity.current
     val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
-    val screenWidthDp = remember(configuration) { configuration.screenWidthDp.dp }
-    val screenHeightDp = remember(configuration) { configuration.screenHeightDp.dp }
-    val backdropWidthPx = remember(screenWidthDp, localDensity) {
-        with(localDensity) { screenWidthDp.roundToPx() }
-    }
-    val backdropHeightPx = remember(screenHeightDp, localDensity) {
-        with(localDensity) { screenHeightDp.roundToPx() }
-    }
+    val backdropWidthPx = remember(localContext) { localContext.resources.displayMetrics.widthPixels.coerceAtLeast(1) }
+    val backdropHeightPx = remember(localContext) { localContext.resources.displayMetrics.heightPixels.coerceAtLeast(1) }
     val hasHeroBackdrop = !heroBackdropUrl.isNullOrBlank()
     val seedBackdropUrl = heroBackdropUrl?.takeIf { it.isNotBlank() }
     val backdropDataUrl = meta.backdropUrl ?: meta.poster

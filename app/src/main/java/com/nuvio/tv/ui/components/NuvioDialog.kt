@@ -1,5 +1,7 @@
 package com.nuvio.tv.ui.components
 
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
 import com.nuvio.tv.ui.theme.NuvioTheme
 
 import android.os.SystemClock
@@ -26,7 +28,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -57,7 +58,9 @@ fun NuvioDialog(
     content: @Composable ColumnScope.() -> Unit
 ) {
     var isReady by remember { mutableStateOf(!suppressFirstKeyUp) }
-    val maxDialogHeight = (LocalConfiguration.current.screenHeightDp.dp - NuvioTheme.spacing.xxxl).coerceAtLeast(320.dp)
+    val dialogDensity = LocalDensity.current
+    val dialogWindowHeightPx = LocalContext.current.resources.displayMetrics.heightPixels
+    val maxDialogHeight = (with(dialogDensity) { dialogWindowHeightPx.toDp() } - NuvioTheme.spacing.xxxl).coerceAtLeast(320.dp)
     val containerShape = RoundedCornerShape(containerCornerRadius)
     val backgroundModifier = if (containerBrush == null) {
         Modifier.background(NuvioTheme.colors.BackgroundElevated, containerShape)

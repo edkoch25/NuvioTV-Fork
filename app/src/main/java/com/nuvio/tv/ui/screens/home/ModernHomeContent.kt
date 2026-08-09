@@ -578,7 +578,6 @@ fun ModernHomeContent(
     }
 
     val localConfiguration = LocalConfiguration.current
-    val screenWidth = localConfiguration.screenWidthDp.dp
     val screenHeight = localConfiguration.screenHeightDp.dp
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -917,11 +916,10 @@ fun ModernHomeContent(
                 }
             }
             val contentFocusRequester = LocalContentFocusRequester.current
-            val heroMediaWidthPx = remember(screenWidth, localDensity, fullScreenBackdrop) {
-                with(localDensity) {
-                    if (fullScreenBackdrop) screenWidth.roundToPx()
-                    else (screenWidth * MODERN_HERO_MEDIA_WIDTH_FRACTION).roundToPx()
-                }.coerceAtLeast(1)
+            val heroWindowWidthPx = LocalContext.current.resources.displayMetrics.widthPixels
+            val heroMediaWidthPx = remember(heroWindowWidthPx, fullScreenBackdrop) {
+                (if (fullScreenBackdrop) heroWindowWidthPx
+                else (heroWindowWidthPx * MODERN_HERO_MEDIA_WIDTH_FRACTION).toInt()).coerceAtLeast(1)
             }
             val heroMediaHeightPx = remember(heroBackdropHeight, screenHeight, localDensity, fullScreenBackdrop) {
                 with(localDensity) {

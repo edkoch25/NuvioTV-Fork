@@ -44,7 +44,6 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -200,10 +199,7 @@ private fun HeroCarouselSlide(
     val highlighterEnabled = LocalRecompositionHighlighterEnabled.current
     val context = LocalContext.current
     val density = LocalDensity.current
-    val configuration = LocalConfiguration.current
-    val requestWidthPx = remember(configuration.screenWidthDp, density) {
-        with(density) { configuration.screenWidthDp.dp.roundToPx() }.coerceAtLeast(1)
-    }
+    val requestWidthPx = remember(context) { context.resources.displayMetrics.widthPixels.coerceAtLeast(1) }
     val requestHeightPx = remember(density) { with(density) { 400.dp.roundToPx() }.coerceAtLeast(1) }
     val logoRequestHeightPx = remember(density) { with(density) { 80.dp.roundToPx() }.coerceAtLeast(1) }
 

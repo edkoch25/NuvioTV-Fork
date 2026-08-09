@@ -55,7 +55,6 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -1130,7 +1129,9 @@ private data class EpisodeCardMetrics(
 
 @Composable
 private fun rememberEpisodeCardMetrics(): EpisodeCardMetrics {
-    val screenWidthDp = LocalConfiguration.current.screenWidthDp
+    val sectionDensity = LocalDensity.current
+    val sectionWindowWidthPx = LocalContext.current.resources.displayMetrics.widthPixels
+    val screenWidthDp = with(sectionDensity) { sectionWindowWidthPx.toDp() }.value.toInt()
     return remember(screenWidthDp) {
         when {
             screenWidthDp >= 1300 -> EpisodeCardMetrics(
