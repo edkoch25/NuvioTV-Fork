@@ -16,6 +16,9 @@ import com.nuvio.tv.domain.model.Stream
 import com.nuvio.tv.domain.model.enabledAddons
 import com.nuvio.tv.domain.repository.AddonRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -55,6 +58,11 @@ class PrefetchSelectionSupplier @Inject constructor(
     private val directDebridResolver: DirectDebridResolver
 ) {
 
+    private val _uiSignals = MutableStateFlow<SourcePrefetchSignal?>(null)
+
+    /** Hero-target source line: RANKED after the pick, READY once the link is usable. */
+    val uiSignals: StateFlow<SourcePrefetchSignal?> = _uiSignals.asStateFlow()
+
     /**
      * Rank [groups] as the stream screen would, then pre-resolve the winner.
      *
@@ -67,7 +75,8 @@ class PrefetchSelectionSupplier @Inject constructor(
         contentId: String?,
         season: Int?,
         episode: Int?,
-        bingeOverride: String? = null
+        bingeOverride: String? = null,
+        uiKey: String? = null
     ): PrefetchedSelection? {
         val rankT0 = SystemClock.elapsedRealtime()
         val selection = rank(groups, contentId, bingeOverride)
@@ -79,8 +88,24 @@ class PrefetchSelectionSupplier @Inject constructor(
             "PREFETCH rank_only winner=$winnerLabel " +
                 "ms=${SystemClock.elapsedRealtime() - rankT0}"
         )
-        if (selection == null) return null
-        preResolve(selection.winner, season, episode)
+        if (selection == null) {
+            if (uiKey != null) _uiSignals.value = null
+            return null
+        }
+        if (uiKey != null) {
+            val facts = selection.snapshot.preferences?.let {
+                com.nuvio.tv.core.debrid.DirectDebridStreamFilter.factsFor(selection.winner, it)
+            }
+            _uiSignals.value = SourcePrefetchSignal(uiKey, SourcePrefetchPhase.RANKED, facts)
+        }
+        val linkReady = preResolve(selection.winner, season, episode)
+        if (uiKey != null && linkReady) {
+            _uiSignals.value = SourcePrefetchSignal(
+                uiKey,
+                SourcePrefetchPhase.READY,
+                _uiSignals.value?.takeIf { it.uiKey == uiKey }?.facts
+            )
+        }
         return selection
     }
 
@@ -185,7 +210,7 @@ class PrefetchSelectionSupplier @Inject constructor(
      * unsupported provider, and for a provider that is not the active resolver.
      * Those return Stale without an API call.
      */
-    private suspend fun preResolve(winner: Stream, season: Int?, episode: Int?) {
+    private suspend fun preResolve(winner: Stream, season: Int?, episode: Int?): Boolean {
         val resolveT0 = SystemClock.elapsedRealtime()
         val result = try {
             directDebridResolver.resolve(winner, season, episode)
@@ -193,7 +218,7 @@ class PrefetchSelectionSupplier @Inject constructor(
             throw e
         } catch (e: Exception) {
             android.util.Log.w(TAG, "PREFETCH resolve failed: ${e.message}")
-            return
+            return false
         }
         // result::class.simpleName was R8-minified in release builds (observed as
         // "result=f0" for Success and "result=e0" for Stale, 25 Jul 2026). An
@@ -245,6 +270,8 @@ class PrefetchSelectionSupplier @Inject constructor(
             com.nuvio.tv.ui.screens.player.PlayerPlaybackNetworking
                 .prewarmPlaybackConnection(result.url, null)
         }
+        return result is DirectDebridResolveResult.Success ||
+            result is DirectDebridResolveResult.Stale
     }
 
     private companion object {

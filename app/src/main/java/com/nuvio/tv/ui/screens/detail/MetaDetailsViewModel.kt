@@ -1,5 +1,6 @@
 package com.nuvio.tv.ui.screens.detail
 
+import kotlinx.coroutines.flow.stateIn
 import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -137,6 +138,23 @@ class MetaDetailsViewModel @Inject constructor(
     private var lastStreamPrefetchKey: String? = null
     private var streamPrefetchJob: Job? = null
 
+    /** Fork: details-page source line. Key of the hero-target prefetch; SEARCHING until the supplier signals. */
+    private val heroSourceKey = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val heroSourceSignal: kotlinx.coroutines.flow.StateFlow<com.nuvio.tv.core.stream.SourcePrefetchSignal?> =
+        kotlinx.coroutines.flow.combine(heroSourceKey, prefetchSelectionSupplier.uiSignals) { key, sig ->
+            when {
+                key == null -> null
+                sig?.uiKey == key -> sig
+                else -> com.nuvio.tv.core.stream.SourcePrefetchSignal(
+                    key, com.nuvio.tv.core.stream.SourcePrefetchPhase.SEARCHING, null
+                )
+            }
+        }.stateIn(
+            viewModelScope,
+            kotlinx.coroutines.flow.SharingStarted.Eagerly,
+            null
+        )
+
     private fun onStreamPrefetchTarget(
         type: String,
         videoId: String,
@@ -149,6 +167,7 @@ class MetaDetailsViewModel @Inject constructor(
         val key = com.nuvio.tv.core.stream.StreamPrefetchCache.keyOf(type, videoId, season, episode)
         if (key == lastStreamPrefetchKey) return
         lastStreamPrefetchKey = key
+        if (source != "episode_focus") heroSourceKey.value = key
         streamPrefetchJob?.cancel()
         streamPrefetchJob = viewModelScope.launch {
             delay(STREAM_PREFETCH_DEBOUNCE_MS)
@@ -167,7 +186,8 @@ class MetaDetailsViewModel @Inject constructor(
                         groups = groups,
                         contentId = contentId,
                         season = season,
-                        episode = episode
+                        episode = episode,
+                        uiKey = if (source != "episode_focus") key else null
                     )
                 }
             )
