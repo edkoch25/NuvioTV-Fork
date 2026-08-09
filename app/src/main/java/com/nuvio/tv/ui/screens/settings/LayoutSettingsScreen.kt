@@ -211,26 +211,6 @@ fun LayoutSettingsContent(
             contentPadding = PaddingValues(bottom = 18.dp),
             verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.md)
         ) {
-            item(key = "ui_scale_row") {
-                val uiScaleContext = LocalContext.current
-                val uiScaleScope = rememberCoroutineScope()
-                val uiScalePercent by com.nuvio.tv.data.local.UiScalePreference.flow(uiScaleContext).collectAsState(initial = 100)
-                SliderSettingsItem(
-                    icon = Icons.Default.AspectRatio,
-                    title = stringResource(R.string.ui_scale_title),
-                    value = uiScalePercent,
-                    valueText = "$uiScalePercent%",
-                    minValue = 85,
-                    maxValue = 115,
-                    step = 5,
-                    onValueChange = { percent ->
-                        uiScaleScope.launch {
-                            com.nuvio.tv.data.local.UiScalePreference.set(uiScaleContext, percent)
-                        }
-                    },
-                    onFocused = {}
-                )
-            }
             item(key = "home_layout_section") {
                 CollapsibleSectionCard(
                     title = stringResource(R.string.layout_section_home),

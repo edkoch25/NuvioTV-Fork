@@ -33,10 +33,13 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -50,6 +53,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import android.widget.Toast
+import kotlinx.coroutines.launch
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Border
@@ -230,6 +234,24 @@ fun ThemeSettingsContent(
                         subtitle = stringResource(R.string.appearance_screensaver_dim_subtitle),
                         value = stringResource(R.string.appearance_screensaver_dim_option, uiState.screensaverDimPercent),
                         onClick = { showScreensaverDimDialog = true }
+                    )
+                    val uiScaleContext = LocalContext.current
+                    val uiScaleScope = rememberCoroutineScope()
+                    val uiScalePercent by com.nuvio.tv.data.local.UiScalePreference.flow(uiScaleContext).collectAsState(initial = 100)
+                    SliderSettingsItem(
+                        icon = Icons.Default.AspectRatio,
+                        title = stringResource(R.string.ui_scale_title),
+                        value = uiScalePercent,
+                        valueText = "$uiScalePercent%",
+                        minValue = 85,
+                        maxValue = 115,
+                        step = 5,
+                        onValueChange = { percent ->
+                            uiScaleScope.launch {
+                                com.nuvio.tv.data.local.UiScalePreference.set(uiScaleContext, percent)
+                            }
+                        },
+                        onFocused = {}
                     )
                 }
                 if (showScreensaverTimeoutDialog) {
