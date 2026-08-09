@@ -237,7 +237,7 @@ class TmdbMetadataService(
                     selectBestLocalizedImagePath(it, normalizedLanguage)
                 }
 
-                val logo = buildImageUrl(logoPath, size = "w500")
+                val logo = buildImageUrl(logoPath, size = "original")
 
                 val castMembers = credits?.cast
                     .orEmpty()
