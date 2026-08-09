@@ -999,7 +999,7 @@ private fun SubtitleLanguageCard(
     onMoveRight: (() -> Unit)?,
     onFocused: () -> Unit
 ) {
-    val textColor = if (isSelected) NuvioTheme.colors.OnSecondary else Color.White
+    val textColor = if (isSelected) Color.White else Color.White
     val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val moveToOptionsKey = if (isRtl) android.view.KeyEvent.KEYCODE_DPAD_LEFT else android.view.KeyEvent.KEYCODE_DPAD_RIGHT
 
@@ -1072,9 +1072,9 @@ private fun SubtitleOptionCard(
     onFocused: () -> Unit,
     onClick: () -> Unit
 ) {
-    val titleColor = if (item.isSelected) NuvioTheme.colors.OnSecondary else Color.White
+    val titleColor = if (item.isSelected) Color.White else Color.White
     val metaColor = if (item.isSelected) {
-        NuvioTheme.colors.OnSecondary.copy(alpha = 0.72f)
+        Color.White.copy(alpha = 0.72f)
     } else {
         NuvioTheme.colors.TextTertiary
     }
@@ -1159,7 +1159,7 @@ private fun SubtitleOptionCard(
                 Icon(
                     imageVector = Icons.Default.Check,
                     contentDescription = null,
-                    tint = NuvioTheme.colors.OnSecondary
+                    tint = Color.White
                 )
             }
         }
@@ -1177,7 +1177,7 @@ private fun CountBadge(
                 color = if (selected) {
                     Color.White.copy(alpha = 0.18f)
                 } else {
-                    NuvioTheme.colors.Secondary.copy(alpha = 0.85f)
+                    Color.White.copy(alpha = 0.30f)
                 },
                 shape = RoundedCornerShape(999.dp)
             )
@@ -1186,7 +1186,7 @@ private fun CountBadge(
         Text(
             text = count.toString(),
             style = MaterialTheme.typography.labelSmall,
-            color = if (selected) NuvioTheme.colors.OnSecondary else NuvioTheme.colors.OnSecondary
+            color = if (selected) Color.White else Color.White
         )
     }
 }
@@ -1197,7 +1197,7 @@ private fun SourceChip(label: String, selected: Boolean = false) {
         modifier = Modifier
             .background(
                 if (selected) {
-                    NuvioTheme.colors.OnSecondary.copy(alpha = 0.14f)
+                    Color.White.copy(alpha = 0.14f)
                 } else {
                     Color.White.copy(alpha = 0.08f)
                 },
@@ -1207,7 +1207,7 @@ private fun SourceChip(label: String, selected: Boolean = false) {
                 if (selected) {
                     Modifier.border(
                         width = NuvioTheme.spacing.hairline,
-                        color = NuvioTheme.colors.OnSecondary.copy(alpha = 0.22f),
+                        color = Color.White.copy(alpha = 0.22f),
                         shape = RoundedCornerShape(999.dp)
                     )
                 } else {
@@ -1220,7 +1220,7 @@ private fun SourceChip(label: String, selected: Boolean = false) {
             text = label,
             style = MaterialTheme.typography.labelSmall,
             color = if (selected) {
-                NuvioTheme.colors.OnSecondary.copy(alpha = 0.9f)
+                Color.White.copy(alpha = 0.9f)
             } else {
                 Color.White.copy(alpha = 0.78f)
             }
@@ -1366,7 +1366,7 @@ private fun StepperButton(
             }
             .then(
                 if (isFocused) {
-                    Modifier.border(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing, RoundedCornerShape(NuvioTheme.radii.md))
+                    Modifier.border(NuvioTheme.spacing.xxs, Color.White, RoundedCornerShape(NuvioTheme.radii.md))
                 } else {
                     Modifier
                 }
@@ -1459,7 +1459,7 @@ private fun ToggleChip(
         Text(
             text = label,
             style = MaterialTheme.typography.bodyMedium,
-            color = if (isEnabled) NuvioTheme.colors.OnSecondary else Color.White,
+            color = if (isEnabled) Color.White else Color.White,
             modifier = Modifier.padding(horizontal = NuvioTheme.spacing.md, vertical = NuvioTheme.spacing.sm)
         )
     }
@@ -1538,7 +1538,7 @@ private fun ColorChip(
             .then(
                 when {
                     isSelected -> Modifier.border(NuvioTheme.spacing.xxs, Color.White, CircleShape)
-                    isFocused -> Modifier.border(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing, CircleShape)
+                    isFocused -> Modifier.border(NuvioTheme.spacing.xxs, Color.White, CircleShape)
                     else -> Modifier
                 }
             )
@@ -1556,8 +1556,8 @@ private fun ColorChip(
 
 @Composable
 private fun overlayCardColors(selected: Boolean) = CardDefaults.colors(
-    containerColor = if (selected) NuvioTheme.colors.Secondary else Color.Transparent,
-    focusedContainerColor = if (selected) NuvioTheme.colors.Secondary else Color.Transparent
+    containerColor = if (selected) Color.White.copy(alpha = 0.16f) else Color.Transparent,
+    focusedContainerColor = if (selected) Color.White.copy(alpha = 0.16f) else Color.Transparent
 )
 
 @Composable
@@ -1567,7 +1567,7 @@ private fun overlayCardBorder() = CardDefaults.border(
         shape = RoundedCornerShape(NuvioTheme.radii.md)
     ),
     focusedBorder = Border(
-        border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+        border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
         shape = RoundedCornerShape(NuvioTheme.radii.md)
     )
 )

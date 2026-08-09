@@ -292,8 +292,8 @@ private fun AudioTrackCard(
             .focusProperties { right = rightFocusRequester }
             .onFocusChanged { if (it.isFocused) onFocused() },
         colors = CardDefaults.colors(
-            containerColor = if (isSelected) NuvioTheme.colors.Secondary else Color.Transparent,
-            focusedContainerColor = if (isSelected) NuvioTheme.colors.Secondary else Color.Transparent
+            containerColor = if (isSelected) Color.White.copy(alpha = 0.16f) else Color.Transparent,
+            focusedContainerColor = if (isSelected) Color.White.copy(alpha = 0.16f) else Color.Transparent
         ),
         shape = CardDefaults.shape(RoundedCornerShape(NuvioTheme.radii.md)),
         border = CardDefaults.border(
@@ -302,20 +302,20 @@ private fun AudioTrackCard(
                 shape = RoundedCornerShape(NuvioTheme.radii.md)
             ),
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                 shape = RoundedCornerShape(NuvioTheme.radii.md)
             )
         ),
         scale = CardDefaults.scale(focusedScale = 1f, pressedScale = 1f)
     ) {
-        val primaryTextColor = if (isSelected) NuvioTheme.colors.OnSecondary else Color.White
+        val primaryTextColor = if (isSelected) Color.White else Color.White
         val secondaryTextColor = if (isSelected) {
-            NuvioTheme.colors.OnSecondary.copy(alpha = 0.82f)
+            Color.White.copy(alpha = 0.82f)
         } else {
             Color.White.copy(alpha = 0.72f)
         }
         val metadataTextColor = if (isSelected) {
-            NuvioTheme.colors.OnSecondary.copy(alpha = 0.72f)
+            Color.White.copy(alpha = 0.72f)
         } else {
             NuvioTheme.colors.TextTertiary
         }
@@ -356,7 +356,7 @@ private fun AudioTrackCard(
                 Icon(
                     imageVector = Icons.Default.Check,
                     contentDescription = null,
-                    tint = NuvioTheme.colors.OnSecondary
+                    tint = Color.White
                 )
             }
         }
@@ -571,8 +571,8 @@ private fun AudioControlsContent(
                         up = firstCenterFocusRequester
                     },
                 colors = CardDefaults.colors(
-                    containerColor = if (persistAmplification) NuvioTheme.colors.Secondary else Color.Transparent,
-                    focusedContainerColor = if (persistAmplification) NuvioTheme.colors.Secondary else Color.Transparent
+                    containerColor = if (persistAmplification) Color.White.copy(alpha = 0.16f) else Color.Transparent,
+                    focusedContainerColor = if (persistAmplification) Color.White.copy(alpha = 0.16f) else Color.Transparent
                 ),
                 shape = CardDefaults.shape(RoundedCornerShape(NuvioTheme.radii.md)),
                 border = CardDefaults.border(
@@ -581,7 +581,7 @@ private fun AudioControlsContent(
                         shape = RoundedCornerShape(NuvioTheme.radii.md)
                     ),
                     focusedBorder = Border(
-                        border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                        border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                         shape = RoundedCornerShape(NuvioTheme.radii.md)
                     )
                 ),
@@ -594,7 +594,7 @@ private fun AudioControlsContent(
                         stringResource(R.string.audio_mix_persist_off)
                     },
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (persistAmplification) NuvioTheme.colors.OnSecondary else Color.White,
+                    color = if (persistAmplification) Color.White else Color.White,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
                 )
             }
@@ -704,7 +704,7 @@ private fun StepCard(
                 shape = RoundedCornerShape(NuvioTheme.radii.md)
             ),
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, if (enabled) NuvioTheme.colors.FocusRing else Color.Transparent),
+                border = BorderStroke(NuvioTheme.spacing.xxs, if (enabled) Color.White else Color.Transparent),
                 shape = RoundedCornerShape(NuvioTheme.radii.md)
             )
         ),

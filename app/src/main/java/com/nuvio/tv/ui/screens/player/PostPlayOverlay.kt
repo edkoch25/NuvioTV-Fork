@@ -109,7 +109,7 @@ fun PostPlayOverlay(
                     shape = RoundedCornerShape(14.dp),
                 ),
                 focusedBorder = Border(
-                    border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                    border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                     shape = RoundedCornerShape(14.dp),
                 ),
             ),
@@ -335,7 +335,7 @@ private fun PostPlayPillButton(
                 shape = CircleShape,
             ),
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                 shape = CircleShape,
             ),
         ),

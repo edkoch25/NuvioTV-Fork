@@ -7,6 +7,7 @@ package com.nuvio.tv.ui.screens.player
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -119,12 +120,12 @@ internal fun StreamItem(
             border = Border(
                 border = BorderStroke(
                     NuvioTheme.spacing.hairline,
-                    if (isCurrentStream) NuvioTheme.colors.Primary.copy(alpha = 0.65f) else Color.Transparent
+                    if (isCurrentStream) Color.White.copy(alpha = 0.55f) else Color.Transparent
                 ),
                 shape = RoundedCornerShape(NuvioTheme.radii.md)
             ),
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                 shape = RoundedCornerShape(NuvioTheme.radii.md)
             )
         ),
@@ -164,13 +165,29 @@ internal fun StreamItem(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(999.dp))
-                                .background(NuvioTheme.colors.Primary.copy(alpha = 0.2f))
+                                .background(Color.White.copy(alpha = 0.16f))
                                 .padding(horizontal = NuvioTheme.spacing.sm, vertical = NuvioTheme.spacing.xs)
                         ) {
                             Text(
                                 text = stringResource(R.string.sources_playing),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = NuvioTheme.colors.Primary
+                                color = Color.White
+                            )
+                        }
+                    }
+                    val releaseGroup = remember(stream) { com.nuvio.tv.core.debrid.DirectDebridStreamFilter.releaseGroupOf(stream) }
+                    if (releaseGroup.isNotBlank()) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(999.dp))
+                                .padding(horizontal = NuvioTheme.spacing.sm, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = releaseGroup,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(alpha = 0.75f),
+                                maxLines = 1
                             )
                         }
                     }

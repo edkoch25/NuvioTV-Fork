@@ -1793,6 +1793,43 @@ private fun PlayerControlsOverlay(
                 )
         )
 
+        // playerMetaChips
+        uiState.streamInfoData?.let { info ->
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = NuvioTheme.spacing.xxl, top = NuvioTheme.spacing.xl),
+                horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.xs),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val resChip = if (info.videoWidth != null && info.videoHeight != null) {
+                    formatResolution(info.videoWidth, info.videoHeight).substringAfter("(").removeSuffix(")")
+                } else null
+                val sizeChip = info.fileSize?.let { bytes ->
+                    if (bytes >= 1_073_741_824L) "%.1f GB".format(bytes / 1_073_741_824.0)
+                    else "%.0f MB".format(bytes / 1_048_576.0)
+                }
+                val audioChip = info.audioCodec?.let { codec ->
+                    info.audioChannels?.let { ch -> "$codec $ch" } ?: codec
+                }
+                listOfNotNull(resChip, sizeChip, audioChip).forEach { label ->
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(Color.White.copy(alpha = 0.12f))
+                            .padding(horizontal = NuvioTheme.spacing.sm, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White.copy(alpha = 0.9f),
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+        }
+
         // Bottom gradient
         Box(
             modifier = Modifier
