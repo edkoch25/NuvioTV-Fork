@@ -123,7 +123,7 @@ fun SeasonTabs(
     val tabShape = remember { RoundedCornerShape(20.dp) }
     val tabBorder = CardDefaults.border(
         focusedBorder = Border(
-            border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+            border = BorderStroke(NuvioTheme.spacing.xxs, Color.Transparent),
             shape = RoundedCornerShape(20.dp)
         )
     )
@@ -228,8 +228,8 @@ fun SeasonTabs(
                     },
                 shape = CardDefaults.shape(shape = tabShape),
                 colors = CardDefaults.colors(
-                    containerColor = if (isSelected) NuvioTheme.colors.SurfaceVariant else NuvioTheme.colors.BackgroundCard,
-                    focusedContainerColor = NuvioTheme.colors.Secondary
+                    containerColor = if (isSelected) Color.White else Color.White.copy(alpha = 0.08f),
+                    focusedContainerColor = Color.White
                 ),
                 border = tabBorder,
                 scale = tabScale
@@ -238,9 +238,9 @@ fun SeasonTabs(
                     text = if (season == 0) stringResource(R.string.episodes_specials) else stringResource(R.string.episodes_season, season),
                     style = tabTextStyle,
                     color = when {
-                        isFocused -> NuvioTheme.colors.OnSecondary
-                        isSelected -> NuvioTheme.colors.TextPrimary
-                        else -> textSecondary
+                        isFocused -> Color.Black
+                        isSelected -> Color.Black
+                        else -> Color(0xFFE8E8EC)
                     },
                     modifier = Modifier.padding(vertical = 10.dp, horizontal = 20.dp)
                 )
@@ -596,7 +596,7 @@ private fun EpisodeCard(
 
     val primaryColor = NuvioTheme.colors.Primary
     val textPrimary = NuvioTheme.colors.TextPrimary
-    val focusRing = NuvioTheme.colors.FocusRing
+    val focusRing = Color.White
     val cardShape = CardDefaults.shape(shape = shape)
     val cardColors = CardDefaults.colors(
         containerColor = Color.Transparent,
@@ -870,13 +870,13 @@ private fun EpisodeCard(
                         )
                         .size(cardMetrics.statusBadgeSize)
                         .shadow(10.dp, shape = CircleShape, spotColor = Color.Transparent)
-                        .background(NuvioTheme.colors.Secondary, CircleShape),
+                        .background(Color.White, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.Check,
                         contentDescription = strCdWatched,
-                        tint = if (NuvioTheme.colors.Secondary == ThemeColors.White.secondary) Color.Black else Color.White,
+                        tint = Color.Black,
                         modifier = Modifier.size(cardMetrics.statusIconSize)
                     )
                 }
