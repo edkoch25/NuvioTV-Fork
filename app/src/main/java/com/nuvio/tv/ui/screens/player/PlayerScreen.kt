@@ -1827,7 +1827,7 @@ private fun PlayerControlsOverlay(
                 verticalAlignment = Alignment.Bottom
             ) {
                 Box(modifier = Modifier.weight(1f)) {
-            AnimatedVisibility(
+            androidx.compose.animation.AnimatedVisibility(
                 visible = !skipIntroVisible,
                 enter = fadeIn(animationSpec = tween(NuvioMotion.tokens.durations.fast)),
                 exit = fadeOut(animationSpec = tween(NuvioMotion.tokens.durations.fast))
