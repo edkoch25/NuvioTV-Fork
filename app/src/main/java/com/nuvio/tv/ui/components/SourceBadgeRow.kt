@@ -23,6 +23,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -88,24 +90,61 @@ fun SourceBadgeRow(
 @Composable
 private fun SourceBadges(facts: DirectDebridStreamFilter.StreamFacts?, badgeHeight: androidx.compose.ui.unit.Dp) {
     if (facts == null) return
-    for (res in sourceBadgeResources(facts)) {
-        Image(
-            painter = painterResource(id = res),
-            contentDescription = null,
-            modifier = Modifier.height(badgeHeight),
-            contentScale = ContentScale.FillHeight
-        )
-    }
+    val resources = sourceBadgeResources(facts)
     val group = facts.releaseGroup
-    if (group.isNotBlank()) {
-        Text(
-            text = group,
-            fontSize = 12.sp,
-            color = Color.White.copy(alpha = 0.9f),
-            modifier = Modifier
-                .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(999.dp))
-                .padding(horizontal = 10.dp, vertical = 2.dp)
-        )
+    val hasChip = group.isNotBlank()
+    Layout(
+        content = {
+            for (res in resources) {
+                Image(
+                    painter = painterResource(id = res),
+                    contentDescription = null,
+                    modifier = Modifier.height(badgeHeight),
+                    contentScale = ContentScale.FillHeight
+                )
+            }
+            if (hasChip) {
+                Text(
+                    text = group,
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.9f),
+                    modifier = Modifier
+                        .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(999.dp))
+                        .padding(horizontal = 10.dp, vertical = 2.dp)
+                )
+            }
+        }
+    ) { measurables, constraints ->
+        // Greedy channels-first tail-drop (signed row rule): the spinner/tick and the
+        // release-group chip always render; badges are kept in their priority order
+        // (res, src, tech, audio, Atmos, channels) until the width budget is spent, so
+        // overflow sheds the tail - channels first - instead of clipping. Unbounded
+        // width keeps everything.
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val placeables = measurables.map { it.measure(loose) }
+        val chip = if (hasChip) placeables.last() else null
+        val badges = if (hasChip) placeables.dropLast(1) else placeables
+        val spacingPx = 9.dp.roundToPx()
+        val budget = if (constraints.hasBoundedWidth) constraints.maxWidth else Int.MAX_VALUE
+        val kept = mutableListOf<Placeable>()
+        var used = chip?.width ?: 0
+        for (badge in badges) {
+            val candidate = used + badge.width + if (used > 0) spacingPx else 0
+            if (candidate > budget) break
+            kept.add(badge)
+            used = candidate
+        }
+        val rowWidth = used.coerceIn(constraints.minWidth, budget)
+        val rowHeight = ((kept + listOfNotNull(chip)).maxOfOrNull { it.height } ?: 0)
+            .coerceIn(constraints.minHeight, constraints.maxHeight)
+        layout(rowWidth, rowHeight) {
+            var x = 0
+            for (p in kept) {
+                p.placeRelative(x, (rowHeight - p.height) / 2)
+                x += p.width + spacingPx
+            }
+            chip?.let { it.placeRelative(x, (rowHeight - it.height) / 2) }
+        }
     }
 }
 

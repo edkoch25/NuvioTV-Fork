@@ -322,7 +322,10 @@ fun HeroContentSection(
                     }
 
                     if (sourceSignal != null) {
-                        SourceBadgeRow(signal = sourceSignal)
+                        SourceBadgeRow(
+                            signal = sourceSignal,
+                            modifier = Modifier.fillMaxWidth(0.75f)
+                        )
                         Spacer(modifier = Modifier.height(14.dp))
                     }
 
