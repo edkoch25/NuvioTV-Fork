@@ -3221,7 +3221,7 @@
 
     <string name="player_pill_play">Play</string>
     <string name="player_pill_pause">Pause</string>
-    <string name="player_pill_restart">Restart</string>
+    <string name="player_pill_restart">Start over</string>
     <string name="player_pill_episodes">Episodes</string>
     <string name="player_pill_next_episode">Next episode</string>
 </resources>

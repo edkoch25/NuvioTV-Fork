@@ -80,6 +80,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -119,6 +120,7 @@ import androidx.tv.material3.IconButtonDefaults
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import coil3.compose.rememberAsyncImagePainter
+import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import androidx.compose.ui.res.stringResource
 import com.nuvio.tv.R
@@ -1811,7 +1813,7 @@ private fun PlayerControlsOverlay(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
-                .padding(horizontal = NuvioTheme.spacing.xxl, vertical = NuvioTheme.spacing.xl)
+                .padding(start = NuvioTheme.spacing.xxl, end = NuvioTheme.spacing.xxl, top = NuvioTheme.spacing.xl, bottom = 48.dp)
         ) {
             val skipIntroVisible = uiState.activeSkipInterval != null
             val hasEpisodeContext = uiState.currentSeason != null && uiState.currentEpisode != null
@@ -1839,13 +1841,29 @@ private fun PlayerControlsOverlay(
                         uiState.title
                     }
 
-                    Text(
-                        text = displayName,
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    val titleLogo = uiState.logo
+                    var titleLogoFailed by remember(titleLogo) { mutableStateOf(false) }
+                    if (!titleLogo.isNullOrBlank() && !titleLogoFailed) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current)
+                                .data(titleLogo)
+                                .memoryCacheKey(titleLogo)
+                                .build(),
+                            contentDescription = displayName,
+                            contentScale = ContentScale.Fit,
+                            alignment = Alignment.BottomStart,
+                            modifier = Modifier.height(72.dp),
+                            onError = { titleLogoFailed = true }
+                        )
+                    } else {
+                        Text(
+                            text = displayName,
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
 
                     if (uiState.currentSeason != null && uiState.currentEpisode != null) {
                         val seasonEpisodeCode = stringResource(
@@ -2025,7 +2043,7 @@ private fun PlayerControlsOverlay(
                 }
             }
 
-            Spacer(modifier = Modifier.height(NuvioTheme.spacing.md))
+            Spacer(modifier = Modifier.height(NuvioTheme.spacing.xs))
 
             // Progress bar — always LTR regardless of locale
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
@@ -2039,7 +2057,7 @@ private fun PlayerControlsOverlay(
                 )
             }
 
-            Spacer(modifier = Modifier.height(NuvioTheme.spacing.lg))
+            Spacer(modifier = Modifier.height(NuvioTheme.spacing.xs))
 
             PlayerControlsTimeTextHost(viewModel = viewModel)
 
@@ -2063,7 +2081,7 @@ private fun PlayerControlsOverlay(
                     PillControlButton(
                         icon = Icons.Default.RestartAlt,
                         label = stringResource(R.string.player_pill_restart),
-                        onClick = { onSeekTo(0L) },
+                        onClick = { onSeekTo(0L); if (!uiState.isPlaying) onPlayPause() },
                         upFocusRequester = progressBarFocusRequester,
                         onDownKey = onHideControls,
                         onFocused = onResetHideTimer
