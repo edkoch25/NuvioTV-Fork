@@ -69,7 +69,6 @@ import coil3.compose.AsyncImage
 import coil3.imageLoader
 import coil3.memory.MemoryCache
 import coil3.request.ImageRequest
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import com.nuvio.tv.domain.model.ContinueWatchingCardStyle
 import com.nuvio.tv.domain.model.FocusedPosterTrailerPlaybackTarget
@@ -577,8 +576,13 @@ fun ModernHomeContent(
         ContinueWatchingCardStyle.CARD -> continueWatchingCardWidth / 1.77f
     }
 
-    val localConfiguration = LocalConfiguration.current
-    val screenHeight = localConfiguration.screenHeightDp.dp
+    // Frame rule (BC-D1): derive the height budget from real window pixels through
+    // the current (scaled) density. The Configuration screen-height value ignores
+    // the UI-scale provider, so Configuration-derived dp inflate by the scale factor
+    // and squeeze the bottom-anchored hero text block.
+    val screenHeight = with(LocalDensity.current) {
+        LocalContext.current.resources.displayMetrics.heightPixels.toDp()
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
             val posterCardCornerRadius = remember(uiState.posterCardCornerRadiusDp) { uiState.posterCardCornerRadiusDp.dp }
