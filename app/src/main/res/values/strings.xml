@@ -3219,4 +3219,9 @@
 
     <string name="assessment_already_set">\u2713 Already set</string>
 
+    <string name="player_pill_play">Play</string>
+    <string name="player_pill_pause">Pause</string>
+    <string name="player_pill_restart">Restart</string>
+    <string name="player_pill_episodes">Episodes</string>
+    <string name="player_pill_next_episode">Next episode</string>
 </resources>
