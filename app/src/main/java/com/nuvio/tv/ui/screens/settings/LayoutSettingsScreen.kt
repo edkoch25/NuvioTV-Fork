@@ -54,6 +54,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
+import androidx.compose.material.icons.filled.AspectRatio
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import com.nuvio.tv.R
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -466,6 +470,25 @@ fun LayoutSettingsContent(
                             )
                         }
                     }
+
+                    val uiScaleContext = LocalContext.current
+                    val uiScaleScope = rememberCoroutineScope()
+                    val uiScalePercent by com.nuvio.tv.data.local.UiScalePreference.flow(uiScaleContext).collectAsState(initial = 100)
+                    SliderSettingsItem(
+                        icon = Icons.Default.AspectRatio,
+                        title = stringResource(R.string.ui_scale_title),
+                        value = uiScalePercent,
+                        valueText = "$uiScalePercent%",
+                        minValue = 85,
+                        maxValue = 115,
+                        step = 5,
+                        onValueChange = { percent ->
+                            uiScaleScope.launch {
+                                com.nuvio.tv.data.local.UiScalePreference.set(uiScaleContext, percent)
+                            }
+                        },
+                        onFocused = { focusedSection = LayoutSettingsSection.DETAIL_PAGE }
+                    )
 
                     CompactToggleRow(
                         title = stringResource(R.string.layout_trailer_button),

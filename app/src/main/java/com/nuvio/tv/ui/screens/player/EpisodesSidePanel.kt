@@ -424,7 +424,7 @@ private fun EpisodesSeasonTabs(
                 shape = CardDefaults.shape(shape = RoundedCornerShape(NuvioTheme.spacing.xl)),
                 colors = CardDefaults.colors(
                     containerColor = if (isSelected) Color(0xFFF5F5F5) else NuvioTheme.colors.BackgroundCard,
-                    focusedContainerColor = if (isSelected) Color.White else NuvioTheme.colors.Secondary
+                    focusedContainerColor = Color.White
                 ),
                 border = CardDefaults.border(
                     border = Border(
@@ -432,7 +432,7 @@ private fun EpisodesSeasonTabs(
                         shape = RoundedCornerShape(NuvioTheme.spacing.xl)
                     ),
                     focusedBorder = Border(
-                        border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                        border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                         shape = RoundedCornerShape(NuvioTheme.spacing.xl)
                     )
                 ),
@@ -443,7 +443,7 @@ private fun EpisodesSeasonTabs(
                     style = MaterialTheme.typography.labelLarge,
                     color = when {
                         isSelected -> Color.Black
-                        isFocused -> NuvioTheme.colors.OnSecondary
+                        isFocused -> Color.Black
                         else -> NuvioTheme.extendedColors.textSecondary
                     },
                     modifier = Modifier.padding(vertical = 10.dp, horizontal = 20.dp)
@@ -490,7 +490,7 @@ private fun EpisodeItem(
         ),
         border = CardDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                 shape = RoundedCornerShape(NuvioTheme.radii.xl)
             )
         ),
@@ -551,13 +551,13 @@ private fun EpisodeItem(
                             .padding(6.dp)
                             .size(22.dp)
                             .clip(RoundedCornerShape(11.dp))
-                            .background(NuvioTheme.colors.Primary),
+                            .background(Color.White),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.Check,
                             contentDescription = stringResource(R.string.cd_current),
-                            tint = Color.White,
+                            tint = Color.Black,
                             modifier = Modifier.size(14.dp)
                         )
                     }

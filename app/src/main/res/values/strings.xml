@@ -3224,4 +3224,5 @@
     <string name="player_pill_restart">Start over</string>
     <string name="player_pill_episodes">Episodes</string>
     <string name="player_pill_next_episode">Next episode</string>
+    <string name="ui_scale_title">Interface scale</string>
 </resources>

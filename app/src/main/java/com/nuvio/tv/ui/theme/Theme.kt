@@ -2,6 +2,9 @@ package com.nuvio.tv.ui.theme
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
@@ -52,6 +55,7 @@ fun NuvioTheme(
     amoledMode: Boolean = false,
     amoledSurfacesMode: Boolean = false,
     settingsUiStyle: SettingsUiStyle = SettingsUiStyle.CLASSIC,
+    uiScalePercent: Int = 100,
     content: @Composable () -> Unit
 ) {
     val palette = ThemeColors.getColorPalette(appTheme)
@@ -90,11 +94,20 @@ fun NuvioTheme(
         LocalAppTheme provides appTheme,
         LocalSettingsUiStyle provides settingsUiStyle
     ) {
-        MaterialTheme(
-            colorScheme = materialColorScheme,
-            typography = typography,
-            content = content
-        )
+        val baseDensity = LocalDensity.current
+        val scaledDensity = remember(baseDensity, uiScalePercent) {
+            Density(
+                density = baseDensity.density * (uiScalePercent / 100f),
+                fontScale = baseDensity.fontScale
+            )
+        }
+        CompositionLocalProvider(LocalDensity provides scaledDensity) {
+            MaterialTheme(
+                colorScheme = materialColorScheme,
+                typography = typography,
+                content = content
+            )
+        }
     }
 }
 

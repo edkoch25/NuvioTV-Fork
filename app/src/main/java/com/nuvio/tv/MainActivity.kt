@@ -504,12 +504,14 @@ class MainActivity : ComponentActivity() {
             }.collectAsState(initial = null)
             val discoverLocation = mainUiPrefs.discoverLocation
 
+            val uiScalePercent by com.nuvio.tv.data.local.UiScalePreference.flow(applicationContext).collectAsState(initial = 100)
             NuvioTheme(
                 appTheme = mainUiPrefs.theme,
                 appFont = mainUiPrefs.font,
                 amoledMode = mainUiPrefs.amoledMode,
                 amoledSurfacesMode = mainUiPrefs.amoledSurfacesMode,
-                settingsUiStyle = mainUiPrefs.settingsUiStyle
+                settingsUiStyle = mainUiPrefs.settingsUiStyle,
+                uiScalePercent = uiScalePercent
             ) {
                 val defaultBringIntoViewSpec = LocalBringIntoViewSpec.current
                 val bringIntoViewSpec = if (mainUiPrefs.smoothBringIntoViewEnabled) {
