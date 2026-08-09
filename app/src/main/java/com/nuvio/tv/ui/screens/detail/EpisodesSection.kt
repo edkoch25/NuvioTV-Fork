@@ -594,7 +594,6 @@ private fun EpisodeCard(
         episode.episode?.let { number -> "$prefix $number" } ?: prefix
     }
 
-    val primaryColor = NuvioTheme.colors.Primary
     val textPrimary = NuvioTheme.colors.TextPrimary
     val focusRing = Color.White
     val cardShape = CardDefaults.shape(shape = shape)
@@ -851,7 +850,7 @@ private fun EpisodeCard(
                             onDrawBehind {
                                 drawRoundRect(color = progressBgColor, cornerRadius = cr)
                                 drawRoundRect(
-                                    color = primaryColor,
+                                    color = Color.White,
                                     size = androidx.compose.ui.geometry.Size(fillWidth, size.height),
                                     cornerRadius = cr
                                 )
