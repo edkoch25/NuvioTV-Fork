@@ -273,6 +273,7 @@ fun MetaDetailsScreen(
     ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> }
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val heroSourceSignal by viewModel.heroSourceSignal.collectAsStateWithLifecycle()
     val effectiveAutoplayEnabled by viewModel.effectiveAutoplayEnabled.collectAsStateWithLifecycle(
         initialValue = false
     )
@@ -487,6 +488,7 @@ fun MetaDetailsScreen(
                     isEpisodeRatingsLoading = uiState.isEpisodeRatingsLoading,
                     episodeRatingsError = uiState.episodeRatingsError,
                     mdbListRatings = uiState.mdbListRatings,
+                    heroSourceSignal = heroSourceSignal,
                     showMdbListImdb = uiState.showMdbListImdb,
                     tmdbRating = uiState.tmdbRating,
                     comments = uiState.comments,
@@ -861,6 +863,7 @@ private fun MetaDetailsContent(
     isEpisodeRatingsLoading: Boolean,
     episodeRatingsError: String?,
     mdbListRatings: MDBListRatings?,
+    heroSourceSignal: com.nuvio.tv.core.stream.SourcePrefetchSignal?,
     showMdbListImdb: Boolean,
     tmdbRating: Float?,
     comments: List<TraktCommentReview>,
@@ -1652,6 +1655,7 @@ private fun MetaDetailsContent(
                         isMovieWatchedPending = isMovieWatchedPending,
                         onToggleMovieWatched = onToggleMovieWatched,
                         mdbListRatings = mdbListRatings,
+                        sourceSignal = heroSourceSignal,
                         hideMetaInfoImdb = showMdbListImdb,
                         tmdbRating = if (mdbListRatings?.isEmpty() != false) tmdbRating else null,
                         showFullReleaseDate = showFullReleaseDate,

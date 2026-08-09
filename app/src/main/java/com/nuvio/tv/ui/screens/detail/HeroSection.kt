@@ -1,5 +1,6 @@
 package com.nuvio.tv.ui.screens.detail
 
+import com.nuvio.tv.ui.components.SourceBadgeRow
 import com.nuvio.tv.ui.theme.NuvioMotion
 
 import android.view.KeyEvent as AndroidKeyEvent
@@ -110,7 +111,8 @@ fun HeroContentSection(
     restorePlayFocusToken: Int = 0,
     onHeroActionFocused: () -> Unit = {},
     onPlayFocusRestored: () -> Unit = {},
-    onShowFullDescription: () -> Unit = {}
+    onShowFullDescription: () -> Unit = {},
+    sourceSignal: com.nuvio.tv.core.stream.SourcePrefetchSignal? = null
 ) {
     val context = LocalContext.current
     val isSeriesApi = remember(meta.apiType) {
@@ -316,6 +318,11 @@ fun HeroContentSection(
 
                     if (mdbListRatings?.isEmpty() == false) {
                         MDBListRatingsRow(ratings = mdbListRatings)
+                        Spacer(modifier = Modifier.height(14.dp))
+                    }
+
+                    if (sourceSignal != null) {
+                        SourceBadgeRow(signal = sourceSignal)
                         Spacer(modifier = Modifier.height(14.dp))
                     }
 
