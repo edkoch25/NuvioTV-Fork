@@ -2,6 +2,8 @@
 
 package com.nuvio.tv.ui.screens.player
 
+import com.nuvio.tv.ui.components.PanelEyebrow
+import com.nuvio.tv.ui.components.PanelActionRow
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height

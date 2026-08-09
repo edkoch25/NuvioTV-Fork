@@ -1,4 +1,4 @@
-package com.nuvio.tv.ui.screens.player
+package com.nuvio.tv.ui.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
