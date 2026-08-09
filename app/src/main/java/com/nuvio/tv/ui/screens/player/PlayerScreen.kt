@@ -41,6 +41,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -1889,7 +1890,7 @@ private fun PlayerControlsOverlay(
                             contentDescription = displayName,
                             contentScale = ContentScale.Fit,
                             alignment = Alignment.BottomStart,
-                            modifier = Modifier.height(72.dp),
+                            modifier = Modifier.sizeIn(maxWidth = 340.dp, maxHeight = 72.dp),
                             onError = { titleLogoFailed = true }
                         )
                     } else {
