@@ -3227,6 +3227,7 @@
     <string name="player_pill_episodes">Episodes</string>
     <string name="player_pill_next_episode">Next episode</string>
     <string name="ui_scale_title">Interface scale</string>
+    <string name="ui_scale_group_subtitle" formatted="false">Scale the whole interface between 85% and 115%</string>
     <string name="panel_audio_adjustments">Delay and gain</string>
     <string name="panel_audio_back_to_tracks">Back to tracks</string>
 </resources>

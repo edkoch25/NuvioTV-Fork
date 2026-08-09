@@ -235,24 +235,6 @@ fun ThemeSettingsContent(
                         value = stringResource(R.string.appearance_screensaver_dim_option, uiState.screensaverDimPercent),
                         onClick = { showScreensaverDimDialog = true }
                     )
-                    val uiScaleContext = LocalContext.current
-                    val uiScaleScope = rememberCoroutineScope()
-                    val uiScalePercent by com.nuvio.tv.data.local.UiScalePreference.flow(uiScaleContext).collectAsState(initial = 100)
-                    SliderSettingsItem(
-                        icon = Icons.Default.AspectRatio,
-                        title = stringResource(R.string.ui_scale_title),
-                        value = uiScalePercent,
-                        valueText = "$uiScalePercent%",
-                        minValue = 85,
-                        maxValue = 115,
-                        step = 5,
-                        onValueChange = { percent ->
-                            uiScaleScope.launch {
-                                com.nuvio.tv.data.local.UiScalePreference.set(uiScaleContext, percent)
-                            }
-                        },
-                        onFocused = {}
-                    )
                 }
                 if (showScreensaverTimeoutDialog) {
                     SettingsSingleChoiceDialog(
@@ -299,6 +281,31 @@ fun ThemeSettingsContent(
                         onDismiss = { showScreensaverDimDialog = false }
                     )
                 }
+            }
+
+            SettingsGroupCard(
+                modifier = Modifier.fillMaxWidth(),
+                title = stringResource(R.string.ui_scale_title),
+                subtitle = stringResource(R.string.ui_scale_group_subtitle)
+            ) {
+                val uiScaleContext = LocalContext.current
+                val uiScaleScope = rememberCoroutineScope()
+                val uiScalePercent by com.nuvio.tv.data.local.UiScalePreference.flow(uiScaleContext).collectAsState(initial = 100)
+                SliderSettingsItem(
+                    icon = Icons.Default.AspectRatio,
+                    title = stringResource(R.string.ui_scale_title),
+                    value = uiScalePercent,
+                    valueText = "$uiScalePercent%",
+                    minValue = 85,
+                    maxValue = 115,
+                    step = 5,
+                    onValueChange = { percent ->
+                        uiScaleScope.launch {
+                            com.nuvio.tv.data.local.UiScalePreference.set(uiScaleContext, percent)
+                        }
+                    },
+                    onFocused = {}
+                )
             }
 
             SettingsGroupCard(
