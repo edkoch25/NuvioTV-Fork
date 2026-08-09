@@ -107,7 +107,9 @@ data class ModernCarouselItem(
     val imageUrl: String?,
     val heroPreview: HeroPreview,
     val payload: ModernPayload,
-    val metaPreview: MetaPreview? = null
+    val metaPreview: MetaPreview? = null,
+    val cornerLabel: String? = null,
+    val progressFraction: Float? = null
 )
 
 @Immutable
@@ -402,6 +404,8 @@ internal fun buildContinueWatchingItem(
 
     return ModernCarouselItem(
         key = continueWatchingItemKey(item),
+        cornerLabel = secondaryHighlightText,
+        progressFraction = (item as? ContinueWatchingItem.InProgress)?.progress?.progressPercentage,
         title = when (item) {
             is ContinueWatchingItem.InProgress -> item.progress.name
             is ContinueWatchingItem.NextUp -> item.info.name

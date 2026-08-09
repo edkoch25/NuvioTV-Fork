@@ -327,7 +327,7 @@ private fun HeroTitleContent(
 ) {
     val preview = previewProvider() ?: return
     val highlighterEnabled = LocalRecompositionHighlighterEnabled.current
-    val descriptionMaxLines = 4
+    val descriptionMaxLines = 1
     val descriptionScale = if (portraitMode) 0.90f else 1f
     val titleScale = if (portraitMode) 0.92f else 1f
     val metaScale = 1f
@@ -644,10 +644,7 @@ private fun HeroCombinedMetaBadge(
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(6.dp))
-            .border(
-                border = BorderStroke(NuvioTheme.spacing.hairline, dividerColor),
-                shape = RoundedCornerShape(6.dp)
-            )
+            .background(Color.White.copy(alpha = 0.08f))
             .padding(horizontal = NuvioTheme.spacing.sm, vertical = NuvioTheme.spacing.xs),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.sm)
@@ -685,10 +682,7 @@ private fun HeroMetaBadge(
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(6.dp))
-            .border(
-                border = BorderStroke(NuvioTheme.spacing.hairline, contentColor.copy(alpha = 0.55f)),
-                shape = RoundedCornerShape(6.dp)
-            )
+            .background(Color.White.copy(alpha = 0.08f))
             .padding(horizontal = NuvioTheme.spacing.sm, vertical = NuvioTheme.spacing.xs),
         contentAlignment = Alignment.Center
     ) {

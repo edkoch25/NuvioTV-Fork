@@ -110,6 +110,7 @@ import com.nuvio.tv.domain.model.ContinueWatchingCardStyle
 import com.nuvio.tv.domain.model.PLACEHOLDER_IMAGE_URL
 import com.nuvio.tv.domain.model.isPlaceholder
 import com.nuvio.tv.ui.components.ContinueWatchingCard
+import com.nuvio.tv.ui.components.RailEyebrow
 import com.nuvio.tv.ui.components.continueWatchingArtworkWidth
 import com.nuvio.tv.ui.components.continueWatchingImageCacheKey
 import com.nuvio.tv.ui.components.continueWatchingImageModel
@@ -501,20 +502,15 @@ internal fun ModernRowSection(
             } else Modifier
         )
     ) {
-        val titleMediumStyle = MaterialTheme.typography.titleMedium
-        val rowTitleStyle = remember(titleMediumStyle) {
-            titleMediumStyle.copy(fontWeight = FontWeight.SemiBold)
-        }
         val rowTitle = row.title
-        val textColor = NuvioTheme.colors.TextPrimary
-        val textModifier = remember(rowTitleBottom) {
-            Modifier.padding(start = 52.dp, bottom = rowTitleBottom)
+        val railHeaderModifier = remember(rowTitleBottom) {
+            Modifier
+                .padding(start = 52.dp, end = 52.dp, bottom = rowTitleBottom)
+                .fillMaxWidth()
         }
-        Text(
+        RailEyebrow(
             text = rowTitle,
-            style = rowTitleStyle,
-            color = textColor,
-            modifier = textModifier
+            modifier = railHeaderModifier
         )
 
         val rowListState = rowListStates.getOrPut(row.key) {
@@ -1388,6 +1384,33 @@ private fun ModernCarouselCard(
                     )
                 }
 
+                item.cornerLabel?.takeIf { it.isNotBlank() }?.let { label ->
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White.copy(alpha = 0.9f),
+                        maxLines = 1,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(end = NuvioTheme.spacing.sm, top = NuvioTheme.spacing.sm)
+                            .zIndex(2f)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(Color.White.copy(alpha = 0.08f))
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    )
+                }
+
+                item.progressFraction?.takeIf { it > 0f }?.let { fraction ->
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .zIndex(2f)
+                            .fillMaxWidth(fraction.coerceIn(0f, 1f))
+                            .height(3.dp)
+                            .background(Color.White)
+                    )
+                }
+
                 if (isWatched) {
                     Box(
                         modifier = Modifier
@@ -1396,11 +1419,11 @@ private fun ModernCarouselCard(
                             .zIndex(2f)
                             .size(21.dp)
                             .shadow(10.dp, shape = CircleShape, spotColor = Color.Transparent)
-                            .background(NuvioTheme.colors.Secondary, CircleShape)
+                            .background(Color.White, CircleShape)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Check,
-                            tint = if (NuvioTheme.colors.Secondary == ThemeColors.White.secondary) Color.Black else Color.White,
+                            tint = Color.Black,
                             contentDescription = stringResource(R.string.episodes_cd_watched),
                             modifier = Modifier.size(20.dp)
                         )

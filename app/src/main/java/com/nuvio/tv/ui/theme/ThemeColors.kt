@@ -29,6 +29,7 @@ object ThemeColors {
         secondaryVariant = NuvioPrimitives.red600,
         focusRing = NuvioPrimitives.red300,
         focusBackground = Color(0xFF3D1A1A),
+        background = Color(0xFF0A0A0E),
         backgroundCard = Color(0xFF241A1A)
     )
 

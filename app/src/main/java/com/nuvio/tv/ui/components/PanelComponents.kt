@@ -51,6 +51,28 @@ internal fun PanelEyebrow(text: String) {
 }
 
 @Composable
+internal fun RailEyebrow(
+    text: String,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier) {
+        Text(
+            text = text.uppercase(),
+            style = MaterialTheme.typography.labelMedium,
+            letterSpacing = 2.2.sp,
+            color = Color.White.copy(alpha = 0.55f),
+            modifier = Modifier.padding(bottom = 10.dp)
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(Color.White.copy(alpha = 0.12f))
+        )
+    }
+}
+
+@Composable
 internal fun PanelActionRow(
     label: String,
     onClick: () -> Unit,
