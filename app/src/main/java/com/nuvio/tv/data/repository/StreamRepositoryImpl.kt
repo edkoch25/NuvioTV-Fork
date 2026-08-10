@@ -79,6 +79,8 @@ class StreamRepositoryImpl @Inject constructor(
         episode: Int?
     ): Flow<NetworkResult<List<AddonStreams>>> = flow {
         emit(NetworkResult.Loading)
+        // P0 instrument: whole-scrape wall time. Grep anchor: SCRAPE_TOTAL.
+        val scrapeT0 = android.os.SystemClock.elapsedRealtime()
 
         try {
             val addons = addonRepository.getInstalledAddons().first().enabledAddons()
@@ -107,6 +109,13 @@ class StreamRepositoryImpl @Inject constructor(
                 // Launch addon jobs
                 streamAddons.forEach { addon ->
                     launch {
+                        // P0 instrument: per-addon wall time, from job launch to
+                        // completion, timeout, error or cancellation. Grep anchor:
+                        // ADDON_MS. Logged in the finally so every exit path,
+                        // including the rethrown cancellation, produces a line.
+                        val addonT0 = android.os.SystemClock.elapsedRealtime()
+                        var addonOutcome = "cancelled"
+                        var addonStreamCount = 0
                         try {
                           withTimeout(ADDON_STREAM_FETCH_TIMEOUT_MS) {
                             val streamsResult = getStreamsFromAddon(addon.baseUrl, type, videoId, addon.displayName, addon.logo)
@@ -116,6 +125,8 @@ class StreamRepositoryImpl @Inject constructor(
                                         val namedStreams = streamsResult.data.map {
                                             it.copy(addonName = addon.displayName, addonLogo = addon.logo)
                                         }
+                                        addonOutcome = "ok"
+                                        addonStreamCount = namedStreams.size
                                         resultChannel.send(
                                             AddonStreams(
                                                 addonName = addon.displayName,
@@ -130,6 +141,8 @@ class StreamRepositoryImpl @Inject constructor(
                                             addon, type, videoId
                                         )
                                         if (inlineStreams.isNotEmpty()) {
+                                            addonOutcome = "ok_inline"
+                                            addonStreamCount = inlineStreams.size
                                             resultChannel.send(
                                                 AddonStreams(
                                                     addonName = addon.displayName,
@@ -138,11 +151,13 @@ class StreamRepositoryImpl @Inject constructor(
                                                 )
                                             )
                                         } else {
+                                            addonOutcome = "empty"
                                             attemptedFailures += buildMissingStreamFailure(addon)
                                         }
                                     }
                                 }
                                 is NetworkResult.Error -> {
+                                    addonOutcome = "error"
                                     attemptedFailures += buildAddonFailure(addon, streamsResult)
                                 }
                                 NetworkResult.Loading -> Unit
@@ -152,6 +167,7 @@ class StreamRepositoryImpl @Inject constructor(
                             // MUST precede the broad catch below: TimeoutCancellationException
                             // is a CancellationException, and rethrowing it would cancel the
                             // enclosing coroutineScope and every sibling addon job with it.
+                            addonOutcome = "timeout"
                             Log.w(TAG, "Addon ${addon.name} exceeded ${ADDON_STREAM_FETCH_TIMEOUT_MS}ms - abandoning")
                             attemptedFailures += StreamAttemptFailure(
                                 addonName = addon.displayName,
@@ -160,6 +176,7 @@ class StreamRepositoryImpl @Inject constructor(
                             )
                         } catch (e: Exception) {
                             if (e is CancellationException) throw e
+                            addonOutcome = "error"
                             Log.e(TAG, "Addon ${addon.name} failed: ${e.message}")
                             attemptedFailures += StreamAttemptFailure(
                                 addonName = addon.displayName,
@@ -167,6 +184,12 @@ class StreamRepositoryImpl @Inject constructor(
                                 detail = e.message ?: context.getString(com.nuvio.tv.R.string.stream_error_detail_addon_request_failed)
                             )
                         } finally {
+                            Log.i(
+                                TAG,
+                                "ADDON_MS name=${addon.displayName} " +
+                                    "ms=${android.os.SystemClock.elapsedRealtime() - addonT0} " +
+                                    "streams=$addonStreamCount outcome=$addonOutcome"
+                            )
                             if (completedJobs.incrementAndGet() >= totalJobs) {
                                 resultChannel.close()
                             }
@@ -175,6 +198,12 @@ class StreamRepositoryImpl @Inject constructor(
                 }
 
                 launch {
+                    // P0 instrument: the plugin job shares the ADDON_MS anchor so
+                    // one grep captures every fan-out participant. streams is not
+                    // tracked at this layer (scrapers send individually); -1 marks
+                    // it as unmeasured rather than zero.
+                    val pluginT0 = android.os.SystemClock.elapsedRealtime()
+                    var pluginOutcome = "done"
                     try {
                         val hasCompatiblePlugins = pluginManager.enabledScrapers.first()
                             .any { scraper -> scraper.supportsType(type) }
@@ -199,8 +228,15 @@ class StreamRepositoryImpl @Inject constructor(
                         )
                     } catch (e: Exception) {
                         if (e is CancellationException) throw e
+                        pluginOutcome = "error"
                         Log.e(TAG, "Plugin execution failed: ${e.message}")
                     } finally {
+                        Log.i(
+                            TAG,
+                            "ADDON_MS name=plugins " +
+                                "ms=${android.os.SystemClock.elapsedRealtime() - pluginT0} " +
+                                "streams=-1 outcome=$pluginOutcome"
+                        )
                         if (completedJobs.incrementAndGet() >= totalJobs) {
                             resultChannel.close()
                         }
@@ -220,8 +256,20 @@ class StreamRepositoryImpl @Inject constructor(
                         val more = resultChannel.tryReceive().getOrNull() ?: break
                         batch += more
                     }
+                    // P0 instrument: the debrid cache check sits between an
+                    // addon's arrival and its visibility to every consumer, so
+                    // its cost is inside every scrape figure. Grep anchor:
+                    // CACHECHECK_MS. Memoised hashes make repeat batches cheap;
+                    // this line shows the real cost per batch either way.
+                    val checkT0 = android.os.SystemClock.elapsedRealtime()
                     val checkingBatch = localDebridAvailabilityService.markChecking(batch)
                     val checkedBatch = localDebridAvailabilityService.annotateCachedAvailability(checkingBatch)
+                    Log.i(
+                        TAG,
+                        "CACHECHECK_MS ms=${android.os.SystemClock.elapsedRealtime() - checkT0} " +
+                            "batch_groups=${batch.size} " +
+                            "batch_streams=${batch.sumOf { it.streams.size }}"
+                    )
                     val finalBatch = if (checkedBatch.size == batch.size) checkedBatch else batch
                     finalBatch.forEach { checkedResult ->
                         mergePresentedResult(accumulatedResults, checkedResult)
@@ -230,6 +278,13 @@ class StreamRepositoryImpl @Inject constructor(
                     Log.d(TAG, "Emitted ${accumulatedResults.size} addon(s), latest batch of ${finalBatch.size}: ${finalBatch.joinToString { "${it.addonName}(${it.streams.size})" }}")
                 }
             }
+
+            Log.i(
+                TAG,
+                "SCRAPE_TOTAL ms=${android.os.SystemClock.elapsedRealtime() - scrapeT0} " +
+                    "groups=${accumulatedResults.size} " +
+                    "streams=${accumulatedResults.sumOf { it.streams.size }}"
+            )
 
             // Emit final result (even if empty)
             if (accumulatedResults.isEmpty()) {
