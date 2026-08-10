@@ -175,8 +175,8 @@ internal fun AudioSelectionOverlay(
                 .width(320.dp)
                 .align(Alignment.BottomEnd)
                 .heightIn(max = 620.dp)
-                .background(Color(0xFF181820), RoundedCornerShape(20.dp))
-                .padding(horizontal = 16.dp, vertical = 20.dp)
+                .background(Color.Black.copy(alpha = 0.85f), RoundedCornerShape(20.dp))
+                .padding(horizontal = 16.dp, vertical = 14.dp)
         ) {
             PanelEyebrow(text = stringResource(R.string.audio_dialog_title))
 

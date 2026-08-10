@@ -111,7 +111,7 @@ internal fun PanelActionRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .padding(horizontal = 14.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(9.dp)
         ) {
@@ -163,7 +163,7 @@ internal fun PlayerPanelRow(
     var isFocused by remember { mutableStateOf(false) }
     val interactionSource = remember { MutableInteractionSource() }
 
-    val darkContent = Color(0xFF181820)
+    val darkContent = Color.Black
     val bgColor by animateColorAsState(
         targetValue = when {
             isFocused -> Color.White
@@ -200,14 +200,14 @@ internal fun PlayerPanelRow(
                 indication = null,
                 onClick = onClick
             )
-            .padding(horizontal = 12.dp, vertical = 9.dp),
+            .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyMedium,
                 color = titleColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis

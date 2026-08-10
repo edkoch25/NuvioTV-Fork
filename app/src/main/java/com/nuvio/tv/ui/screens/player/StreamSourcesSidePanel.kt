@@ -83,9 +83,9 @@ internal fun StreamSourcesSidePanel(
             .heightIn(max = 900.dp)
             .width(440.dp)
             .clip(RoundedCornerShape(topStart = NuvioTheme.spacing.lg, bottomStart = NuvioTheme.spacing.lg))
-            .background(Color(0xFF181820))
+            .background(Color.Black.copy(alpha = 0.85f))
     ) {
-        Column(modifier = Modifier.padding(NuvioTheme.spacing.xl)) {
+        Column(modifier = Modifier.padding(NuvioTheme.spacing.lg)) {
             PanelEyebrow(text = stringResource(R.string.sources_title))
 
             Row(
@@ -105,7 +105,7 @@ internal fun StreamSourcesSidePanel(
                 )
             }
 
-            Spacer(modifier = Modifier.height(NuvioTheme.spacing.lg))
+            Spacer(modifier = Modifier.height(NuvioTheme.spacing.sm))
 
             // Current content info
             val seasonEpisodeCode = if (uiState.currentSeason != null && uiState.currentEpisode != null) {
@@ -128,13 +128,13 @@ internal fun StreamSourcesSidePanel(
                         append(uiState.title)
                     }
                 },
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyMedium,
                 color = NuvioTheme.extendedColors.textSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
 
-            Spacer(modifier = Modifier.height(NuvioTheme.spacing.lg))
+            Spacer(modifier = Modifier.height(NuvioTheme.spacing.sm))
 
             AnimatedVisibility(
                 visible = uiState.sourceChips.isNotEmpty() ||
@@ -152,7 +152,7 @@ internal fun StreamSourcesSidePanel(
                 )
             }
 
-            Spacer(modifier = Modifier.height(NuvioTheme.spacing.lg))
+            Spacer(modifier = Modifier.height(NuvioTheme.spacing.sm))
 
             when {
                 uiState.isLoadingSourceStreams -> {
@@ -213,7 +213,7 @@ internal fun StreamSourcesSidePanel(
                         verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.sm),
                         contentPadding = PaddingValues(
                             start = NuvioTheme.spacing.sm,
-                            top = 14.dp,
+                            top = 6.dp,
                             end = NuvioTheme.spacing.sm,
                             bottom = NuvioTheme.spacing.sm
                         ),
