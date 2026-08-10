@@ -5,7 +5,6 @@ import android.util.Log
 import com.nuvio.tv.core.auth.AuthManager
 import com.nuvio.tv.core.debrid.DebridProviders
 import com.nuvio.tv.core.profile.ProfileManager
-import com.nuvio.tv.data.local.AnimeSkipSettingsDataStore
 import com.nuvio.tv.data.local.DebridSettingsDataStore
 import com.nuvio.tv.data.local.MDBListSettingsDataStore
 import com.nuvio.tv.data.remote.supabase.SupabaseProviderCredential
@@ -54,7 +53,6 @@ class ProviderCredentialSyncService @Inject constructor(
     private val profileManager: ProfileManager,
     private val debridSettingsDataStore: DebridSettingsDataStore,
     private val mdbListSettingsDataStore: MDBListSettingsDataStore,
-    private val animeSkipSettingsDataStore: AnimeSkipSettingsDataStore,
     private val syncClientIdentity: SyncClientIdentity
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -190,7 +188,6 @@ class ProviderCredentialSyncService @Inject constructor(
         check(profileManager.activeProfileId.value == profileId)
         val debrid = debridSettingsDataStore.settings.first()
         val mdbList = mdbListSettingsDataStore.settings.first()
-        val animeSkipClientId = animeSkipSettingsDataStore.clientId.first()
         check(profileManager.activeProfileId.value == profileId)
         return ProviderCredentialSnapshot(
             profileId = profileId,
@@ -211,13 +208,6 @@ class ProviderCredentialSyncService @Inject constructor(
                         value = mdbList.apiKey
                     )
                 )
-                add(
-                    ProviderCredentialValue(
-                        provider = ProviderCredentialIds.ANIMESKIP,
-                        field = CLIENT_ID_FIELD,
-                        value = animeSkipClientId
-                    )
-                )
             }
         )
     }
@@ -232,9 +222,6 @@ class ProviderCredentialSyncService @Inject constructor(
                 }
                 credential.provider == ProviderCredentialIds.MDBLIST -> {
                     mdbListSettingsDataStore.setApiKey(credential.value)
-                }
-                credential.provider == ProviderCredentialIds.ANIMESKIP -> {
-                    animeSkipSettingsDataStore.setClientId(credential.value)
                 }
             }
         }
@@ -259,9 +246,8 @@ class ProviderCredentialSyncService @Inject constructor(
                 .flatMapLatest { profileId ->
                     combine(
                         debridSettingsDataStore.settings,
-                        mdbListSettingsDataStore.settings,
-                        animeSkipSettingsDataStore.clientId
-                    ) { debrid, mdbList, animeSkipClientId ->
+                        mdbListSettingsDataStore.settings
+                    ) { debrid, mdbList ->
                         ProviderCredentialSnapshot(
                             profileId = profileId,
                             values = buildList {
@@ -279,13 +265,6 @@ class ProviderCredentialSyncService @Inject constructor(
                                         provider = ProviderCredentialIds.MDBLIST,
                                         field = API_KEY_FIELD,
                                         value = mdbList.apiKey
-                                    )
-                                )
-                                add(
-                                    ProviderCredentialValue(
-                                        provider = ProviderCredentialIds.ANIMESKIP,
-                                        field = CLIENT_ID_FIELD,
-                                        value = animeSkipClientId
                                     )
                                 )
                             }
