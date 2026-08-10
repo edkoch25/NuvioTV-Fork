@@ -1982,6 +1982,16 @@ internal fun PlayerRuntimeController.buildStreamInfoData(): StreamInfoData {
             ?: CustomDefaultTrackNameProvider.formatNameFromMime(format.codecs)
     } ?: currentVideoCodec
 
+    // Prefer the renderer's live format for the audio codec label: the dvmkv extractor
+    // publishes a provisional core-DTS mime and may refine it to DTS-HD only after the
+    // TrackGroup snapshot freezes, so the track-list value can understate the stream.
+    // The live format carries the refinement; the track-list value stays as fallback
+    // (and is the only value on the mpv engine, where the Exo player handle is null).
+    val liveAudioCodec = _exoPlayer?.audioFormat?.let { format ->
+        CustomDefaultTrackNameProvider.formatNameFromMime(format.sampleMimeType)
+            ?: CustomDefaultTrackNameProvider.formatNameFromMime(format.codecs)
+    }
+
     return StreamInfoData(
         addonName = currentAddonName,
         addonLogo = currentAddonLogo,
@@ -1994,7 +2004,7 @@ internal fun PlayerRuntimeController.buildStreamInfoData(): StreamInfoData {
         videoHeight = videoHeight,
         videoFrameRate = state.detectedFrameRate.takeIf { it > 0f },
         videoBitrate = videoBitrate,
-        audioCodec = selectedAudio?.codec,
+        audioCodec = liveAudioCodec ?: selectedAudio?.codec,
         audioChannels = selectedAudio?.channelCount?.let {
             CustomDefaultTrackNameProvider.getChannelLayoutName(it)
         },
