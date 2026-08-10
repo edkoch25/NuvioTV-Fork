@@ -4,6 +4,7 @@ package com.nuvio.tv.ui.screens.player
 
 import com.nuvio.tv.ui.components.PanelEyebrow
 import com.nuvio.tv.ui.components.PanelActionRow
+import com.nuvio.tv.ui.components.PlayerPanelRow
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -285,89 +286,28 @@ private fun AudioTrackCard(
     rightFocusRequester: FocusRequester,
     focusRequester: FocusRequester?
 ) {
+    val languageLine = track.language
+        ?.takeIf { it.isNotBlank() && it != "und" }
+        ?.let { languageCodeToName(it) }
     val metadata = listOfNotNull(
         track.codec,
         track.channelCount?.let { "$it ch" },
         track.sampleRate?.let { "${it / 1000} kHz" }
-    ).joinToString(" | ")
+    ).joinToString(" · ")
+    val subtitle = listOfNotNull(
+        languageLine,
+        metadata.ifBlank { null }
+    ).joinToString(" · ").ifBlank { null }
 
-    Card(
+    PlayerPanelRow(
+        title = track.name,
+        subtitle = subtitle,
+        selected = isSelected,
         onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-            .focusProperties { right = rightFocusRequester }
-            .onFocusChanged { if (it.isFocused) onFocused() },
-        colors = CardDefaults.colors(
-            containerColor = if (isSelected) Color.White.copy(alpha = 0.16f) else Color.Transparent,
-            focusedContainerColor = if (isSelected) Color.White.copy(alpha = 0.16f) else Color.Transparent
-        ),
-        shape = CardDefaults.shape(RoundedCornerShape(NuvioTheme.radii.md)),
-        border = CardDefaults.border(
-            border = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, Color.Transparent),
-                shape = RoundedCornerShape(NuvioTheme.radii.md)
-            ),
-            focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
-                shape = RoundedCornerShape(NuvioTheme.radii.md)
-            )
-        ),
-        scale = CardDefaults.scale(focusedScale = 1f, pressedScale = 1f)
-    ) {
-        val primaryTextColor = if (isSelected) Color.White else Color.White
-        val secondaryTextColor = if (isSelected) {
-            Color.White.copy(alpha = 0.82f)
-        } else {
-            Color.White.copy(alpha = 0.72f)
-        }
-        val metadataTextColor = if (isSelected) {
-            Color.White.copy(alpha = 0.72f)
-        } else {
-            NuvioTheme.colors.TextTertiary
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = NuvioTheme.spacing.md, vertical = NuvioTheme.spacing.sm),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.xs)
-            ) {
-                Text(
-                    text = track.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = primaryTextColor
-                )
-                if (!track.language.isNullOrBlank() && track.language != "und") {
-                    Text(
-                        text = languageCodeToName(track.language),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = secondaryTextColor
-                    )
-                }
-                if (metadata.isNotBlank()) {
-                    Text(
-                        text = metadata,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = metadataTextColor
-                    )
-                }
-            }
-
-            if (isSelected) {
-                Icon(
-                    imageVector = Icons.Default.Check,
-                    contentDescription = null,
-                    tint = Color.White
-                )
-            }
-        }
-    }
+        onFocused = onFocused,
+        focusRequester = focusRequester,
+        modifier = Modifier.focusProperties { right = rightFocusRequester }
+    )
 }
 
 @Composable
