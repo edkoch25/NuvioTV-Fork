@@ -6,15 +6,27 @@ import com.nuvio.tv.core.network.NetworkResult
 import com.nuvio.tv.core.network.safeApiCall
 import com.nuvio.tv.data.mapper.toDomain
 import com.nuvio.tv.data.remote.api.AddonApi
+import com.nuvio.tv.data.remote.dto.CatalogResponseDto
 import com.nuvio.tv.domain.model.CatalogRow
 import com.nuvio.tv.domain.model.ContentType
 import com.nuvio.tv.domain.model.MetaPreview
 import com.nuvio.tv.domain.repository.CatalogRepository
+import com.squareup.moshi.Moshi
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.io.File
 import java.net.URLEncoder
 import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -26,18 +38,23 @@ class CatalogRepositoryImpl @Inject constructor(
     companion object {
         private const val TAG = "CatalogRepository"
 
-        // Short-TTL in-memory catalogue cache. Targets the profile-switch and
-        // back-navigation cost: re-fetching an already-seen catalogue page over
-        // the network on every visit is the dominant span when switching profiles
-        // (~600 ms observed). Keyed on the fully-resolved catalogue URL, which
-        // already encodes addon base, type, catalogId, skip and extraArgs, so two
-        // requests share a key iff they would hit the same endpoint. TTL is short
-        // enough that freshness is a non-issue for a browse session; the bound
-        // caps memory on a heavy scroll.
+        // In-memory freshness cache (unchanged): short TTL, drop-stale,
+        // skip-network-on-hit. Keyed on the fully-resolved catalogue URL.
         private const val CATALOG_CACHE_TTL_MS = 90_000L
         private const val CATALOG_CACHE_MAX_ENTRIES = 64
 
+        // Disk first-paint cache. DIFFERENT purpose to the in-memory cache: it is a
+        // stale-while-revalidate FIRST PAINT, not a freshness gate. On a disk hit we
+        // serve the stored row immediately and ALWAYS revalidate over the network,
+        // swapping in the fresh row when it lands (unless identical). Only skip==0,
+        // no-extra requests -- the first page of a home row -- are eligible. The
+        // ceiling only caps how old a blob may be before we stop serving it at all.
+        private const val DISK_CACHE_FILE_NAME = "catalog_rows_v1.json"
+        private const val DISK_CACHE_MAX_AGE_MS = 7L * 24 * 60 * 60 * 1000 // 7 days
+        private const val DISK_CACHE_MAX_ENTRIES = 128
+
         private data class CacheEntry(val row: CatalogRow, val storedAtMs: Long)
+        private data class DiskEntry(val dtoJson: String, val storedAtMs: Long)
 
         // access-ordered LinkedHashMap wrapped for LRU eviction; synchronized
         // because catalogue fetches run concurrently across rows.
@@ -48,6 +65,21 @@ class CatalogRepositoryImpl @Inject constructor(
                         size > CATALOG_CACHE_MAX_ENTRIES
                 }
             )
+    }
+
+    private val moshi: Moshi = Moshi.Builder().build()
+    private val catalogResponseAdapter = moshi.adapter(CatalogResponseDto::class.java)
+
+    private val diskFile: File by lazy { File(context.cacheDir, DISK_CACHE_FILE_NAME) }
+    private val diskCache = ConcurrentHashMap<String, DiskEntry>()
+    private val diskMutex = Mutex()
+    @Volatile private var diskLoaded = false
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        // Warm the disk mirror off the critical path so it is ready before the first
+        // getCatalog collection; the guard in ensureDiskLoaded() covers the race.
+        ioScope.launch { runCatching { ensureDiskLoaded() } }
     }
 
     override fun getCatalog(
@@ -66,8 +98,7 @@ class CatalogRepositoryImpl @Inject constructor(
 
         val url = buildCatalogUrl(addonBaseUrl, type, catalogId, skip, extraArgs)
 
-        // Cache hit within TTL: serve the stored row and skip the network entirely.
-        // A stale entry is dropped so the fetch below refreshes it.
+        // 1) In-memory freshness cache hit within TTL: serve and skip the network.
         val cached = catalogCache[url]
         if (cached != null) {
             if (System.currentTimeMillis() - cached.storedAtMs <= CATALOG_CACHE_TTL_MS) {
@@ -79,6 +110,32 @@ class CatalogRepositoryImpl @Inject constructor(
             }
         }
 
+        // 2) Disk first-paint cache (first page of a home row only). Serve stale
+        //    immediately, then fall through to revalidate over the network.
+        val diskEligible = skip == 0 && extraArgs.isEmpty()
+        var servedDiskRow: CatalogRow? = null
+        if (diskEligible) {
+            val diskRow = runCatching {
+                readDiskRow(
+                    url = url,
+                    addonBaseUrl = addonBaseUrl,
+                    addonId = addonId,
+                    addonName = addonName,
+                    catalogId = catalogId,
+                    catalogName = catalogName,
+                    type = type,
+                    skip = skip,
+                    skipStep = skipStep,
+                    supportsSkip = supportsSkip
+                )
+            }.getOrNull()
+            if (diskRow != null) {
+                Log.d(TAG, "Catalog disk hit (serving stale, revalidating) type=$type catalogId=$catalogId url=$url")
+                servedDiskRow = diskRow
+                emit(NetworkResult.Success(diskRow))
+            }
+        }
+
         Log.d(
             TAG,
             "Fetching catalog addonId=$addonId addonName=$addonName type=$type catalogId=$catalogId skip=$skip skipStep=$skipStep supportsSkip=$supportsSkip url=$url"
@@ -86,37 +143,25 @@ class CatalogRepositoryImpl @Inject constructor(
 
         when (val result = safeApiCall(context) { api.getCatalog(url) }) {
             is NetworkResult.Success -> {
-                // Main review F17: on duplicate IDs keep the FIRST (catalogue
-                // order is meaningful) but backfill visual/metadata fields the
-                // first copy lacks from the dropped duplicate, so a richer
-                // poster/background/description is never silently lost.
-                val merged = LinkedHashMap<String, MetaPreview>(result.data.metas.size)
-                result.data.metas.forEach { dto ->
-                    val item = dto.toDomain(type, addonBaseUrl)
-                    val prior = merged[item.id]
-                    merged[item.id] = if (prior == null) {
-                        item
-                    } else {
-                        prior.copy(
-                            poster = prior.poster ?: item.poster,
-                            background = prior.background ?: item.background,
-                            logo = prior.logo ?: item.logo,
-                            description = prior.description ?: item.description,
-                            releaseInfo = prior.releaseInfo ?: item.releaseInfo,
-                            imdbRating = prior.imdbRating ?: item.imdbRating,
-                            landscapePoster = prior.landscapePoster ?: item.landscapePoster,
-                            behaviorHints = prior.behaviorHints ?: item.behaviorHints
-                        )
-                    }
-                }
-                val items = merged.values.toList()
+                val catalogRow = buildCatalogRow(
+                    data = result.data,
+                    addonBaseUrl = addonBaseUrl,
+                    addonId = addonId,
+                    addonName = addonName,
+                    catalogId = catalogId,
+                    catalogName = catalogName,
+                    type = type,
+                    skip = skip,
+                    skipStep = skipStep,
+                    supportsSkip = supportsSkip,
+                    extraArgs = extraArgs
+                )
                 Log.d(
                     TAG,
-                    "Catalog fetch success addonId=$addonId type=$type catalogId=$catalogId items=${items.size}"
+                    "Catalog fetch success addonId=$addonId type=$type catalogId=$catalogId items=${catalogRow.items.size}"
                 )
                 // Build 1: the addon's own declared TTL, against the local one.
-                // declared=null means the addon sent no cacheMaxAge, in which
-                // case the 90 s local TTL is the only policy in play.
+                // declared=null means the addon sent no cacheMaxAge.
                 Log.i(
                     TAG,
                     "CATALOG_TTL declared=${result.data.cacheMaxAge} " +
@@ -124,34 +169,171 @@ class CatalogRepositoryImpl @Inject constructor(
                         "addonName=$addonName catalogId=$catalogId"
                 )
 
-                val catalogRow = CatalogRow(
-                    addonId = addonId,
-                    addonName = addonName,
-                    addonBaseUrl = addonBaseUrl,
-                    catalogId = catalogId,
-                    catalogName = catalogName,
-                    type = ContentType.fromString(type),
-                    rawType = type,
-                    items = items,
-                    isLoading = false,
-                    hasMore = supportsSkip && items.isNotEmpty(),
-                    currentPage = if (skipStep > 0) skip / skipStep else 0,
-                    supportsSkip = supportsSkip,
-                    skipStep = skipStep,
-                    nextSkip = if (supportsSkip && items.isNotEmpty()) skip + items.size else skip,
-                    extraArgs = extraArgs
-                )
                 catalogCache[url] = CacheEntry(catalogRow, System.currentTimeMillis())
-                emit(NetworkResult.Success(catalogRow))
+                if (diskEligible) {
+                    runCatching { writeDiskRow(url, catalogResponseAdapter.toJson(result.data)) }
+                }
+
+                // Emit the fresh row unless it is identical to the disk row already
+                // served (avoids a needless row swap / focus disruption).
+                if (servedDiskRow == null || servedDiskRow != catalogRow) {
+                    emit(NetworkResult.Success(catalogRow))
+                }
             }
             is NetworkResult.Error -> {
                 Log.w(
                     TAG,
                     "Catalog fetch failed addonId=$addonId type=$type catalogId=$catalogId code=${result.code} message=${result.message} url=$url"
                 )
-                emit(result)
+                // If a disk row was already served, keep it on screen rather than
+                // surfacing the error and blanking the row.
+                if (servedDiskRow == null) {
+                    emit(result)
+                }
             }
             NetworkResult.Loading -> { /* Already emitted */ }
+        }
+    }
+
+    private fun buildCatalogRow(
+        data: CatalogResponseDto,
+        addonBaseUrl: String,
+        addonId: String,
+        addonName: String,
+        catalogId: String,
+        catalogName: String,
+        type: String,
+        skip: Int,
+        skipStep: Int,
+        supportsSkip: Boolean,
+        extraArgs: Map<String, String>
+    ): CatalogRow {
+        // Main review F17: on duplicate IDs keep the FIRST (catalogue order is
+        // meaningful) but backfill visual/metadata fields the first copy lacks from
+        // the dropped duplicate, so a richer poster/background/description is not lost.
+        val merged = LinkedHashMap<String, MetaPreview>(data.metas.size)
+        data.metas.forEach { dto ->
+            val item = dto.toDomain(type, addonBaseUrl)
+            val prior = merged[item.id]
+            merged[item.id] = if (prior == null) {
+                item
+            } else {
+                prior.copy(
+                    poster = prior.poster ?: item.poster,
+                    background = prior.background ?: item.background,
+                    logo = prior.logo ?: item.logo,
+                    description = prior.description ?: item.description,
+                    releaseInfo = prior.releaseInfo ?: item.releaseInfo,
+                    imdbRating = prior.imdbRating ?: item.imdbRating,
+                    landscapePoster = prior.landscapePoster ?: item.landscapePoster,
+                    behaviorHints = prior.behaviorHints ?: item.behaviorHints
+                )
+            }
+        }
+        val items = merged.values.toList()
+        return CatalogRow(
+            addonId = addonId,
+            addonName = addonName,
+            addonBaseUrl = addonBaseUrl,
+            catalogId = catalogId,
+            catalogName = catalogName,
+            type = ContentType.fromString(type),
+            rawType = type,
+            items = items,
+            isLoading = false,
+            hasMore = supportsSkip && items.isNotEmpty(),
+            currentPage = if (skipStep > 0) skip / skipStep else 0,
+            supportsSkip = supportsSkip,
+            skipStep = skipStep,
+            nextSkip = if (supportsSkip && items.isNotEmpty()) skip + items.size else skip,
+            extraArgs = extraArgs
+        )
+    }
+
+    // ---- disk first-paint cache -------------------------------------------------
+
+    private suspend fun ensureDiskLoaded() {
+        if (diskLoaded) return
+        diskMutex.withLock {
+            if (diskLoaded) return
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    if (diskFile.exists()) {
+                        val root = JSONObject(diskFile.readText())
+                        val now = System.currentTimeMillis()
+                        val keys = root.keys()
+                        while (keys.hasNext()) {
+                            val key = keys.next()
+                            val obj = root.getJSONObject(key)
+                            val storedAt = obj.getLong("t")
+                            if (now - storedAt <= DISK_CACHE_MAX_AGE_MS) {
+                                diskCache[key] = DiskEntry(obj.getString("b"), storedAt)
+                            }
+                        }
+                    }
+                }
+            }
+            diskLoaded = true
+        }
+    }
+
+    private suspend fun readDiskRow(
+        url: String,
+        addonBaseUrl: String,
+        addonId: String,
+        addonName: String,
+        catalogId: String,
+        catalogName: String,
+        type: String,
+        skip: Int,
+        skipStep: Int,
+        supportsSkip: Boolean
+    ): CatalogRow? {
+        ensureDiskLoaded()
+        val entry = diskCache[url] ?: return null
+        if (System.currentTimeMillis() - entry.storedAtMs > DISK_CACHE_MAX_AGE_MS) {
+            diskCache.remove(url)
+            return null
+        }
+        val dto = catalogResponseAdapter.fromJson(entry.dtoJson) ?: return null
+        return buildCatalogRow(
+            data = dto,
+            addonBaseUrl = addonBaseUrl,
+            addonId = addonId,
+            addonName = addonName,
+            catalogId = catalogId,
+            catalogName = catalogName,
+            type = type,
+            skip = skip,
+            skipStep = skipStep,
+            supportsSkip = supportsSkip,
+            extraArgs = emptyMap()
+        )
+    }
+
+    private suspend fun writeDiskRow(url: String, dtoJson: String) {
+        ensureDiskLoaded()
+        diskCache[url] = DiskEntry(dtoJson, System.currentTimeMillis())
+        if (diskCache.size > DISK_CACHE_MAX_ENTRIES) {
+            diskCache.entries
+                .sortedBy { it.value.storedAtMs }
+                .take(diskCache.size - DISK_CACHE_MAX_ENTRIES)
+                .forEach { diskCache.remove(it.key) }
+        }
+        flushDisk()
+    }
+
+    private suspend fun flushDisk() {
+        diskMutex.withLock {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val root = JSONObject()
+                    diskCache.entries.forEach { (key, entry) ->
+                        root.put(key, JSONObject().put("b", entry.dtoJson).put("t", entry.storedAtMs))
+                    }
+                    diskFile.writeText(root.toString())
+                }
+            }
         }
     }
 
