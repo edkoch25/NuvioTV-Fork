@@ -768,6 +768,11 @@ class MetaDetailsViewModel @Inject constructor(
 
     private fun loadMeta() {
         viewModelScope.launch {
+            // Metadata timing instrument. Grep anchor: MetaTiming. metaLoadStartMs
+            // is read in applyMetaWithEnrichment (always the next step on the
+            // meta) to measure addon-meta-ready, enrich and total text-ready
+            // latency. Logging only.
+            metaLoadStartMs = android.os.SystemClock.elapsedRealtime()
             cancelCommentsRequests()
             _uiState.update {
                 it.copy(
@@ -1018,10 +1023,27 @@ class MetaDetailsViewModel @Inject constructor(
         }
     }
 
+    /** Metadata timing instrument (grep anchor: MetaTiming). Set in loadMeta. */
+    @Volatile
+    private var metaLoadStartMs: Long = 0L
+
     private suspend fun applyMetaWithEnrichment(meta: Meta) {
+        // MetaTiming: addon meta is in hand here (cache hit or network). The
+        // synopsis/cast the addon already returned are not shown until enrichMeta
+        // below returns, so this line and META_APPLY bracket that gate.
+        android.util.Log.i(
+            "MetaTiming",
+            "META_FETCH ms=${android.os.SystemClock.elapsedRealtime() - metaLoadStartMs} id=${meta.id}"
+        )
         // Fire all independent async jobs immediately — they run in parallel.
         loadMoreLikeThisAsync(meta)
+        val enrichT0 = android.os.SystemClock.elapsedRealtime()
         val enriched = enrichMeta(meta)
+        android.util.Log.i(
+            "MetaTiming",
+            "META_ENRICH ms=${android.os.SystemClock.elapsedRealtime() - enrichT0} " +
+                "thread=${Thread.currentThread().name}"
+        )
 
         // Pre-compute nextToWatch before applyMeta so the PlayButton text is stable
         // from the first composition — prevents focus invalidation from late recomposition.
@@ -1034,6 +1056,10 @@ class MetaDetailsViewModel @Inject constructor(
         val precomputedNextToWatch = computeNextToWatch(enriched, progressMap, watchedEpisodes)
         updateNextToWatch(precomputedNextToWatch)
 
+        android.util.Log.i(
+            "MetaTiming",
+            "META_APPLY total_ms=${android.os.SystemClock.elapsedRealtime() - metaLoadStartMs}"
+        )
         applyMeta(enriched)
         // Episode ratings and MDBList are independent — launch both without waiting.
         loadEpisodeRatingsAsync(enriched)
@@ -1484,6 +1510,7 @@ class MetaDetailsViewModel @Inject constructor(
 
         // Fetch main enrichment and episode enrichment in parallel.
         val (enrichment, episodeMap) = coroutineScope {
+            val tmdbT0 = android.os.SystemClock.elapsedRealtime()
             val main = async(Dispatchers.IO) {
                 tmdbMetadataService.fetchEnrichment(
                     tmdbId = tmdbId,
@@ -1501,7 +1528,18 @@ class MetaDetailsViewModel @Inject constructor(
                     )
                 }
             } else null
-            main.await() to episodes?.await()
+            // MetaTiming: main completes at main_ms; total_ms is when both are
+            // done (they run in parallel, so total is the critical path).
+            val mainResult = main.await()
+            val mainMs = android.os.SystemClock.elapsedRealtime() - tmdbT0
+            val episodeResult = episodes?.await()
+            android.util.Log.i(
+                "MetaTiming",
+                "META_TMDB main_ms=$mainMs " +
+                    "total_ms=${android.os.SystemClock.elapsedRealtime() - tmdbT0} " +
+                    "episodes=${needsEpisodes}"
+            )
+            mainResult to episodeResult
         }
 
         var updated = meta
