@@ -31,6 +31,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -167,6 +168,20 @@ class StreamRepositoryImpl @Inject constructor(
                             // MUST precede the broad catch below: TimeoutCancellationException
                             // is a CancellationException, and rethrowing it would cancel the
                             // enclosing coroutineScope and every sibling addon job with it.
+                            //
+                            // Distinguish this addon's OWN 15s deadline from an EXTERNAL
+                            // cancellation. The P2 prefetch cap wraps the collect in
+                            // withTimeoutOrNull, whose TimeoutCancellationException propagates
+                            // in here when the cap fires (e.g. at 3s) - which previously
+                            // mislabelled a 3s cap-cancel as "exceeded 15000ms / timeout" and
+                            // made a genuinely dead addon indistinguishable from one that was
+                            // simply cut short. On a real own-timeout only the inner withTimeout
+                            // scope expired, so this coroutine is still active; on an external
+                            // cancel the coroutine itself is cancelled.
+                            if (!isActive) {
+                                addonOutcome = "cancelled"
+                                throw e
+                            }
                             addonOutcome = "timeout"
                             Log.w(TAG, "Addon ${addon.name} exceeded ${ADDON_STREAM_FETCH_TIMEOUT_MS}ms - abandoning")
                             attemptedFailures += StreamAttemptFailure(
