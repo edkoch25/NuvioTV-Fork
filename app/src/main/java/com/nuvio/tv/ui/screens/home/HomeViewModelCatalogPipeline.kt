@@ -295,8 +295,30 @@ internal suspend fun HomeViewModel.loadAllCatalogsPipeline(
             _uiState.first { it.layoutPreferencesReady }
         }
         val isGridLayout = _uiState.value.homeLayout == HomeLayout.GRID
-        val eagerHomeCatalogs = if (isGridLayout) catalogsToLoad else catalogsToLoad.take(eagerCatalogLoadCount)
-        val lazyHomeCatalogs = if (isGridLayout) emptyList() else catalogsToLoad.drop(eagerCatalogLoadCount)
+        // Eager set follows DISPLAY order (catalogOrder), not addon-manifest order,
+        // so the eagerly-loaded rows are the ones shown at the top of the home
+        // screen -- stable when the user reorders home rows. catalogOrder was
+        // rebuilt at rebuildCatalogOrder(addons) above; collection_* keys are not
+        // network catalogues and are skipped.
+        val eagerHomeCatalogs: List<Pair<Addon, CatalogDescriptor>>
+        val lazyHomeCatalogs: List<Pair<Addon, CatalogDescriptor>>
+        if (isGridLayout) {
+            eagerHomeCatalogs = catalogsToLoad
+            lazyHomeCatalogs = emptyList()
+        } else {
+            val catalogByKey = catalogsToLoad.associateBy { (addon, catalog) ->
+                catalogKey(addonId = addon.id, type = catalog.apiType, catalogId = catalog.id)
+            }
+            val displayOrderKeys = snapshotCatalogState().first.filterNot { it.startsWith("collection_") }
+            val displayOrderKeySet = displayOrderKeys.toSet()
+            val displayOrdered = displayOrderKeys.mapNotNull { catalogByKey[it] }
+            val remainder = catalogsToLoad.filterNot { (addon, catalog) ->
+                catalogKey(addonId = addon.id, type = catalog.apiType, catalogId = catalog.id) in displayOrderKeySet
+            }
+            val ordered = displayOrdered + remainder
+            eagerHomeCatalogs = ordered.take(eagerCatalogLoadCount)
+            lazyHomeCatalogs = ordered.drop(eagerCatalogLoadCount)
+        }
 
         // Build placeholder descriptors for lazy catalogs
         synchronized(catalogStateLock) {
