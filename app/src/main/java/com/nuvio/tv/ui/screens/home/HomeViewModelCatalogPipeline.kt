@@ -545,7 +545,6 @@ internal fun HomeViewModel.loadMoreCatalogItemsPipeline(catalogId: String, addon
 
     updateCatalogRow(key) { it.copy(isLoading = true) }
     _loadingCatalogs.update { it + key }
-    scheduleUpdateCatalogRows()
 
     viewModelScope.launch {
         val addon = addonsCache.find { it.id == addonId }

@@ -96,6 +96,8 @@ object StreamAutoPlaySelector {
             if (bingeGroupOnly) return null
         }
 
+        if (bingeGroupOnly) return null
+
         if (mode == StreamAutoPlayMode.MANUAL) return null
 
         return when (mode) {

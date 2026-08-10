@@ -336,8 +336,7 @@ internal object PlayerPlaybackNetworking {
         )
     }
 
-    @UnstableApi
-    fun createHttpDataSourceFactory(defaultHeaders: Map<String, String> = emptyMap()): DataSource.Factory {
+    fun createHttpClient(defaultHeaders: Map<String, String> = emptyMap()): OkHttpClient {
         val builder = playbackHttpClient.newBuilder()
         if (defaultHeaders.any { it.key.equals("Authorization", ignoreCase = true) }) {
             // OkHttp strips the Authorization header on cross-host redirects.
@@ -361,10 +360,15 @@ internal object PlayerPlaybackNetworking {
                 }
             }
         }
-        val client = builder
+        return builder
             .let { NuvioExoPlayerPerformanceHelper.applyNetworkOptimizations(it) }
             .build()
             .also { logPoolIdentity("datasource", it) }
+    }
+
+    @UnstableApi
+    fun createHttpDataSourceFactory(defaultHeaders: Map<String, String> = emptyMap()): DataSource.Factory {
+        val client = createHttpClient(defaultHeaders)
         return OkHttpDataSource.Factory(client).apply {
             setDefaultRequestProperties(defaultHeaders)
             if (defaultHeaders.none { it.key.equals("User-Agent", ignoreCase = true) }) {

@@ -15,14 +15,18 @@ import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val TRAKT_ACCESS_TOKEN_MAX_LIFETIME_SECONDS = 86_400
+private const val TRAKT_LEGACY_FORCED_TOKEN_LIFETIME_SECONDS = 86_400
+private const val TRAKT_DOCUMENTED_TOKEN_LIFETIME_SECONDS = 604_800
 
 // TRAKT_ACCESS_TOKEN_MAX_LIFETIME_SECONDS is only a fallback for an absent or
 // non-positive expires_in. The server-provided lifetime is otherwise trusted
 // as-is: clamping below the real expiry forces premature refresh attempts.
 internal fun normalizeTraktTokenLifetimeSeconds(expiresIn: Int): Int {
-    if (expiresIn <= 0) return TRAKT_ACCESS_TOKEN_MAX_LIFETIME_SECONDS
-    return expiresIn
+    return if (expiresIn == TRAKT_LEGACY_FORCED_TOKEN_LIFETIME_SECONDS) {
+        TRAKT_DOCUMENTED_TOKEN_LIFETIME_SECONDS
+    } else {
+        expiresIn
+    }
 }
 
 data class TraktAuthState(
@@ -138,54 +142,6 @@ class TraktAuthDataStore @Inject constructor(
             } else {
                 preferences[userSlugKey] = userSlug
             }
-        }
-    }
-
-    suspend fun saveSyncedAuthState(
-        state: TraktAuthState,
-        profileId: Int = profileManager.activeProfileId.value
-    ) {
-        store(profileId).edit { preferences ->
-            if (!state.isAuthenticated) {
-                preferences.remove(accessTokenKey)
-                preferences.remove(refreshTokenKey)
-                preferences.remove(tokenTypeKey)
-                preferences.remove(createdAtKey)
-                preferences.remove(expiresInKey)
-                preferences.remove(usernameKey)
-                preferences.remove(userSlugKey)
-                preferences.remove(deviceCodeKey)
-                preferences.remove(userCodeKey)
-                preferences.remove(verificationUrlKey)
-                preferences.remove(expiresAtKey)
-                preferences.remove(pollIntervalKey)
-                return@edit
-            }
-
-            preferences[accessTokenKey] = state.accessToken.orEmpty()
-            preferences[refreshTokenKey] = state.refreshToken.orEmpty()
-            preferences[tokenTypeKey] = state.tokenType ?: "bearer"
-            preferences[createdAtKey] = state.createdAt ?: (System.currentTimeMillis() / 1000L)
-            preferences[expiresInKey] = normalizeTraktTokenLifetimeSeconds(
-                state.expiresIn ?: TRAKT_ACCESS_TOKEN_MAX_LIFETIME_SECONDS
-            )
-
-            if (state.username.isNullOrBlank()) {
-                preferences.remove(usernameKey)
-            } else {
-                preferences[usernameKey] = state.username
-            }
-            if (state.userSlug.isNullOrBlank()) {
-                preferences.remove(userSlugKey)
-            } else {
-                preferences[userSlugKey] = state.userSlug
-            }
-
-            preferences.remove(deviceCodeKey)
-            preferences.remove(userCodeKey)
-            preferences.remove(verificationUrlKey)
-            preferences.remove(expiresAtKey)
-            preferences.remove(pollIntervalKey)
         }
     }
 

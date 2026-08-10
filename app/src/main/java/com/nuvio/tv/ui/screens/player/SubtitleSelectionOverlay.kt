@@ -122,9 +122,12 @@ internal fun SubtitleSelectionOverlay(
     // Session snapshots: the open panel works from the state at open time, like the
     // three-rail predecessor, so mid-session addon arrivals don't reshuffle focus.
     val sessionInternalTracks = remember(visible) { internalTracks.map(TrackInfo::copy) }
-    val sessionAddonSubtitles = remember(visible) { addonSubtitles.map(Subtitle::copy) }
+    // Live keys (0.8.3): addon subtitles now arrive progressively (sidecar
+    // pipeline), so the snapshot re-takes when the list grows; the selection id
+    // and open-time scroll position stay frozen so focus does not reshuffle.
+    val sessionAddonSubtitles = remember(visible, addonSubtitles) { addonSubtitles.map(Subtitle::copy) }
     val sessionInstalledOrder = remember(visible) { installedSubtitleAddonOrder.toList() }
-    val sessionIsLoadingAddons = remember(visible) { isLoadingAddons }
+    val sessionIsLoadingAddons = isLoadingAddons
     val sessionSelectedOptionId = remember(visible) {
         selectedSubtitleOptionId(
             internalTracks = sessionInternalTracks,
@@ -132,12 +135,12 @@ internal fun SubtitleSelectionOverlay(
             selectedAddonSubtitle = selectedAddonSubtitle
         )
     }
-
     // Flat track list: every language's options concatenated in the language order the
     // rail builder already encodes (preferred languages first, showOnlyPreferredLanguages
     // honoured, alphabetical within). The drill-down rails are gone (finding #3); the
-    // language ordering machinery is reused as the flat sort.
-    val flatOptions = remember(visible, sessionSelectedOptionId) {
+    // language ordering machinery is reused as the flat sort. Recomputes on progressive
+    // addon arrival (0.8.3 sidecar pipeline) via the sessionAddonSubtitles key.
+    val flatOptions = remember(visible, sessionSelectedOptionId, sessionAddonSubtitles) {
         val languageItems = buildSubtitleLanguageRailItems(
             internalTracks = sessionInternalTracks,
             addonSubtitles = sessionAddonSubtitles,

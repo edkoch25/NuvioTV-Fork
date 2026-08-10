@@ -139,7 +139,9 @@
     <string name="continue_watching">המשך צפייה</string>
     <string name="cw_upcoming">בקרוב</string>
     <string name="cw_next_up">הפרק הבא</string>
+    <string name="cw_next_up_short">הבא</string>
     <string name="cw_new_episode">פרק חדש</string>
+    <string name="cw_new_episode_short">חדש</string>
     <string name="cw_new_season">עונה חדשה</string>
     <string name="cw_resume">המשך</string>
     <string name="cw_percent_watched">%1$d%% נצפה</string>
@@ -152,6 +154,14 @@
     <plurals name="cw_airs_in_days">
         <item quantity="one">עולה מחר</item>
         <item quantity="other">יעלה בעוד %d ימים</item>
+    </plurals>
+    <!-- Short versions for compact card styles (wide/poster) -->
+    <string name="cw_airs_date_short">%1$s</string>
+    <string name="cw_airs_today_short">היום</string>
+    <string name="cw_airs_tomorrow_short">מחר</string>
+    <plurals name="cw_airs_in_days_short">
+        <item quantity="one">בעוד יום</item>
+        <item quantity="other">בעוד %d ימים</item>
     </plurals>
     <string name="cw_action_go_to_details">עבור לפרטים</string>
     <string name="cw_action_start_from_beginning">התחל מהתחלה</string>
@@ -757,13 +767,6 @@
     <string name="sub_org_none_desc">הצג כתוביות בסדר ברירת המחדל של התוסף.</string>
     <string name="sub_org_by_lang_desc">קבץ כתוביות לפי שפה.</string>
     <string name="sub_org_by_addon_desc">קבץ כתוביות לפי מקור התוסף.</string>
-    <string name="sub_startup_mode_title">טעינת כתוביות תוסף</string>
-    <string name="sub_startup_mode_fast">הפעלה מהירה</string>
-    <string name="sub_startup_mode_preferred">שפות מועדפות</string>
-    <string name="sub_startup_mode_all">כל כתוביות התוסף</string>
-    <string name="sub_startup_mode_fast_desc">התחל הפעלה מיד. בחירת כתוביות תוסף עלולה לטעון מחדש את הנגן פעם אחת.</string>
-    <string name="sub_startup_mode_preferred_desc">משוך כתוביות תוסף מראש, לפני ההפעלה, וצרף רצועות בשפה המועדפת והמשנית שלך.</string>
-    <string name="sub_startup_mode_all_desc">משוך את כל כתוביות התוסף לפני ההפעלה. האיטי מבין שלושת המצבים.</string>
 
     <string name="autoplay_reuse_last_link">השתמש שוב בקישור האחרון</string>
     <string name="autoplay_reuse_last_link_sub">הפעל אוטומטית את ה-Stream האחרון שעבד עבור אותו סרט/פרק כשהמטמון עדיין תקף</string>

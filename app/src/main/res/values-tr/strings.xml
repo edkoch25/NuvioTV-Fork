@@ -143,7 +143,9 @@
     <string name="continue_watching">İzlemeye Devam Et</string>
     <string name="cw_upcoming">Yaklaşanlar</string>
     <string name="cw_next_up">Sıradaki</string>
+    <string name="cw_next_up_short">Sıradaki</string>
     <string name="cw_new_episode">Yeni Bölüm</string>
+    <string name="cw_new_episode_short">Yeni</string>
     <string name="cw_new_season">Yeni Sezon</string>
     <string name="cw_resume">Devam Et</string>
     <string name="cw_percent_watched">%%%1$d izlendi</string>
@@ -156,6 +158,14 @@
     <plurals name="cw_airs_in_days">
         <item quantity="one">Yayın tarihi: %d gün sonra</item>
         <item quantity="other">Yayın tarihi: %d gün sonra</item>
+    </plurals>
+    <!-- Short versions for compact card styles (wide/poster) -->
+    <string name="cw_airs_date_short">%1$s</string>
+    <string name="cw_airs_today_short">Bugün</string>
+    <string name="cw_airs_tomorrow_short">Yarın</string>
+    <plurals name="cw_airs_in_days_short">
+        <item quantity="one">%d gün sonra</item>
+        <item quantity="other">%d gün sonra</item>
     </plurals>
     <string name="cw_action_go_to_details">Detaylara git</string>
     <string name="cw_action_start_from_beginning">Baştan başla</string>
@@ -791,13 +801,6 @@
     <string name="sub_org_none_desc">Altyazıları varsayılan eklenti sırasına göre göster.</string>
     <string name="sub_org_by_lang_desc">Altyazıları dile göre gruplandır.</string>
     <string name="sub_org_by_addon_desc">Altyazıları eklenti kaynağına göre gruplandır.</string>
-    <string name="sub_startup_mode_title">Eklenti Altyazılarını Yükleme</string>
-    <string name="sub_startup_mode_fast">Hızlı başlangıç</string>
-    <string name="sub_startup_mode_preferred">Tercih edilen diller</string>
-    <string name="sub_startup_mode_all">Tüm eklenti altyazıları</string>
-    <string name="sub_startup_mode_fast_desc">Videoyu beklemeden başlatır. Eklentiden farklı bir altyazı seçerseniz oynatıcı anlık olarak yeniden yüklenebilir.</string>
-    <string name="sub_startup_mode_preferred_desc">Video başlamadan önce eklenti altyazılarını arar ve yalnızca seçtiğiniz dillerdeki altyazıları hazır eder.</string>
-    <string name="sub_startup_mode_all_desc">Bulunan tüm eklenti altyazılarını baştan arka planda getirir. Videonun başlaması biraz daha uzun sürebilir.</string>
 
     <!-- PlaybackAutoPlaySettings -->
     <string name="autoplay_reuse_last_link">Son Bağlantıyı Yeniden Kullan</string>
@@ -1522,6 +1525,7 @@
     <string name="playback_show_loading_status">Yükleme durumunu göster</string>
     <string name="playback_show_loading_status_sub">Oynatıcı başlatılırken adım adım ilerlemeyi göster.</string>
     <string name="player_sync_line">Satırı Senkronize Et</string>
+    <string name="subtitle_delay_reset">Sıfırla</string>
     <string name="subtitle_timing_press_sync">Bir replik duyduğunuzda Senkronize Et\'e basın.</string>
     <string name="subtitle_timing_sync_button">Senkronize Et</string>
     <string name="subtitle_timing_select_addon_first">Önce bir eklenti altyazı kaynağı seçin.</string>

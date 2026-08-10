@@ -502,13 +502,13 @@ private fun PlayerRuntimeController.applySelectedStreamState(
     url: String,
     headers: Map<String, String>
 ) {
-    val (cleanUrl, mergedHeaders) = PlayerMediaSourceFactory.extractUserInfoAuth(url, headers)
-    currentStreamUrl = cleanUrl
-    currentHeaders = mergedHeaders
+    val playbackRequest = PlayerMediaSourceFactory.normalizePlaybackRequest(url, headers)
+    currentStreamUrl = playbackRequest.url
+    currentHeaders = playbackRequest.headers
     currentFilename = stream.behaviorHints?.filename ?: navigationArgs.filename
     currentStreamResponseHeaders = stream.behaviorHints?.proxyHeaders?.response.orEmpty()
     currentStreamMimeType = PlayerMediaSourceFactory.inferMimeType(
-        url = cleanUrl,
+        url = playbackRequest.url,
         filename = currentFilename,
         responseHeaders = currentStreamResponseHeaders
     )
@@ -730,7 +730,9 @@ internal fun PlayerRuntimeController.switchToSourceStream(
         url = url,
         headers = newHeaders
     )
-    persistSelectedStreamForReuse(stream = stream, url = url, headers = newHeaders)
+    val playbackUrl = currentStreamUrl
+    val playbackHeaders = currentHeaders
+    persistSelectedStreamForReuse(stream = stream, url = playbackUrl, headers = playbackHeaders)
 
     // Reset stream-state error flags for the new stream.
     hasRetriedCurrentStreamAfter416 = false
@@ -750,7 +752,7 @@ internal fun PlayerRuntimeController.switchToSourceStream(
             isBuffering = true,
             error = null,
             currentStreamName = stream.name ?: stream.addonName,
-            currentStreamUrl = url,
+            currentStreamUrl = playbackUrl,
             currentStreamInfoHash = stream.infoHash ?: stream.clientResolve?.infoHash,
             currentStreamFileIdx = stream.clientResolve?.fileIdx,
             currentStreamAddonName = stream.addonName,
@@ -796,16 +798,16 @@ internal fun PlayerRuntimeController.switchToSourceStream(
                 afrTrackSwitchInFlight = false
                 afrModeAppliedPreStart = false
                 runAfrCachePreflightIfEnabled(
-                    url = url,
-                    headers = newHeaders,
+                    url = playbackUrl,
+                    headers = playbackHeaders,
                     frameRateMatchingMode = playerSettings.frameRateMatchingMode,
                     resolutionMatchingEnabled = playerSettings.resolutionMatchingEnabled
                 )
                 player.setMediaSource(
                     mediaSourceFactory.createMediaSource(
                         context = context,
-                        url = url,
-                        headers = newHeaders,
+                        url = playbackUrl,
+                        headers = playbackHeaders,
                         filename = currentFilename,
                         responseHeaders = currentStreamResponseHeaders,
                         mimeTypeOverride = currentStreamMimeType,
@@ -819,7 +821,7 @@ internal fun PlayerRuntimeController.switchToSourceStream(
             }
         }
     } ?: run {
-        initializePlayer(url, newHeaders)
+        initializePlayer(playbackUrl, playbackHeaders)
     }
 
     loadSavedProgressFor(currentSeason, currentEpisode)
@@ -1311,8 +1313,6 @@ internal fun PlayerRuntimeController.switchToEpisodeStream(
     val targetVideo = forcedTargetVideo
         ?: _uiState.value.episodes.firstOrNull { it.id == _uiState.value.episodeStreamsForVideoId }
 
-    currentStreamUrl = url
-    currentHeaders = newHeaders
     currentStreamBingeGroup = stream.behaviorHints?.bingeGroup
     currentVideoHash = stream.behaviorHints?.videoHash
     currentVideoSize = stream.behaviorHints?.videoSize
@@ -1329,6 +1329,8 @@ internal fun PlayerRuntimeController.switchToEpisodeStream(
         url = url,
         headers = newHeaders
     )
+    val playbackUrl = currentStreamUrl
+    val playbackHeaders = currentHeaders
     persistedTrackPreference = null
     losslessAudioDefaultAppliedForStream = false
     persistedAudioPreferenceSeenForStream = false
@@ -1341,7 +1343,7 @@ internal fun PlayerRuntimeController.switchToEpisodeStream(
     currentSeason = targetVideo?.season ?: _uiState.value.episodeStreamsSeason ?: currentSeason
     currentEpisode = targetVideo?.episode ?: _uiState.value.episodeStreamsEpisode ?: currentEpisode
     currentEpisodeTitle = targetVideo?.title ?: _uiState.value.episodeStreamsTitle ?: currentEpisodeTitle
-    persistSelectedStreamForReuse(stream = stream, url = url, headers = newHeaders)
+    persistSelectedStreamForReuse(stream = stream, url = playbackUrl, headers = playbackHeaders)
     currentTraktEpisodeMapping = null
     currentTraktEpisodeMappingKey = null
     lastSavedPosition = 0L
@@ -1355,7 +1357,7 @@ internal fun PlayerRuntimeController.switchToEpisodeStream(
             currentVideoId = currentVideoId,
             currentEpisodeTitle = currentEpisodeTitle,
             currentStreamName = stream.name ?: stream.addonName,
-            currentStreamUrl = url,
+            currentStreamUrl = playbackUrl,
             currentStreamInfoHash = stream.infoHash ?: stream.clientResolve?.infoHash,
             currentStreamFileIdx = stream.clientResolve?.fileIdx,
             currentStreamAddonName = stream.addonName,
@@ -1401,14 +1403,14 @@ internal fun PlayerRuntimeController.switchToEpisodeStream(
     fetchSkipIntervals(contentId, currentSeason, currentEpisode)
 
     queuePlaybackRawEventLine(
-        "LINK_SELECTED: source=in_player_source host=${url.safeStreamTraceHost()} " +
+        "LINK_SELECTED: source=in_player_source host=${playbackUrl.safeStreamTraceHost()} " +
             "streamName=${stream.name} addon=${stream.addonName} " +
             "contentId=${contentId ?: "n/a"} videoId=${currentVideoId ?: "n/a"} " +
             "S${currentSeason ?: "-"}E${currentEpisode ?: "-"} torrent=false"
     )
     preparePlaybackBeforeStart(
-        url = url,
-        headers = newHeaders,
+        url = playbackUrl,
+        headers = playbackHeaders,
         loadSavedProgress = true
     )
 }
@@ -1625,7 +1627,8 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                         )
             val bingeGroupOnlyManualMode =
                 shouldAutoSelectInManualMode &&
-                    !playerSettings.streamAutoPlayNextEpisodeEnabled &&
+                    (!playerSettings.streamAutoPlayNextEpisodeEnabled ||
+                        !playerSettings.streamAutoPlayNextEpisodeFallbackEnabled) &&
                     playerSettings.streamAutoPlayPreferBingeGroupForNextEpisode
             if (playerSettings.streamAutoPlayMode == StreamAutoPlayMode.MANUAL && !shouldAutoSelectInManualMode) {
                 _uiState.update {

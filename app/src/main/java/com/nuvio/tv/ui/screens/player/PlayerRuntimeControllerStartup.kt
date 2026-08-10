@@ -39,7 +39,11 @@ internal fun PlayerRuntimeController.startInitialPlaybackIfNeeded() {
             "startFromBeginning=${navigationArgs.startFromBeginning} streamName=${streamName ?: "n/a"}"
     queuePlaybackRawEventLine(startRequestLine)
     TtffTrace.mirror(startRequestLine)
-    Log.d("PlayerStartup", "startInitialPlayback: infoHash=$infoHash, streamUrl=${initialStreamUrl.take(80)}")
+    Log.d(
+        "PlayerStartup",
+        "startInitialPlayback: infoHash=$infoHash host=${currentStreamUrl.safeStartupHost()} " +
+            "urlHash=${currentStreamUrl.hashCode().toUInt().toString(16)}"
+    )
     if (infoHash != null && !initialStreamUrl.startsWith("http")) {
         torrentStreamJob = scope.launch {
             try {
