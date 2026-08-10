@@ -163,7 +163,18 @@ internal fun SubtitleSelectionOverlay(
                     selectedOptionId = sessionSelectedOptionId,
                     builtInLabel = builtInLabel,
                     forcedLabel = forcedLabel
-                )
+                ).map { item ->
+                    // Flat list needs the language on every row (the drill-down implied
+                    // it); keep the track's own name only when it adds information.
+                    val variant = item.title.takeIf { title ->
+                        title.isNotBlank() &&
+                            !title.equals(language.label, ignoreCase = true) &&
+                            !title.equals(language.key, ignoreCase = true)
+                    }
+                    item.copy(
+                        title = if (variant != null) "${language.label} $variant" else language.label
+                    )
+                }
             }
     }
 
@@ -289,10 +300,10 @@ private fun SubtitleStyleRail(
     Column(modifier = Modifier.fillMaxWidth()) {
         LazyColumn(
             state = listState,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
             contentPadding = PaddingValues(bottom = NuvioTheme.spacing.sm),
             modifier = Modifier
-                .heightIn(max = 460.dp)
+                .heightIn(max = 420.dp)
         ) {
             item {
                 Card(
@@ -325,7 +336,7 @@ private fun SubtitleStyleRail(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = NuvioTheme.spacing.md, vertical = 10.dp),
+                            .padding(horizontal = NuvioTheme.spacing.md, vertical = 8.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -482,7 +493,7 @@ private fun SubtitleStyleRail(
                         text = stringResource(R.string.subtitle_reset_defaults),
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color.White,
-                        modifier = Modifier.padding(horizontal = NuvioTheme.spacing.md, vertical = 10.dp)
+                        modifier = Modifier.padding(horizontal = NuvioTheme.spacing.md, vertical = 8.dp)
                     )
                 }
             }
@@ -532,10 +543,10 @@ private fun OverlaySectionCard(
     title: String,
     content: @Composable () -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             text = title,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodySmall,
             color = Color.White
         )
         content()
@@ -606,7 +617,7 @@ private fun StepperButton(
     IconButton(
         onClick = onClick,
         modifier = Modifier
-            .size(40.dp)
+            .size(32.dp)
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .onPreviewKeyEvent { event ->
                 when (event.nativeKeyEvent.keyCode) {
@@ -722,7 +733,7 @@ private fun ToggleChip(
             text = label,
             style = MaterialTheme.typography.bodyMedium,
             color = if (isEnabled) Color.White else Color.White,
-            modifier = Modifier.padding(horizontal = NuvioTheme.spacing.md, vertical = NuvioTheme.spacing.sm)
+            modifier = Modifier.padding(horizontal = NuvioTheme.spacing.md, vertical = NuvioTheme.spacing.xs)
         )
     }
 }
@@ -777,7 +788,7 @@ private fun ColorChip(
             focusedContainerColor = color
         ),
         modifier = Modifier
-            .size(NuvioTheme.spacing.xxl)
+            .size(NuvioTheme.spacing.xl)
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .onPreviewKeyEvent { event ->
                 when (event.nativeKeyEvent.keyCode) {
