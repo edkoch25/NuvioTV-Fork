@@ -230,20 +230,20 @@ fun LoadingOverlay(
                             LoadingIndicator()
                         }
                     }
+                }
 
-                    // #7: the text lane is now an in-order child of the same Column
-                    // as the artwork, so it always lays out below the artwork box
-                    // regardless of canvas height or UI scale -- no magic top inset,
-                    // no centre-anchored sibling that could ride back up into the
-                    // artwork. Vertical clearance is a structural invariant.
-                    val showHorizontalBar = progress != null && !showLogo
-                    if (!sourceLine.isNullOrBlank() || !filename.isNullOrBlank() || !message.isNullOrBlank() || showHorizontalBar) {
-                        Spacer(modifier = Modifier.height(NuvioTheme.spacing.xl))
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier
-                                .padding(horizontal = NuvioTheme.spacing.lg)
-                        ) {
+                // Option A: the source/filename/message lane is pinned to the
+                // bottom of the screen as a sibling of the centred artwork, so the
+                // artwork stays at true centre and never shifts when the lane
+                // appears or grows.
+                val showHorizontalBar = progress != null && !showLogo
+                if (!sourceLine.isNullOrBlank() || !filename.isNullOrBlank() || !message.isNullOrBlank() || showHorizontalBar) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(horizontal = NuvioTheme.spacing.lg, vertical = NuvioTheme.spacing.xxl)
+                    ) {
                         val sourceShadow = androidx.compose.ui.graphics.Shadow(
                             color = Color.Black.copy(alpha = 0.85f),
                             offset = androidx.compose.ui.geometry.Offset(0f, 2f),
@@ -327,7 +327,6 @@ fun LoadingOverlay(
                             }
                         }
                     }
-                }
                 }
             }
         }
