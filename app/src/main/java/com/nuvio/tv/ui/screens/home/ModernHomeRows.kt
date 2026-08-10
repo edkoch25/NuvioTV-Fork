@@ -1395,7 +1395,7 @@ private fun ModernCarouselCard(
                             .padding(end = NuvioTheme.spacing.sm, top = NuvioTheme.spacing.sm)
                             .zIndex(2f)
                             .clip(RoundedCornerShape(999.dp))
-                            .background(Color.White.copy(alpha = 0.08f))
+                            .background(Color.Black.copy(alpha = 0.7f))
                             .padding(horizontal = 8.dp, vertical = 2.dp)
                     )
                 }

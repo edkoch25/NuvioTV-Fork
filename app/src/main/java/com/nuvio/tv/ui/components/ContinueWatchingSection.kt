@@ -89,8 +89,6 @@ import com.nuvio.tv.domain.model.CardDepthStyle
 import kotlinx.coroutines.delay
 
 private val BadgeShape = RoundedCornerShape(NuvioTheme.radii.xs)
-private val CwNewEpisodeBadgeColor = Color(0x14FFFFFF)
-private val CwNewSeasonBadgeColor = Color(0x14FFFFFF)
 
 /** URLs that failed to load — skip them immediately on next recomposition. */
 internal val brokenImageUrls = java.util.Collections.synchronizedSet(mutableSetOf<String>())
@@ -555,13 +553,7 @@ fun ContinueWatchingCard(
     }
 
     val bgColor = NuvioTheme.colors.Background
-    val badgeBackground = remember(bgColor, nextUp) {
-        when {
-            nextUp?.isNewSeasonRelease == true -> CwNewSeasonBadgeColor
-            nextUp?.isReleaseAlert == true -> CwNewEpisodeBadgeColor
-            else -> bgColor.copy(alpha = 0.8f)
-        }
-    }
+    val badgeBackground = remember { Color.Black.copy(alpha = 0.7f) }
     
     val bgCardColor = NuvioTheme.colors.BackgroundCard
     val backgroundPainter = remember(bgCardColor) { androidx.compose.ui.graphics.painter.ColorPainter(bgCardColor) }
