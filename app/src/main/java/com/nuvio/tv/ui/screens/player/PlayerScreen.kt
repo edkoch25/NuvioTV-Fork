@@ -56,7 +56,6 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.QueryStats
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Pause
@@ -132,6 +131,8 @@ import com.nuvio.tv.data.local.StreamAutoPlayMode
 import com.nuvio.tv.domain.model.Subtitle
 import com.nuvio.tv.domain.model.WatchProgress
 import com.nuvio.tv.ui.components.LoadingIndicator
+import com.nuvio.tv.ui.components.PanelActionRow
+import com.nuvio.tv.ui.components.PlayerPanelRow
 import android.text.format.DateFormat
 import java.util.Date
 import java.util.Locale
@@ -3107,8 +3108,8 @@ private fun SpeedSelectionDialog(
         Box(
             modifier = Modifier
                 .width(300.dp)
-                .clip(RoundedCornerShape(NuvioTheme.radii.xl))
-                .background(NuvioTheme.colors.BackgroundElevated)
+                .clip(RoundedCornerShape(NuvioTheme.radii.xxl))
+                .background(Color.Black.copy(alpha = 0.85f))
         ) {
             Column(
                 modifier = Modifier.padding(NuvioTheme.spacing.xl)
@@ -3122,15 +3123,15 @@ private fun SpeedSelectionDialog(
 
                 LazyColumn(
                     state = listState,
-                    verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.sm),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                     contentPadding = PaddingValues(top = NuvioTheme.spacing.xs)
                 ) {
                     itemsIndexed(PLAYBACK_SPEEDS) { index, speed ->
-                        SpeedItem(
-                            modifier = Modifier.focusRequester(speedFocusRequesters[index]),
-                            speed = speed,
-                            isSelected = speed == currentSpeed,
-                            onClick = { onSpeedSelected(speed) }
+                        PlayerPanelRow(
+                            title = if (speed == 1f) stringResource(R.string.player_speed_normal) else "${speed}x",
+                            selected = speed == currentSpeed,
+                            onClick = { onSpeedSelected(speed) },
+                            modifier = Modifier.focusRequester(speedFocusRequesters[index])
                         )
                     }
                 }
@@ -3150,8 +3151,8 @@ private fun MoreActionsDialog(
         Box(
             modifier = Modifier
                 .width(360.dp)
-                .clip(RoundedCornerShape(NuvioTheme.radii.xl))
-                .background(NuvioTheme.colors.BackgroundElevated)
+                .clip(RoundedCornerShape(NuvioTheme.radii.xxl))
+                .background(Color.Black.copy(alpha = 0.85f))
         ) {
             Column(
                 modifier = Modifier.padding(NuvioTheme.spacing.xl),
@@ -3164,89 +3165,17 @@ private fun MoreActionsDialog(
                     modifier = Modifier.padding(bottom = NuvioTheme.spacing.sm)
                 )
 
-                MoreActionItem(
-                    text = stringResource(R.string.player_more_speed),
+                PanelActionRow(
+                    label = stringResource(R.string.player_more_speed),
                     onClick = onPlaybackSpeed
                 )
-                MoreActionItem(
-                    text = stringResource(R.string.player_more_aspect_ratio),
+                PanelActionRow(
+                    label = stringResource(R.string.player_more_aspect_ratio),
                     onClick = onToggleAspectRatio
                 )
-                MoreActionItem(
-                    text = stringResource(R.string.player_more_open_external),
+                PanelActionRow(
+                    label = stringResource(R.string.player_more_open_external),
                     onClick = onOpenInExternalPlayer
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun MoreActionItem(
-    text: String,
-    onClick: () -> Unit
-) {
-    var isFocused by remember { mutableStateOf(false) }
-
-    Card(
-        onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .onFocusChanged { isFocused = it.isFocused },
-        colors = CardDefaults.colors(
-            containerColor = NuvioTheme.colors.BackgroundCard,
-            focusedContainerColor = NuvioTheme.colors.FocusBackground
-        ),
-        shape = CardDefaults.shape(shape = RoundedCornerShape(10.dp))
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodyLarge,
-            color = NuvioTheme.colors.TextPrimary,
-            modifier = Modifier.padding(horizontal = NuvioTheme.spacing.lg, vertical = 14.dp)
-        )
-    }
-}
-
-@Composable
-private fun SpeedItem(
-    modifier: Modifier = Modifier,
-    speed: Float,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
-    var isFocused by remember { mutableStateOf(false) }
-
-    Card(
-        onClick = onClick,
-        modifier = modifier
-            .fillMaxWidth()
-            .onFocusChanged { isFocused = it.isFocused },
-        colors = CardDefaults.colors(
-            containerColor = if (isSelected) NuvioTheme.colors.Secondary.copy(alpha = 0.2f) else NuvioTheme.colors.BackgroundCard,
-            focusedContainerColor = NuvioTheme.colors.FocusBackground
-        ),
-        shape = CardDefaults.shape(shape = RoundedCornerShape(NuvioTheme.radii.sm))
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(NuvioTheme.spacing.lg),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = if (speed == 1f) stringResource(R.string.player_speed_normal) else "${speed}x",
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (isSelected) NuvioTheme.colors.Primary else NuvioTheme.colors.TextPrimary
-            )
-
-            if (isSelected) {
-                Icon(
-                    imageVector = Icons.Default.Check,
-                    contentDescription = stringResource(R.string.cd_selected),
-                    tint = NuvioTheme.colors.Secondary,
-                    modifier = Modifier.size(NuvioTheme.spacing.xl)
                 )
             }
         }
