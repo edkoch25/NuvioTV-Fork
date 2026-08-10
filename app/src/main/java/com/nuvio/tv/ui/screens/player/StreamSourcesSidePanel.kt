@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -79,10 +80,10 @@ internal fun StreamSourcesSidePanel(
 
     Box(
         modifier = modifier
-            .fillMaxHeight()
-            .width(520.dp)
+            .heightIn(max = 900.dp)
+            .width(440.dp)
             .clip(RoundedCornerShape(topStart = NuvioTheme.spacing.lg, bottomStart = NuvioTheme.spacing.lg))
-            .background(NuvioTheme.colors.BackgroundElevated)
+            .background(Color(0xFF181820))
     ) {
         Column(modifier = Modifier.padding(NuvioTheme.spacing.xl)) {
             PanelEyebrow(text = stringResource(R.string.sources_title))
@@ -217,7 +218,6 @@ internal fun StreamSourcesSidePanel(
                             bottom = NuvioTheme.spacing.sm
                         ),
                         modifier = Modifier
-                            .fillMaxHeight()
                             .onKeyEvent { event ->
                                 if (event.nativeKeyEvent.action != KeyEvent.ACTION_DOWN) return@onKeyEvent false
 

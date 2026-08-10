@@ -81,8 +81,6 @@ internal fun StreamItem(
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
-    val unknownStreamLabel = stringResource(R.string.stream_unknown)
-    val streamName = remember(stream, unknownStreamLabel) { stream.getDisplayNameOrNull() ?: unknownStreamLabel }
     // Pre-upscale: decode at 2× target pixels so the hardware compositor
     // has enough pixel data for smooth edges inside Card RenderNodes.
     val logoDecodeSize = remember(density) {
@@ -99,12 +97,26 @@ internal fun StreamItem(
         }
     }
 
-    // Subline: release group · audio · size, each segment dropped when absent so a
-    // web-dl with no parsed group never leaves a dangling separator (finding #7 kin).
+    // Title: "addon — derived quality — release group", each segment dropped when
+    // underivable so sparse resolver parses degrade cleanly (worst case: addon name
+    // alone). Subline: "size · audio", same drop rule.
     val releaseGroup = remember(stream) {
         com.nuvio.tv.core.debrid.DirectDebridStreamFilter.releaseGroupOf(stream)
     }
     val parsed = stream.clientResolve?.stream?.raw?.parsed
+    val qualitySegment = remember(parsed) {
+        val res = parsed?.resolution?.let { r ->
+            if (r.equals("2160p", ignoreCase = true)) "4K" else r
+        }
+        val hdr = parsed?.hdr?.filter { it.isNotBlank() }?.joinToString(" ")?.ifBlank { null }
+        val qual = parsed?.quality?.takeIf { it.isNotBlank() }
+        listOfNotNull(res, hdr, qual).joinToString(" ").ifBlank { null }
+    }
+    val rowTitle = listOfNotNull(
+        stream.addonName,
+        qualitySegment,
+        releaseGroup.takeIf { it.isNotBlank() }
+    ).joinToString(" — ")
     val audioSegment = remember(parsed) {
         val tokens = ((parsed?.audio ?: emptyList()) + (parsed?.channels ?: emptyList()))
             .filter { it.isNotBlank() }
@@ -117,13 +129,12 @@ internal fun StreamItem(
         }
     } else null
     val subtitle = listOfNotNull(
-        releaseGroup.takeIf { it.isNotBlank() },
-        audioSegment,
-        sizeSegment
+        sizeSegment,
+        audioSegment
     ).joinToString(" · ").ifBlank { null }
 
     PlayerPanelRow(
-        title = streamName,
+        title = rowTitle,
         subtitle = subtitle,
         selected = isCurrentStream,
         onClick = onClick,

@@ -172,10 +172,10 @@ internal fun AudioSelectionOverlay(
 
         Column(
             modifier = Modifier
-                .width(430.dp)
-                .align(Alignment.CenterEnd)
-                .fillMaxHeight()
-                .background(Color(0xF0181820), RoundedCornerShape(20.dp))
+                .width(320.dp)
+                .align(Alignment.BottomEnd)
+                .heightIn(max = 620.dp)
+                .background(Color(0xFF181820), RoundedCornerShape(20.dp))
                 .padding(horizontal = 16.dp, vertical = 20.dp)
         ) {
             PanelEyebrow(text = stringResource(R.string.audio_dialog_title))
@@ -255,7 +255,7 @@ private fun AudioTracksContent(
         verticalArrangement = Arrangement.spacedBy(6.dp),
         contentPadding = PaddingValues(top = NuvioTheme.spacing.sm, bottom = NuvioTheme.spacing.sm),
         modifier = Modifier
-            .heightIn(max = 620.dp)
+            .heightIn(max = 500.dp)
             .fillMaxWidth()
     ) {
         items(items = tracks, key = { track -> track.index }) { track ->
