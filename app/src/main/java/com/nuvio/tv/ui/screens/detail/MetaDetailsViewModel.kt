@@ -45,8 +45,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -1515,38 +1514,30 @@ class MetaDetailsViewModel @Inject constructor(
         val isSeries = meta.apiType in listOf("series", "tv")
         val needsEpisodes = (settings.useEpisodes || settings.useReleaseDates) && isSeries
 
-        // Fetch main enrichment and episode enrichment in parallel.
-        val (enrichment, episodeMap) = coroutineScope {
-            val tmdbT0 = android.os.SystemClock.elapsedRealtime()
-            val main = async(Dispatchers.IO) {
-                tmdbMetadataService.fetchEnrichment(
-                    tmdbId = tmdbId,
-                    contentType = tmdbContentType,
-                    language = settings.language
-                )
-            }
-            val episodes = if (needsEpisodes) {
-                async(Dispatchers.IO) {
-                    val seasonNumbers = meta.videos.mapNotNull { it.season }.distinct()
-                    tmdbMetadataService.fetchEpisodeEnrichment(
-                        tmdbId = tmdbId,
-                        seasonNumbers = seasonNumbers,
-                        language = settings.language
-                    )
-                }
-            } else null
-            // MetaTiming: main completes at main_ms; total_ms is when both are
-            // done (they run in parallel, so total is the critical path).
-            val mainResult = main.await()
-            val mainMs = android.os.SystemClock.elapsedRealtime() - tmdbT0
-            val episodeResult = episodes?.await()
-            android.util.Log.i(
-                "MetaTiming",
-                "META_TMDB main_ms=$mainMs " +
-                    "total_ms=${android.os.SystemClock.elapsedRealtime() - tmdbT0} " +
-                    "episodes=${needsEpisodes}"
+        // Fetch the main TMDB enrichment on the render path; episode enrichment
+        // is deferred to the background (see below).
+        val tmdbT0 = android.os.SystemClock.elapsedRealtime()
+        val enrichment = withContext(Dispatchers.IO) {
+            tmdbMetadataService.fetchEnrichment(
+                tmdbId = tmdbId,
+                contentType = tmdbContentType,
+                language = settings.language
             )
-            mainResult to episodeResult
+        }
+        // M1: only the main enrichment (synopsis/cast/backdrop/logo/genres/...)
+        // gates the render now. Episode enrichment - the slow, series-only part,
+        // measured up to ~7s in the field - is fetched in the background and
+        // merged into the already-published meta, so the details text no longer
+        // waits on it. The merge changes only per-episode fields on the SAME
+        // video list, and nextToWatch does not depend on it, so the hero button
+        // and focus are unaffected.
+        android.util.Log.i(
+            "MetaTiming",
+            "META_TMDB main_ms=${android.os.SystemClock.elapsedRealtime() - tmdbT0} " +
+                "episodes=$needsEpisodes"
+        )
+        if (needsEpisodes) {
+            launchEpisodeEnrichmentMerge(tmdbId, settings, meta.videos)
         }
 
         var updated = meta
@@ -1631,31 +1622,80 @@ class MetaDetailsViewModel @Inject constructor(
             }
         }
 
-        if (!episodeMap.isNullOrEmpty()) {
-            updated = updated.copy(
-                videos = meta.videos.map { video ->
-                    val key = if (video.season != null && video.episode != null) video.season to video.episode else null
-                    val ep = key?.let { episodeMap[it] }
-                    video.copy(
-                        title = if (settings.useEpisodes) ep?.title ?: video.title else video.title,
-                        overview = if (settings.useEpisodes) ep?.overview ?: video.overview else video.overview,
-                        released = selectEpisodeReleaseValue(
-                            addonReleased = video.released,
-                            tmdbAirDate = ep?.airDate,
-                            useTmdbReleaseDates = settings.useReleaseDates
-                        ),
-                        thumbnail = if (settings.useEpisodes) ep?.thumbnail ?: video.thumbnail else video.thumbnail,
-                        runtime = if (settings.useEpisodes) ep?.runtimeMinutes ?: video.runtime else video.runtime
-                    )
-                }
-            )
-        }
-
         if (enrichment?.collectionId != null) {
             loadCollectionAsync(enrichment.collectionId, enrichment.collectionName, settings)
         }
 
         return updated
+    }
+
+    /**
+     * M1: episode enrichment (TMDB per-episode titles/overviews/air-dates/
+     * stills/runtimes) is the slow, series-only part of TMDB enrichment - up to
+     * ~7s in the field (10 Aug 2026 capture: META_TMDB total_ms=8833 vs
+     * main_ms=1745). It does not change the episode SET, and neither the
+     * synopsis, cast, nor nextToWatch depend on it, so it is fetched off the
+     * initial render path and merged into the already-published meta when it
+     * lands. Details text and the hero button now render at main-enrichment
+     * speed; per-episode titles and stills fill in shortly after.
+     */
+    private fun launchEpisodeEnrichmentMerge(
+        tmdbId: String,
+        settings: TmdbSettings,
+        baseVideos: List<Video>
+    ) {
+        viewModelScope.launch {
+            val t0 = android.os.SystemClock.elapsedRealtime()
+            val episodeMap = try {
+                withContext(Dispatchers.IO) {
+                    tmdbMetadataService.fetchEpisodeEnrichment(
+                        tmdbId = tmdbId,
+                        seasonNumbers = baseVideos.mapNotNull { it.season }.distinct(),
+                        language = settings.language
+                    )
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emptyMap()
+            }
+            android.util.Log.i(
+                "MetaTiming",
+                "META_EPISODES ms=${android.os.SystemClock.elapsedRealtime() - t0} count=${episodeMap.size}"
+            )
+            if (episodeMap.isEmpty()) return@launch
+            _uiState.update { state ->
+                // applyMeta publishes meta microseconds after enrichMeta returns,
+                // seconds before this fetch completes, so meta is set here. If it
+                // somehow is not, skip rather than resurrect a stale meta.
+                val current = state.meta ?: return@update state
+                val enrichedVideos = enrichVideosWithEpisodes(current.videos, episodeMap, settings)
+                state.copy(
+                    meta = current.copy(videos = enrichedVideos),
+                    episodesForSeason = getEpisodesForSeason(enrichedVideos, state.selectedSeason)
+                )
+            }
+        }
+    }
+
+    private fun enrichVideosWithEpisodes(
+        videos: List<Video>,
+        episodeMap: Map<Pair<Int, Int>, com.nuvio.tv.core.tmdb.TmdbEpisodeEnrichment>,
+        settings: TmdbSettings
+    ): List<Video> = videos.map { video ->
+        val key = if (video.season != null && video.episode != null) video.season to video.episode else null
+        val ep = key?.let { episodeMap[it] }
+        video.copy(
+            title = if (settings.useEpisodes) ep?.title ?: video.title else video.title,
+            overview = if (settings.useEpisodes) ep?.overview ?: video.overview else video.overview,
+            released = selectEpisodeReleaseValue(
+                addonReleased = video.released,
+                tmdbAirDate = ep?.airDate,
+                useTmdbReleaseDates = settings.useReleaseDates
+            ),
+            thumbnail = if (settings.useEpisodes) ep?.thumbnail ?: video.thumbnail else video.thumbnail,
+            runtime = if (settings.useEpisodes) ep?.runtimeMinutes ?: video.runtime else video.runtime
+        )
     }
 
     private fun resolveTmdbContentType(meta: Meta): ContentType {
