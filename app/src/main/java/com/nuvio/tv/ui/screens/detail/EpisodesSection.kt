@@ -66,8 +66,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nuvio.tv.core.util.parseEpisodeReleaseLocalDate
 import androidx.tv.material3.Border
-import androidx.tv.material3.Button
-import androidx.tv.material3.ButtonDefaults
 import androidx.tv.material3.Card
 import androidx.tv.material3.CardDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
@@ -83,6 +81,7 @@ import com.nuvio.tv.domain.model.Video
 import com.nuvio.tv.ui.components.FocusMarqueeText
 import com.nuvio.tv.ui.components.ImdbRatingSourceLabel
 import com.nuvio.tv.ui.components.NuvioDialog
+import com.nuvio.tv.ui.components.PanelActionRow
 import com.nuvio.tv.ui.theme.NuvioTheme
 import com.nuvio.tv.domain.model.CardDepthSurface
 import com.nuvio.tv.ui.components.LocalCardDepthStyle
@@ -961,92 +960,49 @@ private fun EpisodeOptionsDialog(
         title = episode.title.localizeEpisodeTitle(context),
         subtitle = stringResource(R.string.episodes_dialog_subtitle)
     ) {
-        Button(
+        PanelActionRow(
+            label = if (isWatched) stringResource(R.string.episodes_mark_unwatched) else stringResource(R.string.episodes_mark_watched),
             onClick = onToggleWatched,
             enabled = !isPending,
-            modifier = Modifier
-                .fillMaxWidth()
-                .focusRequester(primaryFocusRequester),
-            colors = ButtonDefaults.colors(
-                containerColor = NuvioTheme.colors.BackgroundCard,
-                contentColor = NuvioTheme.colors.TextPrimary
-            )
-        ) {
-            Text(if (isWatched) stringResource(R.string.episodes_mark_unwatched) else stringResource(R.string.episodes_mark_watched))
-        }
+            focusRequester = primaryFocusRequester
+        )
 
-        Button(
-            onClick = if (isSeasonFullyWatched) onMarkSeasonUnwatched else onMarkSeasonWatched,
-            colors = ButtonDefaults.colors(
-                containerColor = NuvioTheme.colors.BackgroundCard,
-                contentColor = NuvioTheme.colors.TextPrimary
-            ),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(if (isSeasonFullyWatched) stringResource(R.string.episodes_mark_season_unwatched) else stringResource(R.string.episodes_mark_season_watched))
-        }
+        PanelActionRow(
+            label = if (isSeasonFullyWatched) stringResource(R.string.episodes_mark_season_unwatched) else stringResource(R.string.episodes_mark_season_watched),
+            onClick = if (isSeasonFullyWatched) onMarkSeasonUnwatched else onMarkSeasonWatched
+        )
 
         if (hasPreviousEpisodes) {
-            Button(
-                onClick = onMarkPreviousEpisodesWatched,
-                colors = ButtonDefaults.colors(
-                    containerColor = NuvioTheme.colors.BackgroundCard,
-                    contentColor = NuvioTheme.colors.TextPrimary
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(stringResource(R.string.episodes_mark_previous_watched))
-            }
+            PanelActionRow(
+                label = stringResource(R.string.episodes_mark_previous_watched),
+                onClick = onMarkPreviousEpisodesWatched
+            )
         }
 
-        Button(
-            onClick = onPlay,
-            colors = ButtonDefaults.colors(
-                containerColor = NuvioTheme.colors.BackgroundCard,
-                contentColor = NuvioTheme.colors.TextPrimary
-            ),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(stringResource(R.string.episodes_play))
-        }
+        PanelActionRow(
+            label = stringResource(R.string.episodes_play),
+            onClick = onPlay
+        )
 
         if (showOpenEpisodeComments) {
-            Button(
-                onClick = onOpenEpisodeComments,
-                colors = ButtonDefaults.colors(
-                    containerColor = NuvioTheme.colors.BackgroundCard,
-                    contentColor = NuvioTheme.colors.TextPrimary
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(stringResource(R.string.episodes_open_comments))
-            }
+            PanelActionRow(
+                label = stringResource(R.string.episodes_open_comments),
+                onClick = onOpenEpisodeComments
+            )
         }
 
         if (showPlayManually) {
-            Button(
-                onClick = onPlayManually,
-                colors = ButtonDefaults.colors(
-                    containerColor = NuvioTheme.colors.BackgroundCard,
-                    contentColor = NuvioTheme.colors.TextPrimary
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(stringResource(R.string.play_manually))
-            }
+            PanelActionRow(
+                label = stringResource(R.string.play_manually),
+                onClick = onPlayManually
+            )
         }
 
         if (hasProgress) {
-            Button(
-                onClick = onStartFromBeginning,
-                colors = ButtonDefaults.colors(
-                    containerColor = NuvioTheme.colors.BackgroundCard,
-                    contentColor = NuvioTheme.colors.TextPrimary
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(stringResource(R.string.cw_action_start_from_beginning))
-            }
+            PanelActionRow(
+                label = stringResource(R.string.cw_action_start_from_beginning),
+                onClick = onStartFromBeginning
+            )
         }
     }
 }
@@ -1073,30 +1029,17 @@ fun SeasonOptionsDialog(
         title = if (season == 0) stringResource(R.string.episodes_specials) else stringResource(R.string.episodes_season, season),
         subtitle = stringResource(R.string.episodes_season_actions)
     ) {
-        Button(
+        PanelActionRow(
+            label = if (isFullyWatched) stringResource(R.string.episodes_mark_season_unwatched) else stringResource(R.string.episodes_mark_season_watched),
             onClick = if (isFullyWatched) onMarkSeasonUnwatched else onMarkSeasonWatched,
-            modifier = Modifier
-                .fillMaxWidth()
-                .focusRequester(primaryFocusRequester),
-            colors = ButtonDefaults.colors(
-                containerColor = NuvioTheme.colors.BackgroundCard,
-                contentColor = NuvioTheme.colors.TextPrimary
-            )
-        ) {
-            Text(if (isFullyWatched) stringResource(R.string.episodes_mark_season_unwatched) else stringResource(R.string.episodes_mark_season_watched))
-        }
+            focusRequester = primaryFocusRequester
+        )
 
         if (hasPreviousSeasons && season > 0) {
-            Button(
-                onClick = onMarkPreviousSeasonsWatched,
-                colors = ButtonDefaults.colors(
-                    containerColor = NuvioTheme.colors.BackgroundCard,
-                    contentColor = NuvioTheme.colors.TextPrimary
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(stringResource(R.string.episodes_mark_previous_seasons_watched))
-            }
+            PanelActionRow(
+                label = stringResource(R.string.episodes_mark_previous_seasons_watched),
+                onClick = onMarkPreviousSeasonsWatched
+            )
         }
     }
 }

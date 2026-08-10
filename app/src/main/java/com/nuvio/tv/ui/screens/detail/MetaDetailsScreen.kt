@@ -30,7 +30,6 @@ import androidx.compose.foundation.relocation.BringIntoViewResponder
 import androidx.compose.foundation.relocation.bringIntoViewResponder
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -92,8 +91,6 @@ import androidx.tv.material3.Border
 import androidx.tv.material3.Card
 import androidx.tv.material3.CardDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
-import androidx.tv.material3.Button
-import androidx.tv.material3.ButtonDefaults
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
@@ -121,6 +118,8 @@ import com.nuvio.tv.domain.model.WatchProgress
 import com.nuvio.tv.ui.components.ErrorState
 import com.nuvio.tv.ui.components.MetaDetailsSkeleton
 import com.nuvio.tv.ui.components.NuvioDialog
+import com.nuvio.tv.ui.components.PanelActionRow
+import com.nuvio.tv.ui.components.PlayerPanelRow
 import com.nuvio.tv.ui.components.PanelEyebrow
 import com.nuvio.tv.ui.components.TrailerPlayer
 import com.nuvio.tv.ui.components.posteroptions.TrackingRemovalConfirmationDialog
@@ -2316,33 +2315,19 @@ private fun PlayManualOverrideDialog(
         subtitle = subtitle
     ) {
         if (showPlayManually) {
-            Button(
+            PanelActionRow(
+                label = stringResource(R.string.play_manually),
                 onClick = onPlayManually,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(primaryFocusRequester),
-                colors = ButtonDefaults.colors(
-                    containerColor = NuvioTheme.colors.BackgroundCard,
-                    contentColor = NuvioTheme.colors.TextPrimary
-                )
-            ) {
-                Text(stringResource(R.string.play_manually))
-            }
+                focusRequester = primaryFocusRequester
+            )
         }
 
         if (showStartFromBeginning) {
-            Button(
+            PanelActionRow(
+                label = stringResource(R.string.cw_action_start_from_beginning),
                 onClick = onStartFromBeginning,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .then(if (!showPlayManually) Modifier.focusRequester(primaryFocusRequester) else Modifier),
-                colors = ButtonDefaults.colors(
-                    containerColor = NuvioTheme.colors.BackgroundCard,
-                    contentColor = NuvioTheme.colors.TextPrimary
-                )
-            ) {
-                Text(stringResource(R.string.cw_action_start_from_beginning))
-            }
+                focusRequester = if (!showPlayManually) primaryFocusRequester else null
+            )
         }
     }
 }
@@ -2569,48 +2554,23 @@ private fun LibraryListPickerDialog(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(max = 300.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             items(tabs, key = { it.key }) { tab ->
                 val selected = membership[tab.key] == true
-                val titleText = if (selected) "\u2713 ${tab.title}" else tab.title
-                Button(
-                    onClick = { onToggle(tab.key) },
-                    enabled = !isPending,
-                    modifier = if (tab.key == tabs.firstOrNull()?.key) {
-                        Modifier
-                            .fillMaxWidth()
-                            .focusRequester(primaryFocusRequester)
-                    } else {
-                        Modifier.fillMaxWidth()
-                    },
-                    colors = ButtonDefaults.colors(
-                        containerColor = if (selected) NuvioTheme.colors.FocusBackground else NuvioTheme.colors.BackgroundCard,
-                        contentColor = NuvioTheme.colors.TextPrimary
-                    )
-                ) {
-                    Text(
-                        text = titleText,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-        }
-
-        HorizontalDivider(color = NuvioTheme.colors.Border, thickness = NuvioTheme.spacing.hairline)
-
-        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-            Button(
-                onClick = onSave,
-                enabled = !isPending,
-                colors = ButtonDefaults.colors(
-                    containerColor = NuvioTheme.colors.BackgroundCard,
-                    contentColor = NuvioTheme.colors.TextPrimary
+                PlayerPanelRow(
+                    title = tab.title,
+                    selected = selected,
+                    onClick = { if (!isPending) onToggle(tab.key) },
+                    focusRequester = if (tab.key == tabs.firstOrNull()?.key) primaryFocusRequester else null
                 )
-            ) {
-                Text(if (isPending) stringResource(R.string.action_saving) else stringResource(R.string.action_save))
             }
         }
+
+        PanelActionRow(
+            label = if (isPending) stringResource(R.string.action_saving) else stringResource(R.string.action_save),
+            onClick = onSave,
+            enabled = !isPending
+        )
     }
 }
