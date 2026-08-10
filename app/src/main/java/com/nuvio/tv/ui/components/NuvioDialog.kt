@@ -51,7 +51,7 @@ fun NuvioDialog(
     containerBrush: Brush? = null,
     containerBorderColor: Color? = null,
     containerBorderWidth: Dp = NuvioTheme.spacing.hairline,
-    containerCornerRadius: Dp = NuvioTheme.radii.xl,
+    containerCornerRadius: Dp = NuvioTheme.radii.xxl,
     contentPadding: Dp = NuvioTheme.spacing.xl,
     contentSpacing: Dp = NuvioTheme.spacing.lg,
     backgroundContent: @Composable BoxScope.() -> Unit = {},
@@ -63,7 +63,7 @@ fun NuvioDialog(
     val maxDialogHeight = (with(dialogDensity) { dialogWindowHeightPx.toDp() } - NuvioTheme.spacing.xxxl).coerceAtLeast(320.dp)
     val containerShape = RoundedCornerShape(containerCornerRadius)
     val backgroundModifier = if (containerBrush == null) {
-        Modifier.background(NuvioTheme.colors.BackgroundElevated, containerShape)
+        Modifier.background(Color.Black.copy(alpha = 0.85f), containerShape)
     } else {
         Modifier.background(containerBrush, containerShape)
     }
@@ -78,10 +78,12 @@ fun NuvioDialog(
                 .heightIn(max = maxDialogHeight)
                 .clip(containerShape)
                 .then(backgroundModifier)
-                .border(
-                    containerBorderWidth,
-                    containerBorderColor ?: NuvioTheme.colors.Border,
-                    containerShape
+                .then(
+                    if (containerBorderColor != null) {
+                        Modifier.border(containerBorderWidth, containerBorderColor, containerShape)
+                    } else {
+                        Modifier
+                    }
                 )
                 .onPreviewKeyEvent { event ->
                     val native = event.nativeKeyEvent
