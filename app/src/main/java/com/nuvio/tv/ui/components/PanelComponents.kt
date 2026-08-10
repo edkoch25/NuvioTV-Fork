@@ -87,13 +87,16 @@ internal fun RailEyebrow(
 internal fun PanelActionRow(
     label: String,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     icon: ImageVector? = null,
+    enabled: Boolean = true,
     focusRequester: FocusRequester? = null,
     onFocused: (() -> Unit)? = null
 ) {
+    val contentAlpha = if (enabled) 1f else 0.45f
     Card(
-        onClick = onClick,
-        modifier = Modifier
+        onClick = { if (enabled) onClick() },
+        modifier = modifier
             .fillMaxWidth()
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .onFocusChanged { if (it.isFocused) onFocused?.invoke() },
@@ -119,14 +122,14 @@ internal fun PanelActionRow(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = Color.White,
+                    tint = Color.White.copy(alpha = contentAlpha),
                     modifier = Modifier.width(16.dp).height(16.dp)
                 )
             }
             Text(
                 text = label,
                 style = MaterialTheme.typography.bodyMedium,
-                color = Color.White,
+                color = Color.White.copy(alpha = contentAlpha),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

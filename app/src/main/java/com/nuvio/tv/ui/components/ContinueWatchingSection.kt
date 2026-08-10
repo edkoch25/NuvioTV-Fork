@@ -64,8 +64,6 @@ import androidx.tv.material3.Card
 import androidx.tv.material3.CardDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.MaterialTheme
-import androidx.tv.material3.Button
-import androidx.tv.material3.ButtonDefaults
 import androidx.tv.material3.Text
 import com.nuvio.tv.ui.screens.home.ContinueWatchingItem
 import com.nuvio.tv.ui.theme.NuvioTheme
@@ -1081,55 +1079,30 @@ fun ContinueWatchingOptionsDialog(
         title = title,
         subtitle = stringResource(R.string.cw_dialog_subtitle)
     ) {
-        Button(
+        PanelActionRow(
+            label = stringResource(R.string.cw_action_go_to_details),
             onClick = onDetails,
-            modifier = Modifier
-                .fillMaxWidth()
-                .focusRequester(detailsFocusRequester),
-            colors = ButtonDefaults.colors(
-                containerColor = NuvioTheme.colors.BackgroundCard,
-                contentColor = NuvioTheme.colors.TextPrimary
-            )
-        ) {
-            Text(stringResource(R.string.cw_action_go_to_details))
-        }
+            focusRequester = detailsFocusRequester
+        )
 
         if (showPlayManually) {
-            Button(
-                onClick = onPlayManually,
-                colors = ButtonDefaults.colors(
-                    containerColor = NuvioTheme.colors.BackgroundCard,
-                    contentColor = NuvioTheme.colors.TextPrimary
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(stringResource(R.string.play_manually))
-            }
+            PanelActionRow(
+                label = stringResource(R.string.play_manually),
+                onClick = onPlayManually
+            )
         }
 
         if (item is ContinueWatchingItem.InProgress) {
-            Button(
-                onClick = onStartFromBeginning,
-                colors = ButtonDefaults.colors(
-                    containerColor = NuvioTheme.colors.BackgroundCard,
-                    contentColor = NuvioTheme.colors.TextPrimary
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(stringResource(R.string.cw_action_start_from_beginning))
-            }
+            PanelActionRow(
+                label = stringResource(R.string.cw_action_start_from_beginning),
+                onClick = onStartFromBeginning
+            )
         }
 
-        Button(
-            onClick = onRemove,
-            colors = ButtonDefaults.colors(
-                containerColor = NuvioTheme.colors.BackgroundCard,
-                contentColor = NuvioTheme.colors.TextPrimary
-            ),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(stringResource(R.string.cw_action_remove))
-        }
+        PanelActionRow(
+            label = stringResource(R.string.cw_action_remove),
+            onClick = onRemove
+        )
     }
 }
 
