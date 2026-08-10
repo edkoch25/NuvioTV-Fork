@@ -58,17 +58,6 @@ import com.nuvio.tv.R
  */
 private val LOADING_ARTWORK_BOX_HEIGHT = 180.dp
 
-/**
- * Top inset for the source/filename/message block when artwork is shown.
- *
- * Derived, not tuned: the artwork box ends at (540 - 180) / 2 + 180 == 360dp, and
- * this clears it by 12dp. Anchored from the top rather than offset from centre so
- * the clearance holds regardless of the block's own height -- a filename that
- * wraps to two lines would otherwise raise a centre-anchored block back into the
- * artwork.
- */
-private val LOADING_TEXT_TOP_INSET = 372.dp
-
 @Composable
 fun LoadingOverlay(
     visible: Boolean,
@@ -242,27 +231,26 @@ fun LoadingOverlay(
                         }
                     }
 
-                }
-
-                // The horizontal progress bar is suppressed when the show logo
-                // is acting as the fill indicator. The text message stays visible.
-                val showHorizontalBar = progress != null && !showLogo
-                if (!sourceLine.isNullOrBlank() || !filename.isNullOrBlank() || !message.isNullOrBlank() || showHorizontalBar) {
-                    // Artwork present: anchor from the top so the block always clears the
-                    // artwork box. Otherwise keep the historical centre-relative offsets.
-                    val messageAlignment = if (showLogo) Alignment.TopCenter else Alignment.Center
-                    val messageOffset = when {
-                        showLogo -> LOADING_TEXT_TOP_INSET
-                        !title.isNullOrBlank() -> 94.dp
-                        else -> 86.dp
-                    }
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .align(messageAlignment)
-                            .offset(y = messageOffset)
-                            .padding(horizontal = NuvioTheme.spacing.xl)
-                    ) {
+                    // #7: the text lane is now an in-order child of the same Column
+                    // as the artwork, so it always lays out below the artwork box
+                    // regardless of canvas height or UI scale -- no magic top inset,
+                    // no centre-anchored sibling that could ride back up into the
+                    // artwork. Vertical clearance is a structural invariant.
+                    val showHorizontalBar = progress != null && !showLogo
+                    if (!sourceLine.isNullOrBlank() || !filename.isNullOrBlank() || !message.isNullOrBlank() || showHorizontalBar) {
+                        Spacer(modifier = Modifier.height(NuvioTheme.spacing.xl))
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .background(
+                                    color = Color.Black.copy(alpha = 0.55f),
+                                    shape = RoundedCornerShape(NuvioTheme.radii.lg)
+                                )
+                                .padding(
+                                    horizontal = NuvioTheme.spacing.lg,
+                                    vertical = NuvioTheme.spacing.md
+                                )
+                        ) {
                         val sourceShadow = androidx.compose.ui.graphics.Shadow(
                             color = Color.Black.copy(alpha = 0.85f),
                             offset = androidx.compose.ui.geometry.Offset(0f, 2f),
@@ -346,6 +334,7 @@ fun LoadingOverlay(
                             }
                         }
                     }
+                }
                 }
             }
         }
