@@ -113,6 +113,14 @@ object StreamPrefetchCache {
         /** Which producer started this prefetch, for log attribution. */
         source: String,
         /**
+         * P2 completion cap. When non-null, the scrape collection stops waiting
+         * after this many ms and ranks/pre-resolves on whatever arrived, rather
+         * than blocking on the slowest source. Null reproduces pre-P2 behaviour
+         * (wait for full completion). The rank and pre-resolve are unchanged;
+         * only the size of the pool they see can be smaller under the cap.
+         */
+        capMs: Long? = null,
+        /**
          * R2: optional ranker, invoked on the prefetch's own IO coroutine
          * once the scrape completes. Null reproduces pre-R2 behaviour
          * exactly, which is how the S4a details-page path stays untouched.
@@ -130,7 +138,7 @@ object StreamPrefetchCache {
             existing?.cancel()
             inFlightKey = key
             inFlightJob = scope.async {
-                val result = collectFinal(repository, type, videoId, season, episode)
+                val result = collectFinal(repository, type, videoId, season, episode, capMs)
                 val rankT0 = SystemClock.elapsedRealtime()
                 val selection = if (rank != null && result.isNotEmpty()) {
                     try {
@@ -175,12 +183,27 @@ object StreamPrefetchCache {
         type: String,
         videoId: String,
         season: Int?,
-        episode: Int?
+        episode: Int?,
+        capMs: Long?
     ): List<AddonStreams> {
         var last: List<AddonStreams> = emptyList()
-        try {
+        // Each Success emission from the repository carries the FULL accumulated
+        // pool, so `last` after the collect (or after the cap cancels it) always
+        // holds the most complete set seen. Under the cap, cancelling the collect
+        // cancels the repository's fan-out scope and its outstanding addon jobs --
+        // exactly the slow-source wait we are declining.
+        val collectBlock: suspend () -> Unit = {
             repository.getStreamsFromAllAddons(type, videoId, season, episode).collect { result ->
                 if (result is NetworkResult.Success) last = result.data
+            }
+        }
+        try {
+            if (capMs != null) {
+                if (withTimeoutOrNull(capMs) { collectBlock() } == null) {
+                    Log.i(TAG, "PREFETCH cap-hit ms=$capMs groups=${last.size}")
+                }
+            } else {
+                collectBlock()
             }
         } catch (e: CancellationException) {
             throw e

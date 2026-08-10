@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Tune
@@ -89,6 +90,7 @@ internal fun LazyListScope.autoPlaySettingsItems(
     onSetNextEpisodeThresholdPercent: (Float) -> Unit,
     onSetNextEpisodeThresholdMinutesBeforeEnd: (Float) -> Unit,
     onSetStreamAutoPlayTimeoutSeconds: (Int) -> Unit,
+    onSetStreamAutoPlayEagerReadyEnabled: (Boolean) -> Unit,
     onSetReuseLastLinkEnabled: (Boolean) -> Unit,
     onSetStillWatchingEnabled: (Boolean) -> Unit,
     onSetStillWatchingEpisodeThreshold: (Int) -> Unit,
@@ -170,6 +172,17 @@ internal fun LazyListScope.autoPlaySettingsItems(
             selected = timeoutSec,
             valueText = valueText,
             onValueChange = { onSetStreamAutoPlayTimeoutSeconds(it) },
+            onFocused = onItemFocused
+        )
+    }
+
+    item(key = "autoplay_eager_ready") {
+        ToggleSettingsItem(
+            icon = Icons.Default.Bolt,
+            title = stringResource(R.string.autoplay_eager_ready_title),
+            subtitle = stringResource(R.string.autoplay_eager_ready_sub),
+            isChecked = playerSettings.streamAutoPlayEagerReadyEnabled,
+            onCheckedChange = onSetStreamAutoPlayEagerReadyEnabled,
             onFocused = onItemFocused
         )
     }

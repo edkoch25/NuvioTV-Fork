@@ -166,6 +166,8 @@ class HomeViewModel @Inject constructor(
             .collectLatest { target ->
                 if (target == null) return@collectLatest
                 delay(CW_STREAM_PREFETCH_DEBOUNCE_MS)
+                // P2: same completion cap as the details path.
+                val capMs = playerSettingsDataStore.playerSettings.first().eagerReadyCapMs()
                 com.nuvio.tv.core.stream.StreamPrefetchCache.prefetch(
                     repository = streamRepository,
                     type = target.type,
@@ -173,6 +175,7 @@ class HomeViewModel @Inject constructor(
                     season = target.season,
                     episode = target.episode,
                     source = "cw",
+                    capMs = capMs,
                     rank = { groups ->
                         prefetchSelectionSupplier.rankAndPreResolve(
                             groups = groups,

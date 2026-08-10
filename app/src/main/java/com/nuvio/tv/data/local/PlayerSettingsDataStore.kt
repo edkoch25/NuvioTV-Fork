@@ -296,6 +296,16 @@ data class PlayerSettings(
     val streamAutoPlayPreferBingeGroupForNextEpisode: Boolean = true,
     val streamAutoPlayReuseBingeGroup: Boolean = true,
     val streamAutoPlayTimeoutSeconds: Int = 3,
+    /**
+     * P2: when true, the details-page/CW prefetch stops waiting for slow
+     * sources once the auto-play timeout has elapsed, rather than blocking on
+     * the slowest addon (measured 6-9s for a bridge returning 2-3 streams).
+     * The prefetch ranks and pre-resolves on whatever arrived by then, so the
+     * hero source line and press-time readiness no longer wait on the tail.
+     * Default on. The ceiling early-exit (a strong source finalising even
+     * sooner) will attach to this same flag.
+     */
+    val streamAutoPlayEagerReadyEnabled: Boolean = true,
     val stillWatchingEnabled: Boolean = false,
     val stillWatchingEpisodeThreshold: Int = DEFAULT_STILL_WATCHING_EPISODE_THRESHOLD,
     val nextEpisodeThresholdMode: NextEpisodeThresholdMode = NextEpisodeThresholdMode.PERCENTAGE,
@@ -329,6 +339,19 @@ data class PlayerSettings(
     // Nuvio ExoPlayer Performance Mode
     val nuvioPerformanceModeEnabled: Boolean = DEFAULT_NUVIO_PERFORMANCE_MODE_ENABLED
 ) {
+    /**
+     * P2 prefetch completion cap in milliseconds, or null to wait for full
+     * scrape completion (pre-P2 behaviour). Non-null only when eager ready is
+     * enabled and the auto-play timeout is a bounded value: instant (0) and
+     * unlimited are treated as "no prefetch cap", matching the press path.
+     */
+    fun eagerReadyCapMs(): Long? =
+        if (streamAutoPlayEagerReadyEnabled && isBoundedTimeout(streamAutoPlayTimeoutSeconds)) {
+            streamAutoPlayTimeoutSeconds * 1000L
+        } else {
+            null
+        }
+
     companion object {
         const val DEFAULT_STILL_WATCHING_EPISODE_THRESHOLD = 3
         const val MIN_STILL_WATCHING_EPISODE_THRESHOLD = 2
@@ -569,6 +592,7 @@ class PlayerSettingsDataStore @Inject constructor(
     private val streamAutoPlayPreferBingeGroupForNextEpisodeKey = booleanPreferencesKey("stream_auto_play_prefer_bingegroup_next_episode")
     private val streamAutoPlayReuseBingeGroupKey = booleanPreferencesKey("stream_auto_play_reuse_binge_group")
     private val streamAutoPlayTimeoutSecondsKey = intPreferencesKey("stream_auto_play_timeout_seconds")
+    private val streamAutoPlayEagerReadyEnabledKey = booleanPreferencesKey("stream_auto_play_eager_ready_enabled")
     private val stillWatchingEnabledKey = booleanPreferencesKey("still_watching_enabled")
     private val stillWatchingEpisodeThresholdKey = intPreferencesKey("still_watching_episode_threshold")
     private val nextEpisodeThresholdModeKey = stringPreferencesKey("next_episode_threshold_mode")
@@ -957,6 +981,7 @@ class PlayerSettingsDataStore @Inject constructor(
                 streamAutoPlayTimeoutSeconds = PlayerSettings.applyLegacyTimeoutSentinelMigration(
                     prefs[streamAutoPlayTimeoutSecondsKey]
                 ),
+                streamAutoPlayEagerReadyEnabled = prefs[streamAutoPlayEagerReadyEnabledKey] ?: true,
                 stillWatchingEnabled = prefs[stillWatchingEnabledKey] ?: false,
                 stillWatchingEpisodeThreshold = prefs[stillWatchingEpisodeThresholdKey]
                     ?.coerceIn(
@@ -1378,6 +1403,12 @@ class PlayerSettingsDataStore @Inject constructor(
     suspend fun setStreamAutoPlayTimeoutSeconds(seconds: Int) {
         store().edit { prefs ->
             prefs[streamAutoPlayTimeoutSecondsKey] = PlayerSettings.applyLegacyTimeoutSentinelMigration(seconds)
+        }
+    }
+
+    suspend fun setStreamAutoPlayEagerReadyEnabled(enabled: Boolean) {
+        store().edit { prefs ->
+            prefs[streamAutoPlayEagerReadyEnabledKey] = enabled
         }
     }
 

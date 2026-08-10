@@ -171,6 +171,12 @@ class MetaDetailsViewModel @Inject constructor(
         streamPrefetchJob?.cancel()
         streamPrefetchJob = viewModelScope.launch {
             delay(STREAM_PREFETCH_DEBOUNCE_MS)
+            // P2: cap the prefetch's wait at the auto-play timeout when eager
+            // ready is on, so a slow source (a bridge measured at 6-9s for 2-3
+            // streams) no longer holds up ranking, pre-resolve and the hero
+            // source line. Null = pre-P2 behaviour (wait for full completion),
+            // used when the toggle is off or the timeout is instant/unlimited.
+            val capMs = playerSettingsDataStore.playerSettings.first().eagerReadyCapMs()
             // S4a covers BOTH shapes: a movie's own id, and a series' hero
             // target (resume/next episode). Both now rank and pre-resolve
             // through the same supplier the Continue Watching path uses.
@@ -181,6 +187,7 @@ class MetaDetailsViewModel @Inject constructor(
                 season = season,
                 episode = episode,
                 source = source,
+                capMs = capMs,
                 rank = { groups ->
                     prefetchSelectionSupplier.rankAndPreResolve(
                         groups = groups,

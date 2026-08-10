@@ -505,6 +505,10 @@ class PlaybackSettingsViewModel @Inject constructor(
         playerSettingsDataStore.setStreamAutoPlayTimeoutSeconds(seconds)
     }
 
+    suspend fun setStreamAutoPlayEagerReadyEnabled(enabled: Boolean) {
+        playerSettingsDataStore.setStreamAutoPlayEagerReadyEnabled(enabled)
+    }
+
     suspend fun setStillWatchingEnabled(enabled: Boolean) {
         playerSettingsDataStore.setStillWatchingEnabled(enabled)
     }
