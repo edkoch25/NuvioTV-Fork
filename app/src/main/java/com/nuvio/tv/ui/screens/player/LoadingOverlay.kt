@@ -242,14 +242,7 @@ fun LoadingOverlay(
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier
-                                .background(
-                                    color = Color.Black.copy(alpha = 0.55f),
-                                    shape = RoundedCornerShape(NuvioTheme.radii.lg)
-                                )
-                                .padding(
-                                    horizontal = NuvioTheme.spacing.lg,
-                                    vertical = NuvioTheme.spacing.md
-                                )
+                                .padding(horizontal = NuvioTheme.spacing.lg)
                         ) {
                         val sourceShadow = androidx.compose.ui.graphics.Shadow(
                             color = Color.Black.copy(alpha = 0.85f),
@@ -297,7 +290,7 @@ fun LoadingOverlay(
                                 if (loadingMessage != null) {
                                     Text(
                                         text = loadingMessage,
-                                        style = MaterialTheme.typography.labelMedium,
+                                        style = MaterialTheme.typography.labelMedium.copy(shadow = sourceShadow),
                                         color = Color.White.copy(alpha = 0.72f),
                                         textAlign = TextAlign.Center,
                                         maxLines = 2,
