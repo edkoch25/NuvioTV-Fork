@@ -1,6 +1,7 @@
 package com.nuvio.tv.ui.screens.player
 
 import android.app.Activity
+import androidx.compose.runtime.mutableStateOf
 import android.content.Context
 import android.media.AudioDeviceCallback
 import android.media.audiofx.LoudnessEnhancer
@@ -337,6 +338,7 @@ class PlayerRuntimeController(
         get() = _exoPlayer
     @Volatile var videoAspectRatio: Float = 0f
     @Volatile var exoPlayerView: androidx.media3.ui.PlayerView? = null
+    val videoBottomFractionState = mutableStateOf<Float?>(null)
     internal var _loadControl: DefaultLoadControl? = null
     internal var playbackSpeedAwareAudioSink: PlaybackSpeedAwareAudioSink? = null
     internal var matRoutingAudioSink: com.nuvio.tv.diagnostics.MatRoutingAudioSink? = null

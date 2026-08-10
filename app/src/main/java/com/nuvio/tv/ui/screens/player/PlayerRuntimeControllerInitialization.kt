@@ -3814,6 +3814,11 @@ private fun PlayerRuntimeController.recordFirstFrameDiagnostics(
 }
 
 @androidx.annotation.OptIn(UnstableApi::class)
+internal fun PlayerRuntimeController.refreshVideoBottomFraction() {
+    val pv = exoPlayerView
+    videoBottomFractionState.value = if (pv != null) pv.videoBoundsFraction(videoAspectRatio)?.bottom else null
+}
+
 private fun PlayerView.videoBoundsFraction(aspectRatio: Float): RectF? {
     val subtitleView = this.subtitleView ?: return null
     val viewWidth = subtitleView.width.toFloat()

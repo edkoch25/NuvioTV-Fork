@@ -93,6 +93,8 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -1548,12 +1550,14 @@ private fun ExoPlayerSurface(
                 }
                 playerView.post {
                     playerView.applyExoAspectMode(latestAspectMode)
+                    controller.refreshVideoBottomFraction()
                 }
             }
 
             override fun onRenderedFirstFrame() {
                 playerView.post {
                     playerView.applyExoAspectMode(latestAspectMode)
+                    controller.refreshVideoBottomFraction()
                 }
             }
 
@@ -1777,6 +1781,20 @@ private fun PlayerControlsOverlay(
     val customSourcePainter = rememberRawSvgPainter(R.raw.ic_player_source)
     val customAspectPainter = rememberRawSvgPainter(R.raw.ic_player_aspect_ratio)
     val customEpisodesPainter = rememberRawSvgPainter(R.raw.ic_player_episodes)
+
+    val density = LocalDensity.current
+    val rootView = LocalView.current
+    val videoBottomFraction = viewModel.controller.videoBottomFractionState.value
+    val bandDp = videoBottomFraction?.let { f ->
+        if (f > 0.5f && f < 0.995f && rootView.height > 0) {
+            with(density) { ((1f - f) * rootView.height).toDp() }
+        } else {
+            null
+        }
+    }
+    val letterboxActive = bandDp != null && bandDp >= 64.dp &&
+        uiState.resizeMode == AspectRatioFrameLayout.RESIZE_MODE_FIT
+    var belowBarHeightPx by remember { mutableStateOf(0) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         // Top gradient
@@ -2096,8 +2114,14 @@ private fun PlayerControlsOverlay(
                 )
             }
 
-            Spacer(modifier = Modifier.height(NuvioTheme.spacing.xs))
+            val edgeGap = if (bandDp != null && letterboxActive && belowBarHeightPx > 0) {
+                (bandDp - with(density) { belowBarHeightPx.toDp() } - 48.dp).coerceAtLeast(NuvioTheme.spacing.xs)
+            } else {
+                NuvioTheme.spacing.xs
+            }
+            Spacer(modifier = Modifier.height(edgeGap))
 
+            Column(modifier = Modifier.onSizeChanged { belowBarHeightPx = it.height }) {
             PlayerControlsTimeTextHost(viewModel = viewModel)
 
             Spacer(modifier = Modifier.height(NuvioTheme.spacing.sm))
@@ -2147,6 +2171,7 @@ private fun PlayerControlsOverlay(
                     )
                     }
                 }
+            }
             }
         }
     }
