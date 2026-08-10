@@ -489,7 +489,7 @@ private fun AddonSubtitleStartupModeDialog(
         androidx.compose.foundation.layout.Box(
             modifier = androidx.compose.ui.Modifier
                 .clip(androidx.compose.foundation.shape.RoundedCornerShape(NuvioTheme.radii.xl))
-                .background(NuvioTheme.colors.BackgroundCard)
+                .background(Color.Black.copy(alpha = 0.85f))
         ) {
             androidx.compose.foundation.layout.Column(
                 modifier = androidx.compose.ui.Modifier

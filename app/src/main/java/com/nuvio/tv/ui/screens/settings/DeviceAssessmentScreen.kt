@@ -28,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
 import androidx.tv.material3.Border
 import androidx.tv.material3.Card
 import androidx.tv.material3.CardDefaults
@@ -480,7 +481,7 @@ private fun AssessmentItemRow(item: AssessmentItem) {
         } else {
             CardDefaults.border(
                 focusedBorder = Border(
-                    border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                    border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                     shape = assessmentCardShape()
                 )
             )
@@ -563,7 +564,7 @@ private fun AssessmentFocusCard(content: @Composable androidx.compose.foundation
         } else {
             CardDefaults.border(
                 focusedBorder = Border(
-                    border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                    border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                     shape = assessmentCardShape()
                 )
             )

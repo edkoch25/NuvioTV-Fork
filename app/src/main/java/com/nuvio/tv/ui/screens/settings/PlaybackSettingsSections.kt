@@ -911,7 +911,7 @@ private fun AfrCapabilityWarningCard(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(SettingsSecondaryCardRadius))
-            .background(NuvioTheme.colors.BackgroundCard)
+            .background(Color.Black.copy(alpha = 0.85f))
             .border(
                 width = NuvioTheme.spacing.hairline,
                 color = warningTone.copy(alpha = 0.55f),
@@ -977,7 +977,7 @@ private fun AfrCapabilityDisableButton(
         ),
         border = CardDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                 shape = RoundedCornerShape(SettingsPillRadius)
             )
         ),
@@ -994,7 +994,7 @@ private fun AfrCapabilityDisableButton(
             Text(
                 text = label,
                 style = MaterialTheme.typography.bodyLarge,
-                color = if (isFocused) NuvioTheme.colors.Primary else NuvioTheme.colors.TextPrimary
+                color = if (isFocused) Color.White else NuvioTheme.colors.TextPrimary
             )
         }
     }

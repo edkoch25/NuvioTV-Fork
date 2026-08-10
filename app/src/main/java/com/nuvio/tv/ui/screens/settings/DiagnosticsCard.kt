@@ -52,7 +52,7 @@ internal fun LazyListScope.diagnosticsCardItems(
                 Text(
                     text = stringResource(R.string.diag_last_playback_title),
                     style = MaterialTheme.typography.labelMedium,
-                    color = NuvioTheme.colors.Primary
+                    color = Color.White
                 )
                 Spacer(modifier = Modifier.height(NuvioTheme.spacing.xs))
                 Text(
@@ -265,12 +265,12 @@ private fun DiagnosticsSectionCard(
         onClick = { /* read-only */ },
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.colors(
-            containerColor = NuvioTheme.colors.BackgroundCard,
-            focusedContainerColor = NuvioTheme.colors.FocusBackground
+            containerColor = Color.Black.copy(alpha = 0.85f),
+            focusedContainerColor = Color.White.copy(alpha = 0.14f)
         ),
         border = CardDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing.copy(alpha = 0.5f)),
+                border = BorderStroke(NuvioTheme.spacing.xxs, Color.White.copy(alpha = 0.5f)),
                 shape = RoundedCornerShape(10.dp)
             )
         ),
@@ -293,7 +293,7 @@ private fun SectionHeader(label: String, subtitle: String? = null) {
     Text(
         text = label.uppercase(),
         style = MaterialTheme.typography.labelSmall,
-        color = NuvioTheme.colors.Primary
+        color = Color.White
     )
     if (subtitle != null) {
         Text(

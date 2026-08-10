@@ -904,7 +904,7 @@ private fun NetworkMetricCard(
             modifier = Modifier
                 .size(28.dp)
                 .then(if (loading) Modifier.rotate(rotation) else Modifier),
-            tint = if (loading) NuvioTheme.colors.Secondary else NuvioTheme.colors.Primary
+            tint = if (loading) Color.White else Color.White
         )
         Text(
             text = label,

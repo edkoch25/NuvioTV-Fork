@@ -38,6 +38,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Border
@@ -350,8 +351,8 @@ internal fun MDBListApiKeyDialog(
                 .fillMaxWidth()
                 .onFocusChanged { isInputFocused = it.isFocused || it.hasFocus },
             colors = CardDefaults.colors(
-                containerColor = NuvioTheme.colors.BackgroundElevated,
-                focusedContainerColor = NuvioTheme.colors.BackgroundElevated
+                containerColor = Color.Black.copy(alpha = 0.85f),
+                focusedContainerColor = Color.Black.copy(alpha = 0.85f)
             ),
             border = CardDefaults.border(
                 border = Border(
@@ -359,7 +360,7 @@ internal fun MDBListApiKeyDialog(
                     shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)
                 ),
                 focusedBorder = Border(
-                    border = androidx.compose.foundation.BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                    border = androidx.compose.foundation.BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                     shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)
                 )
             ),
@@ -384,7 +385,7 @@ internal fun MDBListApiKeyDialog(
                     ),
                     textStyle = MaterialTheme.typography.bodyMedium.copy(color = NuvioTheme.colors.TextPrimary),
                     cursorBrush = SolidColor(
-                        if (isInputFocused) NuvioTheme.colors.Primary
+                        if (isInputFocused) Color.White
                         else androidx.compose.ui.graphics.Color.Transparent
                     ),
                     decorationBox = { innerTextField ->
@@ -408,7 +409,7 @@ internal fun MDBListApiKeyDialog(
             Button(
                 onClick = onDismiss,
                 colors = ButtonDefaults.colors(
-                    containerColor = NuvioTheme.colors.BackgroundElevated,
+                    containerColor = Color.Black.copy(alpha = 0.85f),
                     contentColor = NuvioTheme.colors.TextPrimary
                 )
             ) {
@@ -418,7 +419,7 @@ internal fun MDBListApiKeyDialog(
             Button(
                 onClick = onClear,
                 colors = ButtonDefaults.colors(
-                    containerColor = NuvioTheme.colors.BackgroundElevated,
+                    containerColor = Color.Black.copy(alpha = 0.85f),
                     contentColor = NuvioTheme.colors.TextPrimary
                 )
             ) {
@@ -428,7 +429,7 @@ internal fun MDBListApiKeyDialog(
             Button(
                 onClick = { if (!validating) viewModel.validateAndSaveApiKey(value, onSaved) },
                 colors = ButtonDefaults.colors(
-                    containerColor = NuvioTheme.colors.BackgroundCard,
+                    containerColor = Color.Black.copy(alpha = 0.85f),
                     contentColor = NuvioTheme.colors.TextPrimary
                 )
             ) {

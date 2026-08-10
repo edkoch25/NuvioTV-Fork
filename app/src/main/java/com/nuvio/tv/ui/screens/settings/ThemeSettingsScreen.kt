@@ -52,6 +52,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
 import android.widget.Toast
 import kotlinx.coroutines.launch
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -130,14 +131,6 @@ fun ThemeSettingsContent(
             context.findActivity()?.recreate()
                 ?: Toast.makeText(context, strRestartHint, Toast.LENGTH_LONG).show()
             pendingLanguageRestart = false
-        }
-    }
-
-    val styleFocusRequesters = remember { SettingsUiStyle.entries.associateWith { FocusRequester() } }
-    val appliedSettingsUiStyle = NuvioTheme.settingsUiStyle
-    LaunchedEffect(Unit) {
-        if (viewModel.consumeStyleFocusRestore()) {
-            styleFocusRequesters[appliedSettingsUiStyle]?.requestFocusAfterFrames()
         }
     }
 
@@ -310,32 +303,6 @@ fun ThemeSettingsContent(
 
             SettingsGroupCard(
                 modifier = Modifier.fillMaxWidth(),
-                title = stringResource(R.string.appearance_settings_style),
-                subtitle = stringResource(R.string.appearance_settings_style_subtitle)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(IntrinsicSize.Min)
-                        .padding(horizontal = NuvioTheme.spacing.xs, vertical = NuvioTheme.spacing.xs),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    uiState.availableSettingsUiStyles.forEach { style ->
-                        SettingsStyleOptionCard(
-                            style = style,
-                            isSelected = style == uiState.settingsUiStyle,
-                            onClick = { viewModel.onEvent(ThemeSettingsEvent.SelectSettingsUiStyle(style)) },
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                                .focusRequester(styleFocusRequesters.getValue(style))
-                        )
-                    }
-                }
-            }
-
-            SettingsGroupCard(
-                modifier = Modifier.fillMaxWidth(),
                 title = stringResource(R.string.appearance_font_and_language),
                 subtitle = stringResource(R.string.appearance_font_and_language_subtitle)
             ) {
@@ -433,7 +400,7 @@ private fun ThemeSwatchChip(
         border = CardDefaults.border(
             border = Border.None,
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                 shape = chipShape
             )
         ),
@@ -500,11 +467,11 @@ private fun SettingsStyleOptionCard(
         ),
         border = CardDefaults.border(
             border = if (isSelected) Border(
-                border = BorderStroke(NuvioTheme.spacing.hairline, NuvioTheme.colors.FocusRing),
+                border = BorderStroke(NuvioTheme.spacing.hairline, Color.White),
                 shape = cardShape
             ) else Border.None,
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                 shape = cardShape
             )
         ),
@@ -528,7 +495,7 @@ private fun SettingsStyleOptionCard(
                     Icon(
                         imageVector = Icons.Default.Check,
                         contentDescription = stringResource(R.string.cd_selected),
-                        tint = NuvioTheme.colors.Secondary,
+                        tint = Color.White,
                         modifier = Modifier
                             .size(16.dp)
                             .align(Alignment.CenterEnd)

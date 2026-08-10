@@ -466,7 +466,7 @@ fun PlaybackSettingsContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(
-                        color = NuvioTheme.colors.BackgroundCard,
+                        color = Color.Black.copy(alpha = 0.85f),
                         shape = RoundedCornerShape(10.dp)
                     )
                     .border(NuvioTheme.spacing.hairline, usageColor.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
@@ -640,7 +640,7 @@ internal fun ToggleSettingsItem(
         ),
         border = CardDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, if (enabled) NuvioTheme.colors.FocusRing else NuvioTheme.colors.FocusRing.copy(alpha = 0.3f)),
+                border = BorderStroke(NuvioTheme.spacing.xxs, if (enabled) Color.White else Color.White.copy(alpha = 0.3f)),
                 shape = RoundedCornerShape(SettingsPillRadius)
             )
         ),
@@ -656,7 +656,7 @@ internal fun ToggleSettingsItem(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = (if (isFocused && enabled) NuvioTheme.colors.Primary else NuvioTheme.colors.TextSecondary).copy(alpha = contentAlpha),
+                tint = (if (isFocused && enabled) Color.White else NuvioTheme.colors.TextSecondary).copy(alpha = contentAlpha),
                 modifier = Modifier.size(22.dp)
             )
 
@@ -698,8 +698,8 @@ internal fun ToggleSettingsItem(
                 checked = isChecked,
                 onCheckedChange = null, // Handled by Card onClick
                 colors = SwitchDefaults.colors(
-                    checkedThumbColor = NuvioTheme.colors.Secondary.copy(alpha = contentAlpha),
-                    checkedTrackColor = NuvioTheme.colors.Secondary.copy(alpha = 0.35f * contentAlpha),
+                    checkedThumbColor = Color.White.copy(alpha = contentAlpha),
+                    checkedTrackColor = Color.White.copy(alpha = 0.35f * contentAlpha),
                     uncheckedThumbColor = NuvioTheme.colors.TextSecondary.copy(alpha = contentAlpha),
                     uncheckedTrackColor = NuvioTheme.colors.Border
                 )
@@ -733,23 +733,23 @@ internal fun RenderTypeSettingsItem(
             },
         colors = CardDefaults.colors(
             containerColor = if (isSelected) {
-                NuvioTheme.colors.Primary.copy(alpha = 0.15f * contentAlpha)
+                Color.White.copy(alpha = 0.15f * contentAlpha)
             } else {
-                NuvioTheme.colors.BackgroundCard
+                Color.Black.copy(alpha = 0.85f)
             },
             focusedContainerColor = if (isSelected) {
-                NuvioTheme.colors.Primary.copy(alpha = 0.15f * contentAlpha)
+                Color.White.copy(alpha = 0.15f * contentAlpha)
             } else {
-                NuvioTheme.colors.BackgroundCard
+                Color.Black.copy(alpha = 0.85f)
             }
         ),
         border = CardDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing.copy(alpha = contentAlpha)),
+                border = BorderStroke(NuvioTheme.spacing.xxs, Color.White.copy(alpha = contentAlpha)),
                 shape = RoundedCornerShape(SettingsSecondaryCardRadius)
             ),
             border = if (isSelected) Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.Primary.copy(alpha = contentAlpha)),
+                border = BorderStroke(NuvioTheme.spacing.xxs, Color.White.copy(alpha = contentAlpha)),
                 shape = RoundedCornerShape(SettingsSecondaryCardRadius)
             ) else Border.None
         ),
@@ -766,7 +766,7 @@ internal fun RenderTypeSettingsItem(
                 Text(
                     text = title,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = (if (isSelected) NuvioTheme.colors.Primary else NuvioTheme.colors.TextPrimary).copy(alpha = contentAlpha),
+                    color = (if (isSelected) Color.White else NuvioTheme.colors.TextPrimary).copy(alpha = contentAlpha),
                     maxLines = 2,
                     overflow = TextOverflow.Clip
                 )
@@ -783,7 +783,7 @@ internal fun RenderTypeSettingsItem(
                 Icon(
                     imageVector = Icons.Default.Check,
                     contentDescription = stringResource(R.string.cd_selected),
-                    tint = NuvioTheme.colors.Primary.copy(alpha = contentAlpha),
+                    tint = Color.White.copy(alpha = contentAlpha),
                     modifier = Modifier.size(NuvioTheme.spacing.xl)
                 )
             }
@@ -820,7 +820,7 @@ internal fun NavigationSettingsItem(
         ),
         border = CardDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, if (enabled) NuvioTheme.colors.FocusRing else NuvioTheme.colors.FocusRing.copy(alpha = 0.3f)),
+                border = BorderStroke(NuvioTheme.spacing.xxs, if (enabled) Color.White else Color.White.copy(alpha = 0.3f)),
                 shape = RoundedCornerShape(SettingsPillRadius)
             )
         ),
@@ -836,7 +836,7 @@ internal fun NavigationSettingsItem(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = (if (isFocused && enabled) NuvioTheme.colors.Primary else NuvioTheme.colors.TextSecondary).copy(alpha = contentAlpha),
+                tint = (if (isFocused && enabled) Color.White else NuvioTheme.colors.TextSecondary).copy(alpha = contentAlpha),
                 modifier = Modifier.size(22.dp)
             )
 
@@ -998,7 +998,7 @@ private fun SliderSettingsItemLayout(
         ),
         border = CardDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, if (enabled) NuvioTheme.colors.FocusRing else NuvioTheme.colors.FocusRing.copy(alpha = 0.3f)),
+                border = BorderStroke(NuvioTheme.spacing.xxs, if (enabled) Color.White else Color.White.copy(alpha = 0.3f)),
                 shape = RoundedCornerShape(SettingsSecondaryCardRadius)
             )
         ),
@@ -1018,7 +1018,7 @@ private fun SliderSettingsItemLayout(
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
-                        tint = (if (isFocused && enabled) NuvioTheme.colors.Primary else NuvioTheme.colors.TextSecondary).copy(alpha = contentAlpha),
+                        tint = (if (isFocused && enabled) Color.White else NuvioTheme.colors.TextSecondary).copy(alpha = contentAlpha),
                         modifier = Modifier.size(22.dp)
                     )
 
@@ -1050,7 +1050,7 @@ private fun SliderSettingsItemLayout(
                 Text(
                     text = valueText,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = NuvioTheme.colors.Primary.copy(alpha = contentAlpha)
+                    color = Color.White.copy(alpha = contentAlpha)
                 )
             }
 
@@ -1078,7 +1078,7 @@ private fun SliderSettingsItemLayout(
                     ),
                     border = CardDefaults.border(
                         focusedBorder = Border(
-                            border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                            border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                             shape = CircleShape
                         )
                     ),
@@ -1103,14 +1103,14 @@ private fun SliderSettingsItemLayout(
                         .weight(1f)
                         .height(NuvioTheme.spacing.sm)
                         .clip(RoundedCornerShape(NuvioTheme.radii.xs))
-                        .background(NuvioTheme.colors.BackgroundElevated)
+                        .background(Color.Black.copy(alpha = 0.85f))
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth(progressFraction.coerceIn(0f, 1f))
                             .height(NuvioTheme.spacing.sm)
                             .clip(RoundedCornerShape(NuvioTheme.radii.xs))
-                            .background(NuvioTheme.colors.Primary.copy(alpha = contentAlpha))
+                            .background(Color.White.copy(alpha = contentAlpha))
                     )
                 }
 
@@ -1131,7 +1131,7 @@ private fun SliderSettingsItemLayout(
                     ),
                     border = CardDefaults.border(
                         focusedBorder = Border(
-                            border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                            border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                             shape = CircleShape
                         )
                     ),
@@ -1185,7 +1185,7 @@ internal fun ColorSettingsItem(
         ),
         border = CardDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, if (enabled) NuvioTheme.colors.FocusRing else NuvioTheme.colors.FocusRing.copy(alpha = 0.3f)),
+                border = BorderStroke(NuvioTheme.spacing.xxs, if (enabled) Color.White else Color.White.copy(alpha = 0.3f)),
                 shape = RoundedCornerShape(SettingsPillRadius)
             )
         ),
@@ -1201,7 +1201,7 @@ internal fun ColorSettingsItem(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = (if (isFocused && enabled) NuvioTheme.colors.Primary else NuvioTheme.colors.TextSecondary).copy(alpha = contentAlpha),
+                tint = (if (isFocused && enabled) Color.White else NuvioTheme.colors.TextSecondary).copy(alpha = contentAlpha),
                 modifier = Modifier.size(22.dp)
             )
 
@@ -1366,12 +1366,12 @@ internal fun ColorSelectionDialog(
                 Card(
                     onClick = { alphaPercent = (alphaPercent - 10).coerceAtLeast(0) },
                     colors = CardDefaults.colors(
-                        containerColor = NuvioTheme.colors.BackgroundElevated,
-                        focusedContainerColor = NuvioTheme.colors.Primary
+                        containerColor = Color.Black.copy(alpha = 0.85f),
+                        focusedContainerColor = Color.White
                     ),
                     border = CardDefaults.border(
                         focusedBorder = Border(
-                            border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                            border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                             shape = RoundedCornerShape(NuvioTheme.radii.sm)
                         )
                     ),
@@ -1390,14 +1390,14 @@ internal fun ColorSelectionDialog(
                         .weight(1f)
                         .height(NuvioTheme.spacing.sm)
                         .clip(RoundedCornerShape(NuvioTheme.radii.xs))
-                        .background(NuvioTheme.colors.BackgroundElevated)
+                        .background(Color.Black.copy(alpha = 0.85f))
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth(alphaPercent / 100f)
                             .height(NuvioTheme.spacing.sm)
                             .clip(RoundedCornerShape(NuvioTheme.radii.xs))
-                            .background(NuvioTheme.colors.Primary)
+                            .background(Color.White)
                     )
                 }
                 Text(
@@ -1408,12 +1408,12 @@ internal fun ColorSelectionDialog(
                 Card(
                     onClick = { alphaPercent = (alphaPercent + 10).coerceAtMost(100) },
                     colors = CardDefaults.colors(
-                        containerColor = NuvioTheme.colors.BackgroundElevated,
-                        focusedContainerColor = NuvioTheme.colors.Primary
+                        containerColor = Color.Black.copy(alpha = 0.85f),
+                        focusedContainerColor = Color.White
                     ),
                     border = CardDefaults.border(
                         focusedBorder = Border(
-                            border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                            border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                             shape = RoundedCornerShape(NuvioTheme.radii.sm)
                         )
                     ),
@@ -1438,12 +1438,12 @@ internal fun ColorSelectionDialog(
                 Card(
                     onClick = onDismiss,
                     colors = CardDefaults.colors(
-                        containerColor = NuvioTheme.colors.BackgroundElevated,
-                        focusedContainerColor = NuvioTheme.colors.Primary
+                        containerColor = Color.Black.copy(alpha = 0.85f),
+                        focusedContainerColor = Color.White
                     ),
                     border = CardDefaults.border(
                         focusedBorder = Border(
-                            border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                            border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                             shape = RoundedCornerShape(NuvioTheme.radii.sm)
                         )
                     ),
@@ -1463,12 +1463,12 @@ internal fun ColorSelectionDialog(
                 Card(
                     onClick = { onColorSelected(currentChipColor.copy(alpha = alphaPercent / 100f)) },
                     colors = CardDefaults.colors(
-                        containerColor = NuvioTheme.colors.BackgroundElevated,
-                        focusedContainerColor = NuvioTheme.colors.Primary
+                        containerColor = Color.Black.copy(alpha = 0.85f),
+                        focusedContainerColor = Color.White
                     ),
                     border = CardDefaults.border(
                         focusedBorder = Border(
-                            border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                            border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                             shape = RoundedCornerShape(NuvioTheme.radii.sm)
                         )
                     ),
@@ -1515,11 +1515,11 @@ private fun ColorOption(
         ),
         border = CardDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(3.dp, NuvioTheme.colors.FocusRing),
+                border = BorderStroke(3.dp, Color.White),
                 shape = CircleShape
             ),
             border = if (isSelected) Border(
-                border = BorderStroke(3.dp, NuvioTheme.colors.Primary),
+                border = BorderStroke(3.dp, Color.White),
                 shape = CircleShape
             ) else Border.None
         ),

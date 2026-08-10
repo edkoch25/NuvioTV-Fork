@@ -156,7 +156,7 @@ private fun LicensesAttributionsDetailsPanel(
     Column(
         modifier = modifier
             .border(NuvioTheme.spacing.hairline, NuvioTheme.colors.Border.copy(alpha = 0.5f), RoundedCornerShape(18.dp))
-            .background(NuvioTheme.colors.BackgroundElevated.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
+            .background(Color.Black.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
             .padding(20.dp)
     ) {
         Box(
@@ -239,7 +239,7 @@ private fun AttributionDetailRow(
         ),
         border = CardDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                 shape = RoundedCornerShape(SettingsSecondaryCardRadius)
             )
         ),
@@ -277,7 +277,7 @@ private fun AttributionDetailRow(
                 Text(
                     text = item.url,
                     style = MaterialTheme.typography.labelSmall,
-                    color = NuvioTheme.colors.Primary,
+                    color = Color.White,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )

@@ -1215,11 +1215,11 @@ private fun CwStyleCard(
         ),
         border = CardDefaults.border(
             border = if (isSelected) Border(
-                border = BorderStroke(NuvioTheme.spacing.hairline, NuvioTheme.colors.FocusRing),
+                border = BorderStroke(NuvioTheme.spacing.hairline, Color.White),
                 shape = RoundedCornerShape(SettingsSecondaryCardRadius)
             ) else Border.None,
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                 shape = RoundedCornerShape(SettingsSecondaryCardRadius)
             )
         ),
@@ -1254,7 +1254,7 @@ private fun CwStyleCard(
                     Icon(
                         imageVector = Icons.Default.Check,
                         contentDescription = stringResource(R.string.cd_selected),
-                        tint = NuvioTheme.colors.FocusRing,
+                        tint = Color.White,
                         modifier = Modifier
                             .size(NuvioTheme.spacing.lg)
                             .padding(end = 6.dp)
@@ -1395,7 +1395,7 @@ private fun CardDepthStyleControls(
             ),
             border = ButtonDefaults.border(
                 focusedBorder = Border(
-                    border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                    border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                     shape = RoundedCornerShape(SettingsPillRadius)
                 )
             )
@@ -1507,7 +1507,7 @@ private fun CardDepthResetButton(
                 shape = shape
             ),
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                 shape = shape
             )
         )
@@ -1603,7 +1603,7 @@ private fun PosterCardStyleControls(
             ),
             border = ButtonDefaults.border(
                 focusedBorder = Border(
-                    border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                    border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                     shape = RoundedCornerShape(SettingsPillRadius)
                 )
             )

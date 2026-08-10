@@ -32,6 +32,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Border
@@ -58,7 +59,7 @@ fun DebugSettingsContent(
         Text(
             text = stringResource(R.string.debug_title),
             style = MaterialTheme.typography.headlineMedium,
-            color = NuvioTheme.colors.Secondary
+            color = Color.White
         )
 
         Spacer(modifier = Modifier.height(NuvioTheme.spacing.sm))
@@ -224,12 +225,12 @@ private fun DebugProgressIndicatorCard() {
         onClick = { },
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.colors(
-            containerColor = NuvioTheme.colors.BackgroundCard,
-            focusedContainerColor = NuvioTheme.colors.FocusBackground
+            containerColor = Color.Black.copy(alpha = 0.85f),
+            focusedContainerColor = Color.White.copy(alpha = 0.14f)
         ),
         border = CardDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                 shape = RoundedCornerShape(NuvioTheme.radii.md)
             )
         ),
@@ -295,12 +296,12 @@ private fun DebugToggleCard(
         modifier = Modifier
             .fillMaxWidth(),
         colors = CardDefaults.colors(
-            containerColor = NuvioTheme.colors.BackgroundCard,
-            focusedContainerColor = NuvioTheme.colors.FocusBackground
+            containerColor = Color.Black.copy(alpha = 0.85f),
+            focusedContainerColor = Color.White.copy(alpha = 0.14f)
         ),
         border = CardDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                 shape = RoundedCornerShape(NuvioTheme.radii.md)
             )
         ),
@@ -334,10 +335,10 @@ private fun DebugToggleCard(
                 checked = checked,
                 onCheckedChange = { onToggle(it) },
                 colors = SwitchDefaults.colors(
-                    checkedThumbColor = NuvioTheme.colors.Secondary,
-                    checkedTrackColor = NuvioTheme.colors.Secondary.copy(alpha = 0.3f),
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = Color.White.copy(alpha = 0.3f),
                     uncheckedThumbColor = NuvioTheme.colors.TextSecondary,
-                    uncheckedTrackColor = NuvioTheme.colors.BackgroundCard
+                    uncheckedTrackColor = Color.Black.copy(alpha = 0.85f)
                 )
             )
         }
@@ -358,12 +359,12 @@ private fun DebugActionCard(
             .fillMaxWidth()
             .onFocusChanged { isFocused = it.isFocused },
         colors = CardDefaults.colors(
-            containerColor = NuvioTheme.colors.BackgroundCard,
-            focusedContainerColor = NuvioTheme.colors.FocusBackground
+            containerColor = Color.Black.copy(alpha = 0.85f),
+            focusedContainerColor = Color.White.copy(alpha = 0.14f)
         ),
         border = CardDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                 shape = RoundedCornerShape(NuvioTheme.radii.md)
             )
         ),
@@ -403,8 +404,8 @@ private fun DebugDialogButton(
             .fillMaxWidth()
             .onFocusChanged { isFocused = it.isFocused },
         colors = CardDefaults.colors(
-            containerColor = NuvioTheme.colors.BackgroundCard,
-            focusedContainerColor = NuvioTheme.colors.Secondary
+            containerColor = Color.Black.copy(alpha = 0.85f),
+            focusedContainerColor = Color.White
         ),
         shape = CardDefaults.shape(RoundedCornerShape(NuvioTheme.radii.sm)),
         scale = CardDefaults.scale(focusedScale = 1.0f)
@@ -457,7 +458,7 @@ private fun DebugGenerateLibraryCard(
             Text(
                 text = result,
                 style = MaterialTheme.typography.bodySmall,
-                color = if (result.startsWith("Failed")) NuvioTheme.colors.Error else NuvioTheme.colors.Secondary
+                color = if (result.startsWith("Failed")) NuvioTheme.colors.Error else Color.White
             )
         }
 
@@ -517,7 +518,7 @@ private fun DebugSignInCard(
             Text(
                 text = result,
                 style = MaterialTheme.typography.bodySmall,
-                color = if (result.startsWith("Failed")) NuvioTheme.colors.Error else NuvioTheme.colors.Secondary
+                color = if (result.startsWith("Failed")) NuvioTheme.colors.Error else Color.White
             )
         }
 

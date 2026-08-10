@@ -671,8 +671,8 @@ private fun StreamAutoPlayProviderSelectionDialog(
                     .fillMaxWidth()
                     .then(if (focusedItem == null) Modifier.focusRequester(focusRequester) else Modifier),
                 colors = CardDefaults.colors(
-                    containerColor = if (selected.isEmpty()) NuvioTheme.colors.FocusBackground else NuvioTheme.colors.BackgroundCard,
-                    focusedContainerColor = NuvioTheme.colors.FocusBackground
+                    containerColor = if (selected.isEmpty()) Color.White.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.85f),
+                    focusedContainerColor = Color.White.copy(alpha = 0.14f)
                 ),
                 shape = CardDefaults.shape(shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)),
                 scale = CardDefaults.scale(focusedScale = 1f)
@@ -685,7 +685,7 @@ private fun StreamAutoPlayProviderSelectionDialog(
                 ) {
                     Text(
                         text = allLabel,
-                        color = if (selected.isEmpty()) NuvioTheme.colors.Primary else NuvioTheme.colors.TextPrimary,
+                        color = if (selected.isEmpty()) Color.White else NuvioTheme.colors.TextPrimary,
                         style = MaterialTheme.typography.bodyLarge,
                         modifier = Modifier.weight(1f)
                     )
@@ -693,7 +693,7 @@ private fun StreamAutoPlayProviderSelectionDialog(
                         Icon(
                             imageVector = Icons.Default.Check,
                             contentDescription = stringResource(R.string.cd_selected),
-                            tint = NuvioTheme.colors.Primary,
+                            tint = Color.White,
                             modifier = Modifier.height(20.dp)
                         )
                     }
@@ -729,8 +729,8 @@ private fun StreamAutoPlayProviderSelectionDialog(
                                 .fillMaxWidth()
                                 .then(if (item == focusedItem) Modifier.focusRequester(focusRequester) else Modifier),
                             colors = CardDefaults.colors(
-                                containerColor = if (isSelected) NuvioTheme.colors.FocusBackground else NuvioTheme.colors.BackgroundCard,
-                                focusedContainerColor = NuvioTheme.colors.FocusBackground
+                                containerColor = if (isSelected) Color.White.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.85f),
+                                focusedContainerColor = Color.White.copy(alpha = 0.14f)
                             ),
                             shape = CardDefaults.shape(shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)),
                             scale = CardDefaults.scale(focusedScale = 1f)
@@ -743,7 +743,7 @@ private fun StreamAutoPlayProviderSelectionDialog(
                             ) {
                                 Text(
                                     text = item,
-                                    color = if (isSelected) NuvioTheme.colors.Primary else NuvioTheme.colors.TextPrimary,
+                                    color = if (isSelected) Color.White else NuvioTheme.colors.TextPrimary,
                                     style = MaterialTheme.typography.bodyMedium,
                                     modifier = Modifier.weight(1f)
                                 )
@@ -751,7 +751,7 @@ private fun StreamAutoPlayProviderSelectionDialog(
                                     Icon(
                                         imageVector = Icons.Default.Check,
                                         contentDescription = stringResource(R.string.cd_selected),
-                                        tint = NuvioTheme.colors.Primary,
+                                        tint = Color.White,
                                         modifier = Modifier.height(18.dp)
                                     )
                                 }
@@ -851,12 +851,12 @@ private fun StreamRegexDialog(
                             },
                             modifier = Modifier.onFocusChanged { isFocused = it.isFocused },
                             colors = CardDefaults.colors(
-                                containerColor = NuvioTheme.colors.BackgroundElevated,
-                                focusedContainerColor = NuvioTheme.colors.FocusBackground
+                                containerColor = Color.Black.copy(alpha = 0.85f),
+                                focusedContainerColor = Color.White.copy(alpha = 0.14f)
                             ),
                             border = CardDefaults.border(
                                 focusedBorder = Border(
-                                    border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                                    border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                                     shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp)
                                 )
                             ),
@@ -867,7 +867,7 @@ private fun StreamRegexDialog(
                                 text = label,
                                 modifier = Modifier.padding(horizontal = 14.dp, vertical = NuvioTheme.spacing.sm),
                                 style = MaterialTheme.typography.labelLarge,
-                                color = if (isFocused) NuvioTheme.colors.Primary else NuvioTheme.colors.TextPrimary
+                                color = if (isFocused) Color.White else NuvioTheme.colors.TextPrimary
                             )
                         }
                     }
@@ -879,8 +879,8 @@ private fun StreamRegexDialog(
                         .fillMaxWidth()
                         .onFocusChanged { isInputFocused = it.isFocused || it.hasFocus },
                     colors = CardDefaults.colors(
-                        containerColor = NuvioTheme.colors.BackgroundElevated,
-                        focusedContainerColor = NuvioTheme.colors.BackgroundElevated
+                        containerColor = Color.Black.copy(alpha = 0.85f),
+                        focusedContainerColor = Color.Black.copy(alpha = 0.85f)
                     ),
                     border = CardDefaults.border(
                         border = Border(
@@ -888,7 +888,7 @@ private fun StreamRegexDialog(
                             shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)
                         ),
                         focusedBorder = Border(
-                            border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                            border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                             shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)
                         )
                     ),
@@ -918,7 +918,7 @@ private fun StreamRegexDialog(
                                 onDone = { keyboardController?.hide() }
                             ),
                             textStyle = MaterialTheme.typography.bodyMedium.copy(color = NuvioTheme.colors.TextPrimary),
-                            cursorBrush = SolidColor(if (isInputFocused) NuvioTheme.colors.Primary else Color.Transparent),
+                            cursorBrush = SolidColor(if (isInputFocused) Color.White else Color.Transparent),
                             decorationBox = { innerTextField ->
                                 if (regex.isBlank()) {
                                     Text(
@@ -948,10 +948,10 @@ private fun StreamRegexDialog(
                     Button(
                         onClick = onDismiss,
                         colors = ButtonDefaults.colors(
-                            containerColor = NuvioTheme.colors.BackgroundElevated,
+                            containerColor = Color.Black.copy(alpha = 0.85f),
                             contentColor = NuvioTheme.colors.TextPrimary,
-                            focusedContainerColor = NuvioTheme.colors.FocusBackground,
-                            focusedContentColor = NuvioTheme.colors.Primary
+                            focusedContainerColor = Color.White.copy(alpha = 0.14f),
+                            focusedContentColor = Color.White
                         ),
                         shape = ButtonDefaults.shape(androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
                     ) {
@@ -964,10 +964,10 @@ private fun StreamRegexDialog(
                             regexError = null
                         },
                         colors = ButtonDefaults.colors(
-                            containerColor = NuvioTheme.colors.BackgroundElevated,
+                            containerColor = Color.Black.copy(alpha = 0.85f),
                             contentColor = NuvioTheme.colors.TextPrimary,
-                            focusedContainerColor = NuvioTheme.colors.FocusBackground,
-                            focusedContentColor = NuvioTheme.colors.Primary
+                            focusedContainerColor = Color.White.copy(alpha = 0.14f),
+                            focusedContentColor = Color.White
                         ),
                         shape = ButtonDefaults.shape(androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
                     ) {
@@ -987,10 +987,10 @@ private fun StreamRegexDialog(
                             onSave(value)
                         },
                         colors = ButtonDefaults.colors(
-                            containerColor = NuvioTheme.colors.BackgroundCard,
+                            containerColor = Color.Black.copy(alpha = 0.85f),
                             contentColor = NuvioTheme.colors.TextPrimary,
-                            focusedContainerColor = NuvioTheme.colors.FocusBackground,
-                            focusedContentColor = NuvioTheme.colors.Primary
+                            focusedContainerColor = Color.White.copy(alpha = 0.14f),
+                            focusedContentColor = Color.White
                         ),
                         shape = ButtonDefaults.shape(androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
                     ) {

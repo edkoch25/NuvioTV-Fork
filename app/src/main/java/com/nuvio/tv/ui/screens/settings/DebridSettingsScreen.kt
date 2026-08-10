@@ -935,8 +935,8 @@ private fun DebridTextListDialog(
             onClick = { inputFocusRequester.requestFocus() },
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.colors(
-                containerColor = NuvioTheme.colors.BackgroundElevated,
-                focusedContainerColor = NuvioTheme.colors.BackgroundElevated
+                containerColor = Color.Black.copy(alpha = 0.85f),
+                focusedContainerColor = Color.Black.copy(alpha = 0.85f)
             ),
             shape = CardDefaults.shape(RoundedCornerShape(10.dp)),
             scale = CardDefaults.scale(focusedScale = 1f)
@@ -963,7 +963,7 @@ private fun DebridTextListDialog(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { submit() }),
                     textStyle = MaterialTheme.typography.bodyMedium.copy(color = NuvioTheme.colors.TextPrimary),
-                    cursorBrush = SolidColor(NuvioTheme.colors.Primary)
+                    cursorBrush = SolidColor(Color.White)
                 )
             }
         }
@@ -1531,8 +1531,8 @@ private fun DebridApiKeyDialog(
                 .fillMaxWidth()
                 .onFocusChanged { isInputFocused = it.isFocused || it.hasFocus },
             colors = CardDefaults.colors(
-                containerColor = NuvioTheme.colors.BackgroundElevated,
-                focusedContainerColor = NuvioTheme.colors.BackgroundElevated
+                containerColor = Color.Black.copy(alpha = 0.85f),
+                focusedContainerColor = Color.Black.copy(alpha = 0.85f)
             ),
             border = CardDefaults.border(
                 border = Border(
@@ -1540,7 +1540,7 @@ private fun DebridApiKeyDialog(
                     shape = RoundedCornerShape(10.dp)
                 ),
                 focusedBorder = Border(
-                    border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                    border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
                     shape = RoundedCornerShape(10.dp)
                 )
             ),
@@ -1575,7 +1575,7 @@ private fun DebridApiKeyDialog(
                     ),
                     textStyle = MaterialTheme.typography.bodyMedium.copy(color = NuvioTheme.colors.TextPrimary),
                     cursorBrush = SolidColor(
-                        if (isInputFocused) NuvioTheme.colors.Primary else Color.Transparent
+                        if (isInputFocused) Color.White else Color.Transparent
                     ),
                     decorationBox = { innerTextField ->
                         if (value.isBlank()) {

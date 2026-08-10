@@ -620,8 +620,8 @@ private fun AudioOutputChannelsDialog(
                             .fillMaxWidth()
                             .then(if (index == 0) Modifier.focusRequester(focusRequester) else Modifier),
                         colors = CardDefaults.colors(
-                            containerColor = if (isSelected) NuvioTheme.colors.FocusBackground else NuvioTheme.colors.BackgroundCard,
-                            focusedContainerColor = NuvioTheme.colors.FocusBackground
+                            containerColor = if (isSelected) Color.White.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.85f),
+                            focusedContainerColor = Color.White.copy(alpha = 0.14f)
                         ),
                         shape = CardDefaults.shape(shape = RoundedCornerShape(10.dp)),
                         scale = CardDefaults.scale(focusedScale = 1f)
@@ -634,7 +634,7 @@ private fun AudioOutputChannelsDialog(
                         ) {
                             Text(
                                 text = option.displayLabel,
-                                color = if (isSelected) NuvioTheme.colors.Primary else NuvioTheme.colors.TextPrimary,
+                                color = if (isSelected) Color.White else NuvioTheme.colors.TextPrimary,
                                 style = MaterialTheme.typography.bodyLarge,
                                 modifier = Modifier.weight(1f)
                             )
@@ -643,7 +643,7 @@ private fun AudioOutputChannelsDialog(
                                 Icon(
                                     imageVector = Icons.Default.Check,
                                     contentDescription = stringResource(R.string.cd_selected),
-                                    tint = NuvioTheme.colors.Primary,
+                                    tint = Color.White,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -790,8 +790,8 @@ private fun DeniedHandlingDialog(
                             .fillMaxWidth()
                             .then(if (index == 0) Modifier.focusRequester(focusRequester) else Modifier),
                         colors = CardDefaults.colors(
-                            containerColor = if (isSelected) NuvioTheme.colors.FocusBackground else NuvioTheme.colors.BackgroundCard,
-                            focusedContainerColor = NuvioTheme.colors.FocusBackground
+                            containerColor = if (isSelected) Color.White.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.85f),
+                            focusedContainerColor = Color.White.copy(alpha = 0.14f)
                         ),
                         shape = CardDefaults.shape(shape = RoundedCornerShape(10.dp)),
                         scale = CardDefaults.scale(focusedScale = 1f)
@@ -805,7 +805,7 @@ private fun DeniedHandlingDialog(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = title,
-                                    color = if (isSelected) NuvioTheme.colors.Primary else NuvioTheme.colors.TextPrimary,
+                                    color = if (isSelected) Color.White else NuvioTheme.colors.TextPrimary,
                                     style = MaterialTheme.typography.bodyLarge
                                 )
                                 Spacer(modifier = Modifier.height(NuvioTheme.spacing.xs))
@@ -820,7 +820,7 @@ private fun DeniedHandlingDialog(
                                 Icon(
                                     imageVector = Icons.Default.Check,
                                     contentDescription = stringResource(R.string.cd_selected),
-                                    tint = NuvioTheme.colors.Primary,
+                                    tint = Color.White,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -900,8 +900,8 @@ private fun Dv7HandlingModeDialog(
                             .fillMaxWidth()
                             .then(if (index == 0) Modifier.focusRequester(focusRequester) else Modifier),
                         colors = CardDefaults.colors(
-                            containerColor = if (isSelected) NuvioTheme.colors.FocusBackground else NuvioTheme.colors.BackgroundCard,
-                            focusedContainerColor = NuvioTheme.colors.FocusBackground
+                            containerColor = if (isSelected) Color.White.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.85f),
+                            focusedContainerColor = Color.White.copy(alpha = 0.14f)
                         ),
                         shape = CardDefaults.shape(shape = RoundedCornerShape(10.dp)),
                         scale = CardDefaults.scale(focusedScale = 1f)
@@ -915,7 +915,7 @@ private fun Dv7HandlingModeDialog(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = title,
-                                    color = if (isSelected) NuvioTheme.colors.Primary else NuvioTheme.colors.TextPrimary,
+                                    color = if (isSelected) Color.White else NuvioTheme.colors.TextPrimary,
                                     style = MaterialTheme.typography.bodyLarge
                                 )
                                 Spacer(modifier = Modifier.height(NuvioTheme.spacing.xs))
@@ -930,7 +930,7 @@ private fun Dv7HandlingModeDialog(
                                 Icon(
                                     imageVector = Icons.Default.Check,
                                     contentDescription = stringResource(R.string.cd_selected),
-                                    tint = NuvioTheme.colors.Primary,
+                                    tint = Color.White,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
