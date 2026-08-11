@@ -462,6 +462,7 @@ object DirectDebridStreamFilter {
             stream.name,
             stream.title,
             stream.description,
+            stream.behaviorHints?.filename,
             stream.quality,
             resolve?.torrentName,
             resolve?.filename,
