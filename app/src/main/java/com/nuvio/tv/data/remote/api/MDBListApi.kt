@@ -11,6 +11,10 @@ import com.nuvio.tv.data.remote.dto.mdblist.MDBListWatchedRemoveResponseDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListWatchedResponseDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListWatchedWriteDto
 import com.nuvio.tv.data.remote.dto.mdblist.MDBListUserDto
+import com.nuvio.tv.data.remote.dto.mdblist.MDBListWatchlistAddResponseDto
+import com.nuvio.tv.data.remote.dto.mdblist.MDBListWatchlistPageDto
+import com.nuvio.tv.data.remote.dto.mdblist.MDBListWatchlistRemoveResponseDto
+import com.nuvio.tv.data.remote.dto.mdblist.MDBListWatchlistWriteDto
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
@@ -112,6 +116,43 @@ interface MDBListApi {
         @Query("offset") offset: Int?,
         @Query("cursor") cursor: String?
     ): Response<MDBListWatchedResponseDto>
+
+    /**
+     * The user's watchlist, paged. Returns `{ movies, shows, pagination }`.
+     * Page by `offset` (documented) until `pagination.has_more` is false.
+     *
+     * no-cache for the same reason as the other sync reads: a cached page would
+     * report a stale library, and stale in the "not present" direction is the
+     * harmful one for membership state.
+     */
+    @Headers("Cache-Control: no-cache")
+    @GET("watchlist/items")
+    suspend fun getWatchlistItems(
+        @Query("apikey") apiKey: String,
+        @Query("limit") limit: Int,
+        @Query("offset") offset: Int? = null
+    ): Response<MDBListWatchlistPageDto>
+
+    /**
+     * Adds items to the watchlist. Idempotent: a title already present is
+     * reported under `existing`, never duplicated. Body is the flat
+     * `{ movies, shows }` shape; imdb alone is a sufficient identity.
+     */
+    @POST("watchlist/items/add")
+    suspend fun addToWatchlist(
+        @Query("apikey") apiKey: String,
+        @Body body: MDBListWatchlistWriteDto
+    ): Response<MDBListWatchlistAddResponseDto>
+
+    /**
+     * Removes items from the watchlist. `removed` is not a reliable success
+     * signal - verify by re-reading, as with [removeWatched].
+     */
+    @POST("watchlist/items/remove")
+    suspend fun removeFromWatchlist(
+        @Query("apikey") apiKey: String,
+        @Body body: MDBListWatchlistWriteDto
+    ): Response<MDBListWatchlistRemoveResponseDto>
 
     /** Accepts either a playback id or the scrobble payload; id is used here. */
     @POST("scrobble/clear")
