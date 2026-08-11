@@ -1982,6 +1982,7 @@ private fun PlayerControlsOverlay(
                     }
 
                     if (uiState.currentSeason != null && uiState.currentEpisode != null) {
+                        Spacer(modifier = Modifier.height(NuvioTheme.spacing.sm))
                         val seasonEpisodeCode = stringResource(
                             R.string.season_episode_format,
                             uiState.currentSeason,
