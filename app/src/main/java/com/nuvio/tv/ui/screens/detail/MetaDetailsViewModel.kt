@@ -154,6 +154,37 @@ class MetaDetailsViewModel @Inject constructor(
             null
         )
 
+    /**
+     * nt4: kick the stream prefetch as early as the play target is knowable -
+     * at raw-meta time, before enrichment - so the prewarm has the maximum head
+     * start to finish before the user presses. Mirrors the post-applyMeta
+     * observer's target selection exactly (movie -> the meta id; series -> the
+     * nextToWatch episode, or nothing when there is no next), so the key matches
+     * and the observer's later fire is a dedup no-op rather than a re-scrape.
+     */
+    private fun launchEarlyStreamPrefetch(rawMeta: Meta) {
+        viewModelScope.launch {
+            val isSeries = rawMeta.videos.any { it.season != null }
+            val target: StreamPrefetchTarget? = if (isSeries) {
+                val progressMap = watchProgressRepository
+                    .getAllEpisodeProgress(_effectiveContentId.value)
+                    .first()
+                val watchedEpisodes = watchedItemsPreferences
+                    .getWatchedEpisodesForContent(_effectiveContentId.value)
+                    .first()
+                val ntw = computeNextToWatch(rawMeta, progressMap, watchedEpisodes)
+                ntw.nextVideoId?.let {
+                    StreamPrefetchTarget(rawMeta.apiType, it, ntw.nextSeason, ntw.nextEpisode, rawMeta.id)
+                }
+            } else {
+                StreamPrefetchTarget(rawMeta.apiType, rawMeta.id, null, null, rawMeta.id)
+            }
+            target?.let {
+                onStreamPrefetchTarget(it.type, it.videoId, it.season, it.episode, it.contentId, "details_hero_early")
+            }
+        }
+    }
+
     private fun onStreamPrefetchTarget(
         type: String,
         videoId: String,
@@ -1041,6 +1072,15 @@ class MetaDetailsViewModel @Inject constructor(
             "MetaTiming",
             "META_FETCH ms=${android.os.SystemClock.elapsedRealtime() - metaLoadStartMs} id=${meta.id}"
         )
+        // nt4: fire the stream prefetch off the RAW meta NOW, before the ~1.7s
+        // enrichMeta await below. The play target is already determined here (a
+        // movie's id, or the series nextToWatch - air-date-independent, computed
+        // from the addon episode list that enrichment does not change), so this
+        // is the same target the post-applyMeta observer would compute, ~1.7s
+        // sooner - giving the prewarm that much more head start to complete
+        // before the press. The observer's later fire dedups on
+        // lastStreamPrefetchKey, so this does not double-scrape.
+        launchEarlyStreamPrefetch(meta)
         // Fire all independent async jobs immediately — they run in parallel.
         loadMoreLikeThisAsync(meta)
         val enrichT0 = android.os.SystemClock.elapsedRealtime()
