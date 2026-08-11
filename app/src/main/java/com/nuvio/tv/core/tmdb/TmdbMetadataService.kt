@@ -51,6 +51,8 @@ class TmdbMetadataService(
     private val enrichmentCache = ConcurrentHashMap<String, TmdbEnrichment>()
     private val episodeCache = ConcurrentHashMap<String, Map<Pair<Int, Int>, TmdbEpisodeEnrichment>>()
     private val enrichmentInFlight = ConcurrentHashMap<String, CompletableDeferred<TmdbEnrichment?>>()
+    private val posterArtCache = ConcurrentHashMap<String, TmdbPosterArt>()
+    private val posterArtInFlight = ConcurrentHashMap<String, CompletableDeferred<TmdbPosterArt?>>()
     private val episodeInFlight = ConcurrentHashMap<String, CompletableDeferred<Map<Pair<Int, Int>, TmdbEpisodeEnrichment>>>()
     private val personCache = ConcurrentHashMap<String, PersonDetail>()
     private val moreLikeThisCache = ConcurrentHashMap<String, List<MetaPreview>>()
@@ -398,6 +400,68 @@ class TmdbMetadataService(
                     requestDeferred.complete(null)
                 }
                 enrichmentInFlight.remove(cacheKey, requestDeferred)
+            }
+        }
+
+    /**
+     * Lightweight artwork fetch for grids: a single TMDB details call (no
+     * credits/images/ratings/alt-title fan-out), cached and in-flight-deduped.
+     * Use instead of [fetchEnrichment] when only poster/backdrop (and basic
+     * text) is needed. The detail screen still calls [fetchEnrichment] for the
+     * full set, so nothing downstream loses data.
+     */
+    suspend fun fetchPosterArt(
+        tmdbId: String,
+        contentType: ContentType,
+        language: String = "en"
+    ): TmdbPosterArt? =
+        withContext(ioDispatcher) {
+            val normalizedLanguage = normalizeTmdbLanguage(language)
+            val cacheKey = "$tmdbId:${contentType.name}:$normalizedLanguage"
+            posterArtCache[cacheKey]?.let { return@withContext it }
+            posterArtInFlight[cacheKey]?.let { return@withContext it.await() }
+
+            val numericId = tmdbId.toIntOrNull() ?: return@withContext null
+            val requestDeferred = CompletableDeferred<TmdbPosterArt?>()
+            posterArtInFlight.putIfAbsent(cacheKey, requestDeferred)?.let { existing ->
+                return@withContext existing.await()
+            }
+            val tmdbType = when (contentType) {
+                ContentType.SERIES, ContentType.TV -> "tv"
+                else -> "movie"
+            }
+            try {
+                val details = when (tmdbType) {
+                    "tv" -> tmdbApi.getTvDetails(numericId, TMDB_API_KEY, normalizedLanguage)
+                    else -> tmdbApi.getMovieDetails(numericId, TMDB_API_KEY, normalizedLanguage)
+                }.body()
+                if (details == null) {
+                    requestDeferred.complete(null)
+                    return@withContext null
+                }
+                val art = TmdbPosterArt(
+                    poster = buildImageUrl(details.posterPath, size = "w500"),
+                    backdrop = buildImageUrl(details.backdropPath, size = TmdbImageSizes.backdrop),
+                    description = details.overview?.takeIf { it.isNotBlank() },
+                    genres = details.genres?.mapNotNull { genre ->
+                        genre.name.trim().takeIf { name -> name.isNotBlank() }
+                    } ?: emptyList()
+                )
+                posterArtCache[cacheKey] = art
+                requestDeferred.complete(art)
+                art
+            } catch (e: CancellationException) {
+                requestDeferred.cancel(e)
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to fetch TMDB poster art: ${e.message}", e)
+                requestDeferred.complete(null)
+                null
+            } finally {
+                if (!requestDeferred.isCompleted) {
+                    requestDeferred.complete(null)
+                }
+                posterArtInFlight.remove(cacheKey, requestDeferred)
             }
         }
 
@@ -1333,6 +1397,13 @@ private fun selectTvAgeRating(
         .mapNotNull { it.rating?.trim() }
         .firstOrNull { it.isNotBlank() }
 }
+
+data class TmdbPosterArt(
+    val poster: String?,
+    val backdrop: String?,
+    val description: String?,
+    val genres: List<String>
+)
 
 data class TmdbEnrichment(
     val localizedTitle: String?,

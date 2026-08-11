@@ -106,15 +106,14 @@ class MDBListWatchlistDataSource @Inject constructor(
     private suspend fun hydratePoster(entry: LibraryEntry): LibraryEntry {
         if (!entry.poster.isNullOrBlank()) return entry
         val tmdbId = entry.tmdbId ?: return entry
-        val enrichment = runCatching {
-            tmdbMetadataService.fetchEnrichment(tmdbId.toString(), ContentType.fromString(entry.type))
+        val art = runCatching {
+            tmdbMetadataService.fetchPosterArt(tmdbId.toString(), ContentType.fromString(entry.type))
         }.getOrNull() ?: return entry
         return entry.copy(
-            poster = enrichment.poster ?: entry.poster,
-            background = enrichment.backdrop ?: entry.background,
-            logo = enrichment.logo ?: entry.logo,
-            description = entry.description ?: enrichment.description,
-            genres = if (entry.genres.isEmpty()) enrichment.genres else entry.genres
+            poster = art.poster ?: entry.poster,
+            background = art.backdrop ?: entry.background,
+            description = entry.description ?: art.description,
+            genres = if (entry.genres.isEmpty()) art.genres else entry.genres
         )
     }
 
