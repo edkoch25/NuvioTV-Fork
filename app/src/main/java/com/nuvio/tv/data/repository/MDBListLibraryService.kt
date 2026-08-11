@@ -58,7 +58,7 @@ class MDBListWatchlistDataSource @Inject constructor(
     }
 
     /** The whole watchlist, paged by offset until the server reports no more. */
-    suspend fun fetchAll(apiKey: String): List<LibraryEntry> {
+    suspend fun fetchAll(apiKey: String, hydratePosters: Boolean = true): List<LibraryEntry> {
         val entries = mutableListOf<LibraryEntry>()
         var offset = 0
         val limit = 1000
@@ -73,6 +73,7 @@ class MDBListWatchlistDataSource @Inject constructor(
             offset += limit
         }
         val deduped = entries.distinctBy { it.id }
+        if (!hydratePosters) return deduped
         // Best-effort poster hydration: the watchlist read carries no artwork,
         // so fill it from TMDB by id (cached + in-flight-deduped in the service).
         // Bounded so a slow/unreachable TMDB never stalls opening the library.
@@ -98,6 +99,7 @@ class MDBListWatchlistDataSource @Inject constructor(
 
     private companion object {
         const val POSTER_HYDRATION_TIMEOUT_MS = 4_000L
+        const val WRITE_BATCH_SIZE = 100
     }
 
     suspend fun add(apiKey: String, item: LibraryEntryInput) {
@@ -116,18 +118,26 @@ class MDBListWatchlistDataSource @Inject constructor(
      *  number of unique, resolvable items sent (success is confirmed by the
      *  caller re-reading, not by the response count). */
     suspend fun addAll(apiKey: String, items: List<LibraryEntryInput>): Int {
-        val plan = buildWatchlistWritePlan(items)
-        if (plan.isEmpty) return 0
-        val response = api.addToWatchlist(apiKey, plan.body)
-        return if (response.isSuccessful) plan.moviesCount + plan.showsCount else 0
+        var written = 0
+        for (batch in items.chunked(WRITE_BATCH_SIZE)) {
+            val plan = buildWatchlistWritePlan(batch)
+            if (plan.isEmpty) continue
+            val response = api.addToWatchlist(apiKey, plan.body)
+            if (response.isSuccessful) written += plan.moviesCount + plan.showsCount
+        }
+        return written
     }
 
     /** Bulk remove for transfer (move). One request for the whole batch. */
     suspend fun removeAll(apiKey: String, items: List<LibraryEntryInput>): Int {
-        val plan = buildWatchlistWritePlan(items)
-        if (plan.isEmpty) return 0
-        val response = api.removeFromWatchlist(apiKey, plan.body)
-        return if (response.isSuccessful) plan.moviesCount + plan.showsCount else 0
+        var removed = 0
+        for (batch in items.chunked(WRITE_BATCH_SIZE)) {
+            val plan = buildWatchlistWritePlan(batch)
+            if (plan.isEmpty) continue
+            val response = api.removeFromWatchlist(apiKey, plan.body)
+            if (response.isSuccessful) removed += plan.moviesCount + plan.showsCount
+        }
+        return removed
     }
 }
 

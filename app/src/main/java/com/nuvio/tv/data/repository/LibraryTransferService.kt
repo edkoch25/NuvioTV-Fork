@@ -12,6 +12,8 @@ import com.nuvio.tv.domain.model.ListMembershipChanges
 import com.nuvio.tv.domain.model.SavedLibraryItem
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.nuvio.tv.data.simkl.SimklDestructiveRemovalRequiredException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 
 data class LibraryTransferResult(
@@ -43,6 +45,13 @@ class LibraryTransferService @Inject constructor(
 ) {
     /** The current contents of a library location. */
     suspend fun read(mode: LibrarySourceMode): List<LibraryEntry> {
+        // MDBList: read the watchlist directly and skip poster hydration — the
+        // transfer only needs ids, and hydrating a large library on every read
+        // is pure overhead here.
+        if (mode == LibrarySourceMode.MDBLIST) {
+            val apiKey = mdbListDataSource.apiKeyOrNull() ?: return emptyList()
+            return mdbListDataSource.fetchAll(apiKey, hydratePosters = false)
+        }
         val providerId = mode.providerId
         return if (providerId == null) {
             libraryPreferences.getAllItems().map { it.toLibraryEntry() }
@@ -114,10 +123,19 @@ class LibraryTransferService @Inject constructor(
             val provider = trackingProviders.provider(providerId) ?: return 0
             val desired = ListMembershipChanges(provider.toggledDefaultMembership(emptyMap()))
             var ok = 0
+            var consecutiveFailures = 0
             for (item in items) {
-                runCatching {
+                val success = runCatching {
                     provider.applyMembershipChanges(item, desired, destructiveRemovalConfirmed = false)
-                }.onSuccess { ok++ }
+                }.isSuccess
+                if (success) {
+                    ok++
+                    consecutiveFailures = 0
+                } else {
+                    consecutiveFailures++
+                }
+                if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) break
+                delay(TRACKING_THROTTLE_MS)
             }
             return ok
         }
@@ -158,6 +176,7 @@ class LibraryTransferService @Inject constructor(
                 ?: return RemovalOutcome(0, items.size)
             var removed = 0
             var kept = 0
+            var consecutiveFailures = 0
             for (item in items) {
                 val current = runCatching {
                     provider.getMembershipSnapshot(item).listMembership
@@ -171,13 +190,29 @@ class LibraryTransferService @Inject constructor(
                     continue
                 }
                 val cleared = ListMembershipChanges(current.mapValues { false })
-                runCatching {
+                val error = runCatching {
                     provider.applyMembershipChanges(
                         item,
                         cleared,
                         destructiveRemovalConfirmed = false
                     )
-                }.fold(onSuccess = { removed++ }, onFailure = { kept++ })
+                }.exceptionOrNull()
+                when {
+                    error == null -> {
+                        removed++
+                        consecutiveFailures = 0
+                    }
+                    error is SimklDestructiveRemovalRequiredException -> {
+                        kept++ // expected safe-skip, not a rate-limit signal
+                        consecutiveFailures = 0
+                    }
+                    else -> {
+                        kept++
+                        consecutiveFailures++
+                    }
+                }
+                if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) break
+                delay(TRACKING_THROTTLE_MS)
             }
             return RemovalOutcome(removed, kept)
         }
@@ -189,6 +224,11 @@ class LibraryTransferService @Inject constructor(
             }.onSuccess { removed++ }
         }
         return RemovalOutcome(removed, items.size - removed)
+    }
+
+    private companion object {
+        const val MAX_CONSECUTIVE_FAILURES = 5
+        const val TRACKING_THROTTLE_MS = 30L
     }
 }
 
