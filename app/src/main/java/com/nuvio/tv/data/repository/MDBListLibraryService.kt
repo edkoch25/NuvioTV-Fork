@@ -5,8 +5,10 @@ import com.nuvio.tv.R
 import com.nuvio.tv.core.tracking.TrackingLibraryProvider
 import com.nuvio.tv.core.tracking.TrackingProviderId
 import com.nuvio.tv.core.tracking.TrackingRefreshIntent
+import com.nuvio.tv.core.tmdb.TmdbMetadataService
 import com.nuvio.tv.data.local.MDBListSettingsDataStore
 import com.nuvio.tv.data.remote.api.MDBListApi
+import com.nuvio.tv.domain.model.ContentType
 import com.nuvio.tv.domain.model.LibraryEntry
 import com.nuvio.tv.domain.model.LibraryEntryInput
 import com.nuvio.tv.domain.model.LibraryListTab
@@ -15,6 +17,10 @@ import com.nuvio.tv.domain.model.ListMembershipSnapshot
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -36,7 +42,8 @@ import kotlinx.coroutines.sync.withLock
 @Singleton
 class MDBListWatchlistDataSource @Inject constructor(
     private val api: MDBListApi,
-    private val settingsDataStore: MDBListSettingsDataStore
+    private val settingsDataStore: MDBListSettingsDataStore,
+    private val tmdbMetadataService: TmdbMetadataService
 ) {
     /** The active profile's key, or null when tracking is not ready. */
     suspend fun apiKeyOrNull(): String? {
@@ -65,7 +72,32 @@ class MDBListWatchlistDataSource @Inject constructor(
             if (page.pagination?.hasMore != true || pageCount == 0) break
             offset += limit
         }
-        return entries.distinctBy { it.id }
+        val deduped = entries.distinctBy { it.id }
+        // Best-effort poster hydration: the watchlist read carries no artwork,
+        // so fill it from TMDB by id (cached + in-flight-deduped in the service).
+        // Bounded so a slow/unreachable TMDB never stalls opening the library.
+        return withTimeoutOrNull(POSTER_HYDRATION_TIMEOUT_MS) {
+            coroutineScope { deduped.map { entry -> async { hydratePoster(entry) } }.awaitAll() }
+        } ?: deduped
+    }
+
+    private suspend fun hydratePoster(entry: LibraryEntry): LibraryEntry {
+        if (!entry.poster.isNullOrBlank()) return entry
+        val tmdbId = entry.tmdbId ?: return entry
+        val enrichment = runCatching {
+            tmdbMetadataService.fetchEnrichment(tmdbId.toString(), ContentType.fromString(entry.type))
+        }.getOrNull() ?: return entry
+        return entry.copy(
+            poster = enrichment.poster ?: entry.poster,
+            background = enrichment.backdrop ?: entry.background,
+            logo = enrichment.logo ?: entry.logo,
+            description = entry.description ?: enrichment.description,
+            genres = if (entry.genres.isEmpty()) enrichment.genres else entry.genres
+        )
+    }
+
+    private companion object {
+        const val POSTER_HYDRATION_TIMEOUT_MS = 4_000L
     }
 
     suspend fun add(apiKey: String, item: LibraryEntryInput) {
