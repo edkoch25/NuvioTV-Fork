@@ -65,6 +65,7 @@ fun TrackingSettingsScreen(
     var disconnectProvider by remember { mutableStateOf<TrackingProviderId?>(null) }
     var restoreFocusTarget by remember { mutableStateOf<TrackingFocusTarget?>(null) }
     var showLibrarySourceDialog by remember { mutableStateOf(false) }
+    var showTransferFlow by remember { mutableStateOf(false) }
     var showWatchProgressDialog by remember { mutableStateOf(false) }
     var showDaysCapDialog by remember { mutableStateOf(false) }
     var showMoreLikeThisSourceDialog by remember { mutableStateOf(false) }
@@ -78,7 +79,8 @@ fun TrackingSettingsScreen(
         showDaysCapDialog ||
         showMoreLikeThisSourceDialog ||
         showAnimeIdDialog ||
-        showMdbListApiKeyDialog
+        showMdbListApiKeyDialog ||
+        showTransferFlow
 
     BackHandler(enabled = !hasOverlay) {
         onBackPress()
@@ -184,6 +186,10 @@ fun TrackingSettingsScreen(
         onLibrarySourceClick = {
             restoreFocusTarget = TrackingFocusTarget.LIBRARY
             showLibrarySourceDialog = true
+        },
+        onTransferClick = {
+            restoreFocusTarget = TrackingFocusTarget.LIBRARY
+            showTransferFlow = true
         },
         onWatchProgressClick = {
             restoreFocusTarget = TrackingFocusTarget.WATCH_PROGRESS
@@ -331,6 +337,13 @@ fun TrackingSettingsScreen(
         )
     }
 
+    if (showTransferFlow) {
+        LibraryTransferFlow(
+            availableModes = trackingState.availableLibrarySourceModes,
+            onDismiss = { showTransferFlow = false }
+        )
+    }
+
     if (showLibrarySourceDialog) {
         SettingsSingleChoiceDialog(
             title = stringResource(R.string.trakt_library_source_dialog_title),
@@ -470,6 +483,7 @@ internal fun TrackingSettingsOverview(
     onSimklClick: () -> Unit,
     onMdbListClick: () -> Unit = {},
     onLibrarySourceClick: () -> Unit,
+    onTransferClick: () -> Unit = {},
     onWatchProgressClick: () -> Unit,
     onContinueWatchingWindowClick: () -> Unit,
     onCommentsChanged: (Boolean) -> Unit,
@@ -563,6 +577,12 @@ internal fun TrackingSettingsOverview(
                                 modifier = Modifier
                                     .focusRequester(libraryFocusRequester)
                                     .testTag(TrackingSettingsTestTags.LIBRARY_SOURCE)
+                            )
+                            SettingsActionRow(
+                                title = stringResource(R.string.library_transfer_row_title),
+                                subtitle = stringResource(R.string.library_transfer_row_subtitle),
+                                enabled = trackingState.isReady,
+                                onClick = onTransferClick
                             )
                             SettingsActionRow(
                                 title = stringResource(R.string.trakt_watch_progress_title),
