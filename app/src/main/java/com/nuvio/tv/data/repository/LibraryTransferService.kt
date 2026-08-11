@@ -20,6 +20,7 @@ data class LibraryTransferResult(
     val unmatched: Int,
     val duplicates: Int,
     val removedFromSource: Int,
+    val keptAtSource: Int,
     val failed: Int
 )
 
@@ -66,22 +67,36 @@ class LibraryTransferService @Inject constructor(
         to: LibrarySourceMode,
         mode: LibraryTransferMode
     ): LibraryTransferResult {
-        if (from == to) return LibraryTransferResult(0, 0, 0, 0, 0, 0)
-        val plan = preview(from, to)
+        if (from == to) return LibraryTransferResult(0, 0, 0, 0, 0, 0, 0)
+        val source = read(from)
+        val destinationKeysBefore = read(to).map(::transferKey).toSet()
+        val plan = computeTransferPlan(source, destinationKeysBefore)
         val written = writeAll(to, plan.toWrite)
-        val failed = plan.willWrite - written
-        val removed = if (mode == LibraryTransferMode.MOVE && written > 0) {
-            removeAll(from, plan.toWrite.take(written))
-        } else {
-            0
+
+        var removed = 0
+        var kept = 0
+        if (mode == LibraryTransferMode.MOVE) {
+            // Remove from the source everything confirmed at the destination
+            // after the copy - both newly written and already present - by
+            // re-reading the destination, not by trusting write counts.
+            val destinationKeysAfter = read(to).map(::transferKey).toSet()
+            val removable = source
+                .filter { it.hasResolvableId() && transferKey(it) in destinationKeysAfter }
+                .distinctBy { transferKey(it) }
+                .map { it.toTransferInput() }
+            val outcome = removeFromSource(from, removable)
+            removed = outcome.removed
+            kept = outcome.kept
         }
+
         return LibraryTransferResult(
             copied = written,
             alreadyPresent = plan.alreadyPresent,
             unmatched = plan.unmatched,
             duplicates = plan.duplicates,
             removedFromSource = removed,
-            failed = failed
+            keptAtSource = kept,
+            failed = plan.willWrite - written
         )
     }
 
@@ -113,34 +128,67 @@ class LibraryTransferService @Inject constructor(
         return ok
     }
 
-    private suspend fun removeAll(from: LibrarySourceMode, items: List<LibraryEntryInput>): Int {
-        if (items.isEmpty()) return 0
+    private data class RemovalOutcome(val removed: Int, val kept: Int)
+
+    /**
+     * Removes [items] from the source. Uses each item's *full* current
+     * membership (all lists/statuses), so an item is cleared from the source
+     * entirely — not just its default list. Never forces a destructive removal:
+     * if clearing an item would also wipe watched history or a rating (Simkl's
+     * guard throws), the item is left in place and counted as kept.
+     */
+    private suspend fun removeFromSource(
+        from: LibrarySourceMode,
+        items: List<LibraryEntryInput>
+    ): RemovalOutcome {
+        if (items.isEmpty()) return RemovalOutcome(0, 0)
+
         if (from == LibrarySourceMode.MDBLIST) {
-            val apiKey = mdbListDataSource.apiKeyOrNull() ?: return 0
+            val apiKey = mdbListDataSource.apiKeyOrNull()
+                ?: return RemovalOutcome(0, items.size)
             val removed = mdbListDataSource.removeAll(apiKey, items)
             trackingProviders.provider(TrackingProviderId.MDBLIST)
                 ?.refresh(TrackingRefreshIntent.USER_INITIATED)
-            return removed
+            return RemovalOutcome(removed, items.size - removed)
         }
+
         val providerId = from.providerId
         if (providerId != null) {
-            val provider = trackingProviders.provider(providerId) ?: return 0
-            val cleared = ListMembershipChanges(
-                provider.toggledDefaultMembership(emptyMap()).mapValues { false }
-            )
-            var ok = 0
+            val provider = trackingProviders.provider(providerId)
+                ?: return RemovalOutcome(0, items.size)
+            var removed = 0
+            var kept = 0
             for (item in items) {
+                val current = runCatching {
+                    provider.getMembershipSnapshot(item).listMembership
+                }.getOrNull()
+                if (current == null) {
+                    kept++
+                    continue
+                }
+                if (current.values.none { selected -> selected }) {
+                    removed++ // already not in the source library
+                    continue
+                }
+                val cleared = ListMembershipChanges(current.mapValues { false })
                 runCatching {
-                    provider.applyMembershipChanges(item, cleared, destructiveRemovalConfirmed = true)
-                }.onSuccess { ok++ }
+                    provider.applyMembershipChanges(
+                        item,
+                        cleared,
+                        destructiveRemovalConfirmed = false
+                    )
+                }.fold(onSuccess = { removed++ }, onFailure = { kept++ })
             }
-            return ok
+            return RemovalOutcome(removed, kept)
         }
-        var ok = 0
+
+        var removed = 0
         for (item in items) {
-            runCatching { libraryPreferences.removeItem(item.itemId, item.itemType) }.onSuccess { ok++ }
+            runCatching {
+                libraryPreferences.removeItem(item.itemId, item.itemType)
+            }.onSuccess { removed++ }
         }
-        return ok
+        return RemovalOutcome(removed, items.size - removed)
     }
 }
 

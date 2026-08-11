@@ -119,6 +119,12 @@ private fun LibraryTransferReviewDialog(
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
+                if (result.keptAtSource > 0) {
+                    Text(
+                        text = stringResource(R.string.library_transfer_kept, result.keptAtSource),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
                 PanelActionRow(label = stringResource(R.string.action_close), onClick = onClose)
             }
 

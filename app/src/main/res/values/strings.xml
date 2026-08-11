@@ -1902,6 +1902,7 @@
     <string name="library_transfer_plan">%1$d to copy, %2$d already there, %3$d unmatched</string>
     <string name="library_transfer_result">Copied %1$d, %2$d already there, %3$d unmatched</string>
     <string name="library_transfer_removed">Removed %1$d from the source</string>
+    <string name="library_transfer_kept">Kept %1$d at the source (removing would clear watched history or a rating)</string>
     <string name="library_transfer_copy">Copy</string>
     <string name="library_transfer_move">Move (copy, then remove from source)</string>
     <string name="library_transfer_none">Nothing to copy</string>
