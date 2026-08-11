@@ -13,6 +13,8 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * N6 V2: prices a connection open on the playback path.
@@ -77,6 +79,9 @@ internal class PlaybackConnectionEventListener(
     private var range: String? = null
     private var host: String? = null
     private var proto: String? = null
+    // nt3: how many playback calls were already in flight when this one started
+    private var inflightAtStart = -1
+    private var hostInflightAtStart = -1
     private var code = -1
 
     private fun now() = SystemClock.elapsedRealtime()
@@ -86,6 +91,9 @@ internal class PlaybackConnectionEventListener(
         val request = call.request()
         range = request.header("Range")
         host = request.url.host
+        val before = PlaybackConnectionEvents.enter(host ?: "unknown")
+        inflightAtStart = before[0]
+        hostInflightAtStart = before[1]
     }
 
     override fun dnsStart(call: Call, domainName: String) {
@@ -152,6 +160,7 @@ internal class PlaybackConnectionEventListener(
     }
 
     private fun emit(outcome: String) {
+        PlaybackConnectionEvents.exit(host ?: "unknown")
         val totalMs = now() - callT0
         val rangeLabel = range ?: "none"
         val hostLabel = host ?: "unknown"
@@ -171,6 +180,7 @@ internal class PlaybackConnectionEventListener(
                 "dns=${dnsMs}ms connect=${connMs}ms tls=${tlsMs}ms " +
                 "headers=${headersMs}ms total=${totalMs}ms " +
                 "preDns=${preDnsMs}ms route=${routeMs}ms ttfb=${ttfbMs}ms acqToHdr=${acqToHdrMs}ms " +
+                "inflight=$inflightAtStart hostInflight=$hostInflightAtStart " +
                 "code=$code proto=$protoLabel range=$rangeLabel host=$hostLabel"
         )
     }
@@ -189,6 +199,29 @@ internal class PlaybackConnectionEventListener(
  */
 internal object PlaybackConnectionEvents : EventListener.Factory {
     private val seq = AtomicLong(0L)
+
+    // nt3 (preDns dig): preDns is dispatcher/queue wait. To attribute it, track
+    // how many playback calls are already in flight - total, and to the same
+    // host - when each call starts. A high count when preDns is high means the
+    // wait is concurrency/per-host-cap contention (fixable with a dedicated
+    // dispatcher or a higher maxRequestsPerHost); a low count means the wait is
+    // upstream of the dispatcher. Balanced 1:1: enter() at callStart, exit() in
+    // emit() (the single terminal path for callEnd and callFailed).
+    private val inflightTotal = AtomicInteger(0)
+    private val inflightPerHost = ConcurrentHashMap<String, AtomicInteger>()
+
+    /** Returns [totalBefore, hostBefore] - the counts prior to this call. */
+    fun enter(host: String): IntArray {
+        val hostCounter = inflightPerHost.getOrPut(host) { AtomicInteger(0) }
+        val totalBefore = inflightTotal.getAndIncrement()
+        val hostBefore = hostCounter.getAndIncrement()
+        return intArrayOf(totalBefore, hostBefore)
+    }
+
+    fun exit(host: String) {
+        inflightTotal.decrementAndGet()
+        inflightPerHost[host]?.decrementAndGet()
+    }
 
     override fun create(call: Call): EventListener =
         PlaybackConnectionEventListener(seq.incrementAndGet())
