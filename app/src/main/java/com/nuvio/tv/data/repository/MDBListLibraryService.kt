@@ -58,7 +58,9 @@ class MDBListWatchlistDataSource @Inject constructor(
     }
 
     /** The whole watchlist, paged by offset until the server reports no more. */
-    suspend fun fetchAll(apiKey: String, hydratePosters: Boolean = true): List<LibraryEntry> {
+    /** Reads the whole watchlist. Carries no artwork - posters are filled in
+     *  separately via [hydratePostersProgressively]. */
+    suspend fun fetchAll(apiKey: String): List<LibraryEntry> {
         val entries = mutableListOf<LibraryEntry>()
         var offset = 0
         val limit = 1000
@@ -72,14 +74,33 @@ class MDBListWatchlistDataSource @Inject constructor(
             if (page.pagination?.hasMore != true || pageCount == 0) break
             offset += limit
         }
-        val deduped = entries.distinctBy { it.id }
-        if (!hydratePosters) return deduped
-        // Best-effort poster hydration: the watchlist read carries no artwork,
-        // so fill it from TMDB by id (cached + in-flight-deduped in the service).
-        // Bounded so a slow/unreachable TMDB never stalls opening the library.
-        return withTimeoutOrNull(POSTER_HYDRATION_TIMEOUT_MS) {
-            coroutineScope { deduped.map { entry -> async { hydratePoster(entry) } }.awaitAll() }
-        } ?: deduped
+        return entries.distinctBy { it.id }
+    }
+
+    /**
+     * Fills posters from TMDB in bounded chunks, calling [onProgress] with the
+     * growing list after each chunk so the library fills in progressively.
+     * Never discards partial work: a slow/failed lookup (per-item timeout) just
+     * leaves that entry as-is. TMDB results are cached, so repeat calls are cheap.
+     */
+    suspend fun hydratePostersProgressively(
+        entries: List<LibraryEntry>,
+        onProgress: (List<LibraryEntry>) -> Unit
+    ) {
+        if (entries.isEmpty()) return
+        val result = entries.toMutableList()
+        val indexById = entries.withIndex().associate { (index, entry) -> entry.id to index }
+        for (chunk in entries.chunked(HYDRATION_CHUNK)) {
+            val hydrated = coroutineScope {
+                chunk.map { entry ->
+                    async {
+                        withTimeoutOrNull(PER_ITEM_HYDRATION_TIMEOUT_MS) { hydratePoster(entry) } ?: entry
+                    }
+                }.awaitAll()
+            }
+            hydrated.forEach { entry -> indexById[entry.id]?.let { result[it] = entry } }
+            onProgress(result.toList())
+        }
     }
 
     private suspend fun hydratePoster(entry: LibraryEntry): LibraryEntry {
@@ -98,7 +119,8 @@ class MDBListWatchlistDataSource @Inject constructor(
     }
 
     private companion object {
-        const val POSTER_HYDRATION_TIMEOUT_MS = 4_000L
+        const val HYDRATION_CHUNK = 8
+        const val PER_ITEM_HYDRATION_TIMEOUT_MS = 6_000L
         const val WRITE_BATCH_SIZE = 100
     }
 
@@ -230,20 +252,25 @@ class MDBListLibraryService @Inject constructor(
                 if (stamp != null && stamp == current.lastWatchlistedAt) return
             }
             state.value = current.copy(isLoading = true)
-            val fetched = runCatching { dataSource.fetchAll(apiKey) }
+            val fetched = runCatching { dataSource.fetchAll(apiKey) }.getOrNull()
             val stamp = runCatching { dataSource.lastWatchlistedAt(apiKey) }.getOrNull()
-            state.value = fetched.fold(
-                onSuccess = { entries ->
-                    State(
-                        entries = entries,
-                        watchlistIds = entries.map { it.id }.toSet(),
-                        isLoading = false,
-                        loaded = true,
-                        lastWatchlistedAt = stamp ?: current.lastWatchlistedAt
-                    )
-                },
-                onFailure = { current.copy(isLoading = false) }
+            if (fetched == null) {
+                state.value = current.copy(isLoading = false)
+                return@withLock
+            }
+            // Show the watchlist immediately (posterless), then fill posters in
+            // the background, updating state as each chunk completes.
+            state.value = State(
+                entries = fetched,
+                watchlistIds = fetched.map { it.id }.toSet(),
+                isLoading = true,
+                loaded = true,
+                lastWatchlistedAt = stamp ?: current.lastWatchlistedAt
             )
+            dataSource.hydratePostersProgressively(fetched) { progress ->
+                state.value = state.value.copy(entries = progress)
+            }
+            state.value = state.value.copy(isLoading = false)
         }
     }
 

@@ -54,7 +54,7 @@ class LibraryTransferService @Inject constructor(
         // is pure overhead here.
         if (mode == LibrarySourceMode.MDBLIST) {
             val apiKey = mdbListDataSource.apiKeyOrNull() ?: return emptyList()
-            return mdbListDataSource.fetchAll(apiKey, hydratePosters = false)
+            return mdbListDataSource.fetchAll(apiKey)
         }
         val providerId = mode.providerId
         return if (providerId == null) {
