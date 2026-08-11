@@ -98,6 +98,27 @@ class PrefetchSelectionSupplier @Inject constructor(
             }
             _uiSignals.value = SourcePrefetchSignal(uiKey, SourcePrefetchPhase.RANKED, facts)
         }
+        // 0.8.3-nt2: warm the exact URL the press will open for a direct-play
+        // stream. StreamScreenViewModel.resolveStreamForPlayback opens
+        // winner.getStreamUrl() verbatim when shouldResolveToPlayableStream is
+        // false, and the datasource's head/tail windows are keyed by exact Uri
+        // equality - so warming this precise url lets consumeHead/peekTail hit
+        // on press and skips BOTH cold connections (the head probe and the Cues
+        // tail read). preResolve below only warms freshly-resolved (Success)
+        // debrid links, which these direct-url streams are not: the 11 Aug 2026
+        // capture showed every resolve returning Stale and no prewarm firing, so
+        // every press paid two cold connections. Purely additive - the ready
+        // signal is still preResolve's result, unchanged.
+        if (!directDebridResolver.shouldResolveToPlayableStream(selection.winner)) {
+            selection.winner.getStreamUrl()?.takeIf { it.isNotBlank() }?.let { directUrl ->
+                com.nuvio.tv.ui.screens.player.PlayerPlaybackNetworking
+                    .prewarmPlaybackConnection(
+                        directUrl,
+                        selection.winner.behaviorHints?.proxyHeaders?.request
+                    )
+                android.util.Log.i(TAG, "PREFETCH prewarm direct")
+            }
+        }
         val linkReady = preResolve(selection.winner, season, episode)
         if (uiKey != null && linkReady) {
             _uiSignals.value = SourcePrefetchSignal(
