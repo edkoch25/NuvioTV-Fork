@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -180,6 +181,9 @@ private val DotGood = Color(0xFF4CAF50)
 private val DotWarn = Color(0xFFFFC107)
 private val DotBad = Color(0xFFF44336)
 
+/** Max width the stats HUD reaches; the control cluster slides left by this + a gap when it is open. */
+internal val StatsPanelMaxWidth = 380.dp
+
 @Composable
 fun PlaybackStatsOverlay(
     visible: Boolean,
@@ -199,6 +203,7 @@ fun PlaybackStatsOverlay(
                     shape = RoundedCornerShape(NuvioTheme.radii.sm)
                 )
                 .width(IntrinsicSize.Max)
+                .widthIn(max = StatsPanelMaxWidth)
                 .padding(horizontal = NuvioTheme.spacing.md, vertical = NuvioTheme.spacing.sm),
             verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.xxs)
         ) {

@@ -2036,7 +2036,13 @@ private fun PlayerControlsOverlay(
                 }
 
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    val statsSlide by animateDpAsState(
+                        targetValue = if (uiState.showPlaybackStatsOverlay) -(StatsPanelMaxWidth + NuvioTheme.spacing.sm) else 0.dp,
+                        animationSpec = tween(NuvioMotion.tokens.durations.fast),
+                        label = "statsClusterSlide"
+                    )
                     Row(
+                        modifier = Modifier.offset(x = statsSlide),
                         horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.xs),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
