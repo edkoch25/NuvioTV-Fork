@@ -79,6 +79,24 @@ class MDBListWatchlistDataSource @Inject constructor(
         if (plan.isEmpty) return
         api.removeFromWatchlist(apiKey, plan.body)
     }
+
+    /** Bulk add for transfer: one request for the whole batch. Returns the
+     *  number of unique, resolvable items sent (success is confirmed by the
+     *  caller re-reading, not by the response count). */
+    suspend fun addAll(apiKey: String, items: List<LibraryEntryInput>): Int {
+        val plan = buildWatchlistWritePlan(items)
+        if (plan.isEmpty) return 0
+        val response = api.addToWatchlist(apiKey, plan.body)
+        return if (response.isSuccessful) plan.moviesCount + plan.showsCount else 0
+    }
+
+    /** Bulk remove for transfer (move). One request for the whole batch. */
+    suspend fun removeAll(apiKey: String, items: List<LibraryEntryInput>): Int {
+        val plan = buildWatchlistWritePlan(items)
+        if (plan.isEmpty) return 0
+        val response = api.removeFromWatchlist(apiKey, plan.body)
+        return if (response.isSuccessful) plan.moviesCount + plan.showsCount else 0
+    }
 }
 
 @Singleton
