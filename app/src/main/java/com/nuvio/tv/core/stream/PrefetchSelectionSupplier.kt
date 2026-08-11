@@ -89,7 +89,7 @@ class PrefetchSelectionSupplier @Inject constructor(
                 "ms=${SystemClock.elapsedRealtime() - rankT0}"
         )
         if (selection == null) {
-            if (uiKey != null) _uiSignals.value = null
+            if (uiKey != null) _uiSignals.value = SourcePrefetchSignal(uiKey, SourcePrefetchPhase.EMPTY, null)
             return null
         }
         if (uiKey != null) {

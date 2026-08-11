@@ -140,13 +140,19 @@ class MetaDetailsViewModel @Inject constructor(
     /** Fork: details-page source line. Key of the hero-target prefetch; SEARCHING until the supplier signals. */
     private val heroSourceKey = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     val heroSourceSignal: kotlinx.coroutines.flow.StateFlow<com.nuvio.tv.core.stream.SourcePrefetchSignal?> =
-        kotlinx.coroutines.flow.combine(heroSourceKey, prefetchSelectionSupplier.uiSignals) { key, sig ->
+        kotlinx.coroutines.flow.combine(
+            heroSourceKey,
+            prefetchSelectionSupplier.uiSignals,
+            playerSettingsDataStore.playerSettings
+        ) { key, sig, settings ->
             when {
                 key == null -> null
-                sig?.uiKey == key -> sig
-                else -> com.nuvio.tv.core.stream.SourcePrefetchSignal(
+                settings.streamAutoPlayMode == com.nuvio.tv.data.local.StreamAutoPlayMode.MANUAL -> null
+                sig?.uiKey != key -> com.nuvio.tv.core.stream.SourcePrefetchSignal(
                     key, com.nuvio.tv.core.stream.SourcePrefetchPhase.SEARCHING, null
                 )
+                sig.phase == com.nuvio.tv.core.stream.SourcePrefetchPhase.EMPTY -> null
+                else -> sig
             }
         }.stateIn(
             viewModelScope,

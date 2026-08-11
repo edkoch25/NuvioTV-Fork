@@ -11,7 +11,7 @@ import com.nuvio.tv.core.debrid.DirectDebridStreamFilter
  * SEARCHING is not emitted here: the ViewModel derives it from "key set,
  * no matching signal yet".
  */
-enum class SourcePrefetchPhase { SEARCHING, RANKED, READY }
+enum class SourcePrefetchPhase { SEARCHING, RANKED, READY, EMPTY }
 
 data class SourcePrefetchSignal(
     val uiKey: String,

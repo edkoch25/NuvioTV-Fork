@@ -55,7 +55,7 @@ fun SourceBadgeRow(
     modifier: Modifier = Modifier,
     badgeHeight: androidx.compose.ui.unit.Dp = 22.dp
 ) {
-    if (signal == null) return
+    if (signal == null || signal.phase == SourcePrefetchPhase.EMPTY) return
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
