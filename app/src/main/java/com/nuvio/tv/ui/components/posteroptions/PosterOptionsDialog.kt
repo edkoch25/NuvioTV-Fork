@@ -41,6 +41,7 @@ fun PosterOptionsDialog(
     onDismiss: () -> Unit,
     onDetails: () -> Unit,
     onToggleLibrary: () -> Unit,
+    onManageLists: () -> Unit,
     onToggleWatched: () -> Unit
 ) {
     val primaryFocusRequester = remember { FocusRequester() }
@@ -61,18 +62,22 @@ fun PosterOptionsDialog(
         )
 
         PanelActionRow(
-            label = if (showManageLists) {
-                stringResource(R.string.library_manage_lists)
+            label = if (isInLibrary) {
+                stringResource(R.string.hero_remove_from_library)
             } else {
-                if (isInLibrary) {
-                    stringResource(R.string.hero_remove_from_library)
-                } else {
-                    stringResource(R.string.hero_add_to_library)
-                }
+                stringResource(R.string.hero_add_to_library)
             },
             onClick = onToggleLibrary,
             enabled = !isLibraryPending
         )
+
+        if (showManageLists) {
+            PanelActionRow(
+                label = stringResource(R.string.library_manage_lists),
+                onClick = onManageLists,
+                enabled = !isLibraryPending
+            )
+        }
 
         if (isMovie || isSeries) {
             PanelActionRow(
@@ -172,12 +177,11 @@ fun PosterOptionsHost(
                 controller.dismiss()
             },
             onToggleLibrary = {
-                if (state.librarySourceMode != LibrarySourceMode.LOCAL) {
-                    controller.openListPicker()
-                } else {
-                    controller.toggleLibrary()
-                    controller.dismiss()
-                }
+                controller.toggleLibrary()
+                controller.dismiss()
+            },
+            onManageLists = {
+                controller.openListPicker()
             },
             onToggleWatched = {
                 if (isMovie) {
