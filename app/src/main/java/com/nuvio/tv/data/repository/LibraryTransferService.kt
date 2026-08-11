@@ -12,6 +12,8 @@ import com.nuvio.tv.domain.model.ListMembershipChanges
 import com.nuvio.tv.domain.model.SavedLibraryItem
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.nuvio.tv.core.profile.ProfileManager
+import com.nuvio.tv.core.sync.LibrarySyncService
 import com.nuvio.tv.data.simkl.SimklDestructiveRemovalRequiredException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -41,7 +43,9 @@ data class LibraryTransferResult(
 class LibraryTransferService @Inject constructor(
     private val trackingProviders: TrackingLibraryProviderRegistry,
     private val libraryPreferences: LibraryPreferences,
-    private val mdbListDataSource: MDBListWatchlistDataSource
+    private val mdbListDataSource: MDBListWatchlistDataSource,
+    private val librarySyncService: LibrarySyncService,
+    private val profileManager: ProfileManager
 ) {
     /** The current contents of a library location. */
     suspend fun read(mode: LibrarySourceMode): List<LibraryEntry> {
@@ -104,6 +108,15 @@ class LibraryTransferService @Inject constructor(
         // need an explicit nudge.
         setOfNotNull(from.providerId, to.providerId).forEach { providerId ->
             trackingProviders.provider(providerId)?.refresh(TrackingRefreshIntent.USER_INITIATED)
+        }
+
+        // If the local Nuvio library changed, push it to the cloud so local and
+        // cloud stay consistent - otherwise a Move that cleared local could be
+        // undone by the next pull. The normal add/remove path does this too.
+        val localWritten = to.providerId == null ||
+            (from.providerId == null && mode == LibraryTransferMode.MOVE)
+        if (localWritten) {
+            runCatching { librarySyncService.pushToRemote(profileManager.activeProfileId.value) }
         }
 
         return LibraryTransferResult(
