@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -984,6 +985,14 @@ fun ModernHomeContent(
                     .fillMaxWidth(MODERN_HERO_TEXT_WIDTH_FRACTION)
             }
 
+            val heroDescriptionScalePercent by com.nuvio.tv.data.local.UiScalePreference
+                .flow(LocalContext.current.applicationContext)
+                .collectAsState(initial = 100)
+            val heroDescriptionMaxLines = when {
+                heroDescriptionScalePercent <= 95 -> 4
+                heroDescriptionScalePercent <= 100 -> 3
+                else -> 2
+            }
             HeroTitleBlock(
                 previewProvider = {
                     val state = heroSceneStateLambda()
@@ -1002,6 +1011,7 @@ fun ModernHomeContent(
                         state.fullScreenBackdrop && shouldPlayTrailerLambda() && heroTrailerRenderedLambda()
                     }
                 },
+                descriptionMaxLines = heroDescriptionMaxLines,
                 modifier = heroMetadataModifier
             )
 
