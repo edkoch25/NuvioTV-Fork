@@ -450,6 +450,7 @@
     <string name="tracking_trakt_progress_required">Available when Trakt is the Watch Progress source</string>
     <string name="trakt_name">Trakt</string>
     <string name="simkl_name">Simkl</string>
+    <string name="mdblist_name">MDBList</string>
     <string name="settings_about_subtitle">Version and policies</string>
     <string name="settings_network">Network speed</string>
     <string name="settings_network_subtitle">Latency and download diagnostics</string>
@@ -1886,6 +1887,10 @@
     <string name="library_empty_simkl_subtitle">Use + in details to add items to a Simkl status</string>
     <string name="library_empty_simkl_not_auth_title">Simkl not connected</string>
     <string name="library_empty_simkl_not_auth_subtitle">Connect your Simkl account in Settings to view your Simkl library</string>
+    <string name="library_empty_mdblist_title">No %1$s on your watchlist</string>
+    <string name="library_empty_mdblist_subtitle">Use + in details to add items to your MDBList watchlist</string>
+    <string name="library_empty_mdblist_not_auth_title">MDBList not connected</string>
+    <string name="library_empty_mdblist_not_auth_subtitle">Connect MDBList in Settings to view your MDBList watchlist</string>
     <string name="library_list_create_dialog_title">Create List</string>
     <string name="library_list_edit_dialog_title">Edit List</string>
     <string name="library_sync_btn">Sync</string>

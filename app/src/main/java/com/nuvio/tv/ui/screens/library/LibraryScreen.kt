@@ -274,6 +274,7 @@ fun LibraryScreen(
                         viewMode == LibraryViewMode.Cloud -> stringResource(R.string.library_source_cloud).uppercase()
                         uiState.sourceMode == LibrarySourceMode.TRAKT -> "TRAKT"
                         uiState.sourceMode == LibrarySourceMode.SIMKL -> "SIMKL"
+                        uiState.sourceMode == LibrarySourceMode.MDBLIST -> "MDBLIST"
                         uiState.isNuvioAccount -> "NUVIO"
                         else -> stringResource(R.string.library_source_local)
                     },
@@ -379,15 +380,19 @@ fun LibraryScreen(
                     val title = when {
                         uiState.sourceMode == LibrarySourceMode.TRAKT && !uiState.isTrackingAuthenticated -> stringResource(R.string.library_empty_trakt_not_auth_title)
                         uiState.sourceMode == LibrarySourceMode.SIMKL && !uiState.isTrackingAuthenticated -> stringResource(R.string.library_empty_simkl_not_auth_title)
+                        uiState.sourceMode == LibrarySourceMode.MDBLIST && !uiState.isTrackingAuthenticated -> stringResource(R.string.library_empty_mdblist_not_auth_title)
                         uiState.sourceMode == LibrarySourceMode.TRAKT -> stringResource(R.string.library_empty_trakt_title, selectedTypeLabel)
                         uiState.sourceMode == LibrarySourceMode.SIMKL -> stringResource(R.string.library_empty_simkl_title, selectedTypeLabel)
+                        uiState.sourceMode == LibrarySourceMode.MDBLIST -> stringResource(R.string.library_empty_mdblist_title, selectedTypeLabel)
                         else -> stringResource(R.string.library_empty_local_title, selectedTypeLabel)
                     }
                     val subtitle = when {
                         uiState.sourceMode == LibrarySourceMode.TRAKT && !uiState.isTrackingAuthenticated -> stringResource(R.string.library_empty_trakt_not_auth_subtitle)
                         uiState.sourceMode == LibrarySourceMode.SIMKL && !uiState.isTrackingAuthenticated -> stringResource(R.string.library_empty_simkl_not_auth_subtitle)
+                        uiState.sourceMode == LibrarySourceMode.MDBLIST && !uiState.isTrackingAuthenticated -> stringResource(R.string.library_empty_mdblist_not_auth_subtitle)
                         uiState.sourceMode == LibrarySourceMode.TRAKT -> stringResource(R.string.library_empty_trakt_subtitle)
                         uiState.sourceMode == LibrarySourceMode.SIMKL -> stringResource(R.string.library_empty_simkl_subtitle)
+                        uiState.sourceMode == LibrarySourceMode.MDBLIST -> stringResource(R.string.library_empty_mdblist_subtitle)
                         else -> stringResource(R.string.library_empty_local_subtitle)
                     }
                     EmptyScreenState(
