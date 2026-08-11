@@ -106,6 +106,8 @@ class MDBListTrackingProvider @Inject constructor(
         displayName = "MDBList",
         capabilities = setOf(
             TrackingCapability.AUTHENTICATION,
+            TrackingCapability.LIBRARY_READ,
+            TrackingCapability.LIBRARY_WRITE,
             TrackingCapability.WATCHED_READ,
             TrackingCapability.WATCHED_WRITE,
             TrackingCapability.PROGRESS_READ,
