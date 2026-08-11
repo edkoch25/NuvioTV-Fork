@@ -72,7 +72,7 @@ fun SourceBadgeRow(
             }
             SourcePrefetchPhase.RANKED -> {
                 SourceLineSpinner()
-                SourceBadges(signal.facts, badgeHeight)
+                SourceBadges(signal.facts, signal.badges, badgeHeight)
             }
             SourcePrefetchPhase.READY -> {
                 Icon(
@@ -81,27 +81,38 @@ fun SourceBadgeRow(
                     tint = Color(0xFF4CAF7D),
                     modifier = Modifier.size(18.dp)
                 )
-                SourceBadges(signal.facts, badgeHeight)
+                SourceBadges(signal.facts, signal.badges, badgeHeight)
             }
         }
     }
 }
 
 @Composable
-private fun SourceBadges(facts: DirectDebridStreamFilter.StreamFacts?, badgeHeight: androidx.compose.ui.unit.Dp) {
+private fun SourceBadges(
+    facts: DirectDebridStreamFilter.StreamFacts?,
+    fusionBadges: List<com.nuvio.tv.domain.model.StreamBadge>,
+    badgeHeight: androidx.compose.ui.unit.Dp
+) {
     if (facts == null) return
-    val resources = sourceBadgeResources(facts)
+    val useFusion = fusionBadges.isNotEmpty()
+    val resources = if (useFusion) emptyList() else sourceBadgeResources(facts)
     val group = facts.releaseGroup
     val hasChip = group.isNotBlank()
     Layout(
         content = {
-            for (res in resources) {
-                Image(
-                    painter = painterResource(id = res),
-                    contentDescription = null,
-                    modifier = Modifier.height(badgeHeight),
-                    contentScale = ContentScale.FillHeight
-                )
+            if (useFusion) {
+                for (badge in fusionBadges) {
+                    StreamImportedBadgeChip(badge = badge)
+                }
+            } else {
+                for (res in resources) {
+                    Image(
+                        painter = painterResource(id = res),
+                        contentDescription = null,
+                        modifier = Modifier.height(badgeHeight),
+                        contentScale = ContentScale.FillHeight
+                    )
+                }
             }
             if (hasChip) {
                 Text(

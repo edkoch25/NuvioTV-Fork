@@ -16,5 +16,6 @@ enum class SourcePrefetchPhase { SEARCHING, RANKED, READY, EMPTY }
 data class SourcePrefetchSignal(
     val uiKey: String,
     val phase: SourcePrefetchPhase,
-    val facts: DirectDebridStreamFilter.StreamFacts?
+    val facts: DirectDebridStreamFilter.StreamFacts?,
+    val badges: List<com.nuvio.tv.domain.model.StreamBadge> = emptyList()
 )

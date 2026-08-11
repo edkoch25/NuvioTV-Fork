@@ -55,7 +55,8 @@ class PrefetchSelectionSupplier @Inject constructor(
     private val addonRepository: AddonRepository,
     private val bingeGroupCacheDataStore: BingeGroupCacheDataStore,
     private val debridSettingsDataStore: DebridSettingsDataStore,
-    private val directDebridResolver: DirectDebridResolver
+    private val directDebridResolver: DirectDebridResolver,
+    private val streamBadgePresentation: com.nuvio.tv.core.streams.StreamBadgePresentation
 ) {
 
     private val _uiSignals = MutableStateFlow<SourcePrefetchSignal?>(null)
@@ -96,7 +97,8 @@ class PrefetchSelectionSupplier @Inject constructor(
             val facts = selection.snapshot.preferences?.let {
                 com.nuvio.tv.core.debrid.DirectDebridStreamFilter.factsFor(selection.winner, it)
             }
-            _uiSignals.value = SourcePrefetchSignal(uiKey, SourcePrefetchPhase.RANKED, facts)
+            val badges = streamBadgePresentation.badgesFor(selection.winner)
+            _uiSignals.value = SourcePrefetchSignal(uiKey, SourcePrefetchPhase.RANKED, facts, badges)
         }
         // 0.8.3-nt2: warm the exact URL the press will open for a direct-play
         // stream. StreamScreenViewModel.resolveStreamForPlayback opens
@@ -124,7 +126,8 @@ class PrefetchSelectionSupplier @Inject constructor(
             _uiSignals.value = SourcePrefetchSignal(
                 uiKey,
                 SourcePrefetchPhase.READY,
-                _uiSignals.value?.takeIf { it.uiKey == uiKey }?.facts
+                _uiSignals.value?.takeIf { it.uiKey == uiKey }?.facts,
+                _uiSignals.value?.takeIf { it.uiKey == uiKey }?.badges ?: emptyList()
             )
         }
         return selection
