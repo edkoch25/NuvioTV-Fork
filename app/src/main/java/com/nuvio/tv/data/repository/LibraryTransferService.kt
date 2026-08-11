@@ -98,6 +98,14 @@ class LibraryTransferService @Inject constructor(
             kept = outcome.kept
         }
 
+        // Refresh both endpoints so the Library screen reflects the transfer
+        // (the source shrank on a Move; the destination grew). Local libraries
+        // are DataStore-backed and update reactively, so only tracking providers
+        // need an explicit nudge.
+        setOfNotNull(from.providerId, to.providerId).forEach { providerId ->
+            trackingProviders.provider(providerId)?.refresh(TrackingRefreshIntent.USER_INITIATED)
+        }
+
         return LibraryTransferResult(
             copied = written,
             alreadyPresent = plan.alreadyPresent,
@@ -113,10 +121,7 @@ class LibraryTransferService @Inject constructor(
         if (items.isEmpty()) return 0
         if (to == LibrarySourceMode.MDBLIST) {
             val apiKey = mdbListDataSource.apiKeyOrNull() ?: return 0
-            val written = mdbListDataSource.addAll(apiKey, items)
-            trackingProviders.provider(TrackingProviderId.MDBLIST)
-                ?.refresh(TrackingRefreshIntent.USER_INITIATED)
-            return written
+            return mdbListDataSource.addAll(apiKey, items)
         }
         val providerId = to.providerId
         if (providerId != null) {
@@ -165,8 +170,6 @@ class LibraryTransferService @Inject constructor(
             val apiKey = mdbListDataSource.apiKeyOrNull()
                 ?: return RemovalOutcome(0, items.size)
             val removed = mdbListDataSource.removeAll(apiKey, items)
-            trackingProviders.provider(TrackingProviderId.MDBLIST)
-                ?.refresh(TrackingRefreshIntent.USER_INITIATED)
             return RemovalOutcome(removed, items.size - removed)
         }
 
