@@ -468,6 +468,38 @@ fun AddonManagerScreen(
             }
 
             item {
+                val metadataLevels = uiState.healthByUrl
+                    .filterKeys { it.startsWith(AddonHealthStore.METADATA_PREFIX) }
+                if (metadataLevels.isNotEmpty()) {
+                    val level = metadataLevels.values.first()
+                    val chip = when (level) {
+                        AddonHealthLevel.HEALTHY -> "OK" to NuvioTheme.colors.Success
+                        AddonHealthLevel.DEGRADED -> "Slow" to NuvioTheme.colors.Warning
+                        AddonHealthLevel.DOWN -> "Down" to NuvioTheme.colors.Error
+                        else -> "-" to NuvioTheme.colors.TextTertiary
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = NuvioTheme.spacing.sm),
+                        horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.sm),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Metadata",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = NuvioTheme.colors.TextSecondary
+                        )
+                        Text(
+                            text = chip.first,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = chip.second
+                        )
+                    }
+                }
+            }
+
+            item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically

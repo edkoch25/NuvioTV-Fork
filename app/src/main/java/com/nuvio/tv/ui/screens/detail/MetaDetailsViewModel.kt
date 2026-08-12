@@ -5,6 +5,8 @@ import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.nuvio.tv.core.health.AddonHealthStore
+import com.nuvio.tv.core.health.HealthOutcome
 import com.nuvio.tv.core.player.StreamAutoPlayPolicy
 import com.nuvio.tv.core.network.NetworkResult
 import com.nuvio.tv.core.tmdb.TmdbMetadataService
@@ -106,7 +108,8 @@ class MetaDetailsViewModel @Inject constructor(
     private val watchedSeriesStateHolder: com.nuvio.tv.data.local.WatchedSeriesStateHolder,
     val posterOptions: com.nuvio.tv.ui.components.posteroptions.PosterOptionsController,
     private val prefetchSelectionSupplier: com.nuvio.tv.core.stream.PrefetchSelectionSupplier,
-    savedStateHandle: SavedStateHandle
+    savedStateHandle: SavedStateHandle,
+    private val healthStore: AddonHealthStore
 ) : ViewModel() {
     private val itemId: String = savedStateHandle["itemId"] ?: ""
     private val itemType: String = savedStateHandle["itemType"] ?: ""
@@ -1112,6 +1115,13 @@ class MetaDetailsViewModel @Inject constructor(
             "MetaTiming",
             "META_APPLY total_ms=${android.os.SystemClock.elapsedRealtime() - metaLoadStartMs}"
         )
+        viewModelScope.launch {
+            healthStore.record(
+                AddonHealthStore.METADATA_KEY,
+                HealthOutcome.SUCCESS,
+                android.os.SystemClock.elapsedRealtime() - metaLoadStartMs
+            )
+        }
         applyMeta(enriched)
         // Episode ratings and MDBList are independent — launch both without waiting.
         loadEpisodeRatingsAsync(enriched)

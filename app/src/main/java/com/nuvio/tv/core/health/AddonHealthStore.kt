@@ -30,6 +30,8 @@ class AddonHealthStore @Inject constructor(
         private const val FEATURE = "addon_health"
         const val ADDON_PREFIX = "addon:"
         const val RESOLVER_PREFIX = "resolver:"
+        const val METADATA_PREFIX = "metadata:"
+        const val METADATA_KEY = "metadata:pipeline"
 
         fun addonKey(canonicalBaseUrl: String): String = ADDON_PREFIX + canonicalBaseUrl
         fun resolverKey(provider: String): String = RESOLVER_PREFIX + provider
@@ -58,8 +60,13 @@ class AddonHealthStore @Inject constructor(
     val levels: Flow<Map<String, AddonHealthLevel>> = effectiveProfileIdFlow.flatMapLatest { pid ->
         factory.get(pid, FEATURE).data.map { preferences ->
             val now = System.currentTimeMillis()
-            parseRecords(preferences[recordsKey]).mapValues { (_, record) ->
-                AddonHealthModel.deriveLevel(record, now)
+            parseRecords(preferences[recordsKey]).mapValues { (key, record) ->
+                val slow = if (key.startsWith(METADATA_PREFIX)) {
+                    AddonHealthModel.METADATA_SLOW_LATENCY_MS
+                } else {
+                    AddonHealthModel.SLOW_LATENCY_MS
+                }
+                AddonHealthModel.deriveLevel(record, now, slow)
             }
         }
     }

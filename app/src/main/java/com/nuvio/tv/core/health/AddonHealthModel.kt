@@ -30,6 +30,9 @@ object AddonHealthModel {
     const val COOLDOWN_MS = 5 * 60_000L
     const val MAX_SAMPLES = 20
     const val SLOW_LATENCY_MS = 8_000L
+
+    /** Metadata pipeline: a details page slower than this reads DEGRADED. */
+    const val METADATA_SLOW_LATENCY_MS = 4_000L
     const val DEGRADED_EMPTY_RATE = 0.5
 
     fun applySample(record: HealthRecord, sample: HealthSample): HealthRecord {
@@ -51,7 +54,11 @@ object AddonHealthModel {
         return HealthRecord(samples, failures, successes, openUntil)
     }
 
-    fun deriveLevel(record: HealthRecord, nowMs: Long): AddonHealthLevel {
+    fun deriveLevel(
+        record: HealthRecord,
+        nowMs: Long,
+        slowLatencyMs: Long = SLOW_LATENCY_MS
+    ): AddonHealthLevel {
         if (record.samples.isEmpty()) return AddonHealthLevel.UNKNOWN
         if (record.breakerOpenUntilMs > nowMs) return AddonHealthLevel.DOWN
         if (record.breakerOpenUntilMs > 0L &&
@@ -66,7 +73,7 @@ object AddonHealthModel {
         val emptyRate = record.samples.count { it.outcome == HealthOutcome.EMPTY }
             .toDouble() / record.samples.size
         if (emptyRate >= DEGRADED_EMPTY_RATE) return AddonHealthLevel.DEGRADED
-        if (last.latencyMs > SLOW_LATENCY_MS) return AddonHealthLevel.DEGRADED
+        if (last.latencyMs > slowLatencyMs) return AddonHealthLevel.DEGRADED
         return AddonHealthLevel.HEALTHY
     }
 }
