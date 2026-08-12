@@ -4,6 +4,9 @@ import android.content.Context
 import android.util.Log
 import com.nuvio.tv.core.network.NetworkResult
 import com.nuvio.tv.core.network.safeApiCall
+import com.nuvio.tv.core.health.AddonHealthStore
+import com.nuvio.tv.core.health.HealthOutcome
+import com.nuvio.tv.core.util.canonicalizeAddonUrl
 import com.nuvio.tv.data.mapper.toDomain
 import com.nuvio.tv.data.remote.api.AddonApi
 import com.nuvio.tv.data.remote.dto.CatalogResponseDto
@@ -33,7 +36,8 @@ import javax.inject.Singleton
 @Singleton
 class CatalogRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val api: AddonApi
+    private val api: AddonApi,
+    private val healthStore: AddonHealthStore
 ) : CatalogRepository {
     companion object {
         private const val TAG = "CatalogRepository"
@@ -141,8 +145,10 @@ class CatalogRepositoryImpl @Inject constructor(
             "Fetching catalog addonId=$addonId addonName=$addonName type=$type catalogId=$catalogId skip=$skip skipStep=$skipStep supportsSkip=$supportsSkip url=$url"
         )
 
+        val healthT0 = android.os.SystemClock.elapsedRealtime()
         when (val result = safeApiCall(context) { api.getCatalog(url) }) {
             is NetworkResult.Success -> {
+                recordAddonHealth(addonBaseUrl, HealthOutcome.SUCCESS, android.os.SystemClock.elapsedRealtime() - healthT0)
                 val catalogRow = buildCatalogRow(
                     data = result.data,
                     addonBaseUrl = addonBaseUrl,
@@ -181,6 +187,7 @@ class CatalogRepositoryImpl @Inject constructor(
                 }
             }
             is NetworkResult.Error -> {
+                recordAddonHealth(addonBaseUrl, HealthOutcome.FAILURE, android.os.SystemClock.elapsedRealtime() - healthT0)
                 Log.w(
                     TAG,
                     "Catalog fetch failed addonId=$addonId type=$type catalogId=$catalogId code=${result.code} message=${result.message} url=$url"
@@ -192,6 +199,12 @@ class CatalogRepositoryImpl @Inject constructor(
                 }
             }
             NetworkResult.Loading -> { /* Already emitted */ }
+        }
+    }
+
+    private fun recordAddonHealth(baseUrl: String, outcome: HealthOutcome, latencyMs: Long) {
+        ioScope.launch {
+            healthStore.record(AddonHealthStore.addonKey(canonicalizeAddonUrl(baseUrl)), outcome, latencyMs)
         }
     }
 
