@@ -23,6 +23,9 @@ import com.nuvio.tv.domain.model.StreamBehaviorHints
 import com.nuvio.tv.domain.model.enabledAddons
 import com.nuvio.tv.domain.repository.AddonRepository
 import com.nuvio.tv.domain.repository.StreamRepository
+import com.nuvio.tv.core.health.AddonHealthStore
+import com.nuvio.tv.core.health.HealthOutcome
+import com.nuvio.tv.core.util.canonicalizeAddonUrl
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -34,6 +37,9 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withTimeout
 import java.net.URLEncoder
 import javax.inject.Inject
@@ -60,8 +66,35 @@ class StreamRepositoryImpl @Inject constructor(
     private val pluginManager: PluginManager,
     private val tmdbService: TmdbService,
     private val debridStreamPresentation: DebridStreamPresentation,
-    private val localDebridAvailabilityService: LocalDebridAvailabilityService
+    private val localDebridAvailabilityService: LocalDebridAvailabilityService,
+    private val healthStore: AddonHealthStore
 ) : StreamRepository {
+
+    // Detached scope for passive health writes so recording a stream
+    // outcome never adds latency to the fetch or delays the channel close.
+    private val healthScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * Fire-and-forget a passive health sample for one addon stream fetch.
+     * Maps the ADDON_MS outcome vocabulary onto HealthOutcome; cancelled
+     * and any unknown outcome are dropped (an external cap-cancel is not
+     * the addon's fault). Keyed by canonical base URL, matching the store.
+     */
+    private fun recordAddonHealth(baseUrl: String, outcome: String, latencyMs: Long) {
+        val mapped = when (outcome) {
+            "ok", "ok_inline" -> HealthOutcome.SUCCESS
+            "empty" -> HealthOutcome.EMPTY
+            "timeout", "error" -> HealthOutcome.FAILURE
+            else -> return
+        }
+        healthScope.launch {
+            healthStore.record(
+                AddonHealthStore.addonKey(canonicalizeAddonUrl(baseUrl)),
+                mapped,
+                latencyMs
+            )
+        }
+    }
     private enum class StreamFailureKind {
         MISSING,
         REQUEST_FAILED
@@ -199,12 +232,14 @@ class StreamRepositoryImpl @Inject constructor(
                                 detail = e.message ?: context.getString(com.nuvio.tv.R.string.stream_error_detail_addon_request_failed)
                             )
                         } finally {
+                            val addonMs = android.os.SystemClock.elapsedRealtime() - addonT0
                             Log.i(
                                 TAG,
                                 "ADDON_MS name=${addon.displayName} " +
-                                    "ms=${android.os.SystemClock.elapsedRealtime() - addonT0} " +
+                                    "ms=$addonMs " +
                                     "streams=$addonStreamCount outcome=$addonOutcome"
                             )
+                            recordAddonHealth(addon.baseUrl, addonOutcome, addonMs)
                             if (completedJobs.incrementAndGet() >= totalJobs) {
                                 resultChannel.close()
                             }
