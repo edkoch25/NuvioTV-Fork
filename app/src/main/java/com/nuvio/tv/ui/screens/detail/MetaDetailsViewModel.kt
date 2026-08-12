@@ -48,6 +48,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -1123,6 +1124,24 @@ class MetaDetailsViewModel @Inject constructor(
             )
         }
         applyMeta(enriched)
+        // 0.8.4 merge (#3 remote-progress correctness): the local read above can
+        // land before the remote provider (Simkl/Trakt) has finished its initial
+        // sync, seeding an empty progress map and a wrong "Play S1E1" instead of
+        // "Resume". First paint stays fast (above); once remote signals loaded we
+        // re-read, bounded, and refine. updateNextToWatch no-ops when the value is
+        // unchanged, so this is free on the common local-only path.
+        viewModelScope.launch {
+            val cid = _effectiveContentId.value
+            watchProgressRepository.observeRemoteProgressLoaded().first { it }
+            val refreshedProgress = withTimeoutOrNull(150L) {
+                watchProgressRepository.getAllEpisodeProgress(cid).first { it.isNotEmpty() }
+            } ?: watchProgressRepository.getAllEpisodeProgress(cid).first()
+            val refreshedWatched = watchedItemsPreferences
+                .getWatchedEpisodesForContent(cid)
+                .first()
+            val refined = computeNextToWatch(enriched, refreshedProgress, refreshedWatched)
+            updateNextToWatch(refined)
+        }
         // Episode ratings and MDBList are independent — launch both without waiting.
         loadEpisodeRatingsAsync(enriched)
         viewModelScope.launch { loadMDBListRatings(enriched) }
@@ -1920,6 +1939,11 @@ class MetaDetailsViewModel @Inject constructor(
         val meta = _uiState.value.meta ?: return
         val progressMap = _uiState.value.episodeProgressMap
         val watchedEpisodes = _uiState.value.watchedEpisodes
+        // 0.8.4 merge (#3): don't let an observer-driven recompute from empty progress
+        // clobber a good nextToWatch that the applyMetaWithEnrichment refine already set.
+        if (progressMap.isEmpty() && watchedEpisodes.isEmpty() && _uiState.value.nextToWatch != null) {
+            return
+        }
         nextToWatchJob?.cancel()
 
         nextToWatchJob = viewModelScope.launch {
