@@ -6,11 +6,14 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.nuvio.tv.core.profile.ProfileManager
 import com.nuvio.tv.data.local.ProfileDataStoreFactory
+import com.nuvio.tv.data.local.LayoutPreferenceDataStore
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -24,7 +27,8 @@ import javax.inject.Singleton
 @OptIn(ExperimentalCoroutinesApi::class)
 class AddonHealthStore @Inject constructor(
     private val factory: ProfileDataStoreFactory,
-    private val profileManager: ProfileManager
+    private val profileManager: ProfileManager,
+    private val layoutPreferenceDataStore: LayoutPreferenceDataStore
 ) {
     companion object {
         private const val FEATURE = "addon_health"
@@ -57,22 +61,30 @@ class AddonHealthStore @Inject constructor(
     }.distinctUntilChanged()
 
     /** Derived traffic-light levels, keyed as above. Recomputed on every write. */
-    val levels: Flow<Map<String, AddonHealthLevel>> = effectiveProfileIdFlow.flatMapLatest { pid ->
-        factory.get(pid, FEATURE).data.map { preferences ->
-            val now = System.currentTimeMillis()
-            parseRecords(preferences[recordsKey]).mapValues { (key, record) ->
-                val slow = if (key.startsWith(METADATA_PREFIX)) {
-                    AddonHealthModel.METADATA_SLOW_LATENCY_MS
-                } else {
-                    AddonHealthModel.SLOW_LATENCY_MS
+    val levels: Flow<Map<String, AddonHealthLevel>> =
+        layoutPreferenceDataStore.addonHealthEnabled.flatMapLatest { enabled ->
+            if (!enabled) {
+                flowOf(emptyMap())
+            } else {
+                effectiveProfileIdFlow.flatMapLatest { pid ->
+                    factory.get(pid, FEATURE).data.map { preferences ->
+                        val now = System.currentTimeMillis()
+                        parseRecords(preferences[recordsKey]).mapValues { (key, record) ->
+                            val slow = if (key.startsWith(METADATA_PREFIX)) {
+                                AddonHealthModel.METADATA_SLOW_LATENCY_MS
+                            } else {
+                                AddonHealthModel.SLOW_LATENCY_MS
+                            }
+                            AddonHealthModel.deriveLevel(record, now, slow)
+                        }
+                    }
                 }
-                AddonHealthModel.deriveLevel(record, now, slow)
             }
         }
-    }
 
     /** Record one request outcome against [key]. Never throws. */
     suspend fun record(key: String, outcome: HealthOutcome, latencyMs: Long) {
+        if (!layoutPreferenceDataStore.addonHealthEnabled.first()) return
         val sample = HealthSample(
             atMs = System.currentTimeMillis(),
             outcome = outcome,

@@ -499,6 +499,18 @@ fun AdvancedSettingsContent(
                         )
                     }
                 )
+                SettingsToggleRow(
+                    title = "Add-on health indicators",
+                    subtitle = "Show OK/Slow/Down status on add-ons and resolvers. Passive - no background scanning.",
+                    checked = uiState.addonHealthEnabled,
+                    onToggle = {
+                        viewModel.onEvent(
+                            AdvancedSettingsEvent.SetAddonHealthEnabled(
+                                !uiState.addonHealthEnabled
+                            )
+                        )
+                    }
+                )
                 val profileManager = remember {
                     dagger.hilt.android.EntryPointAccessors.fromApplication(
                         context.applicationContext,

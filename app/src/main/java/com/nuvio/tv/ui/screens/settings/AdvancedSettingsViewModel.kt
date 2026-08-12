@@ -17,7 +17,8 @@ data class AdvancedSettingsUiState(
     val fastHorizontalNavigationEnabled: Boolean = false,
     val smoothBringIntoViewEnabled: Boolean = true,
     val composeHighlighterEnabled: Boolean = false,
-    val playbackIssueReportsEnabled: Boolean = false
+    val playbackIssueReportsEnabled: Boolean = false,
+    val addonHealthEnabled: Boolean = true
 )
 
 sealed class AdvancedSettingsEvent {
@@ -25,6 +26,7 @@ sealed class AdvancedSettingsEvent {
     data class SetSmoothBringIntoViewEnabled(val enabled: Boolean) : AdvancedSettingsEvent()
     data class SetComposeHighlighterEnabled(val enabled: Boolean) : AdvancedSettingsEvent()
     data class SetPlaybackIssueReportsEnabled(val enabled: Boolean) : AdvancedSettingsEvent()
+    data class SetAddonHealthEnabled(val enabled: Boolean) : AdvancedSettingsEvent()
 }
 
 @HiltViewModel
@@ -56,6 +58,11 @@ class AdvancedSettingsViewModel @Inject constructor(
                 _uiState.update { it.copy(playbackIssueReportsEnabled = settings.playbackIssueReportsEnabled) }
             }
         }
+        viewModelScope.launch {
+            layoutPreferenceDataStore.addonHealthEnabled.collectLatest { enabled ->
+                _uiState.update { it.copy(addonHealthEnabled = enabled) }
+            }
+        }
     }
 
     fun onEvent(event: AdvancedSettingsEvent) {
@@ -78,6 +85,11 @@ class AdvancedSettingsViewModel @Inject constructor(
             is AdvancedSettingsEvent.SetPlaybackIssueReportsEnabled -> {
                 viewModelScope.launch {
                     playerSettingsDataStore.setPlaybackIssueReportsEnabled(event.enabled)
+                }
+            }
+            is AdvancedSettingsEvent.SetAddonHealthEnabled -> {
+                viewModelScope.launch {
+                    layoutPreferenceDataStore.setAddonHealthEnabled(event.enabled)
                 }
             }
         }
