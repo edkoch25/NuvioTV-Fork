@@ -3,6 +3,8 @@ package com.nuvio.tv.ui.screens.addon
 import com.nuvio.tv.ui.theme.NuvioTheme
 import com.nuvio.tv.core.health.AddonHealthLevel
 import com.nuvio.tv.core.util.canonicalizeAddonUrl
+import com.nuvio.tv.core.debrid.DebridProviders
+import com.nuvio.tv.core.health.AddonHealthStore
 
 import android.graphics.Bitmap
 import androidx.activity.compose.BackHandler
@@ -420,6 +422,49 @@ fun AddonManagerScreen(
                         down = firstAddonToggleFocusRequester
                     }
                 )
+            }
+
+            item {
+                val resolverLevels = uiState.healthByUrl
+                    .filterKeys { it.startsWith(AddonHealthStore.RESOLVER_PREFIX) }
+                if (resolverLevels.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = NuvioTheme.spacing.sm)
+                    ) {
+                        Text(
+                            text = "Debrid",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = NuvioTheme.colors.TextPrimary
+                        )
+                        resolverLevels.forEach { (key, level) ->
+                            val providerId = key.removePrefix(AddonHealthStore.RESOLVER_PREFIX)
+                            val chip = when (level) {
+                                AddonHealthLevel.HEALTHY -> "OK" to NuvioTheme.colors.Success
+                                AddonHealthLevel.DEGRADED -> "Slow" to NuvioTheme.colors.Warning
+                                AddonHealthLevel.DOWN -> "Down" to NuvioTheme.colors.Error
+                                else -> "-" to NuvioTheme.colors.TextTertiary
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.sm),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = DebridProviders.displayName(providerId),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = NuvioTheme.colors.TextSecondary
+                                )
+                                Text(
+                                    text = chip.first,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = chip.second
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             item {
