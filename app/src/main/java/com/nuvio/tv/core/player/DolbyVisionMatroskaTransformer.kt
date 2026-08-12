@@ -108,8 +108,11 @@ internal class DolbyVisionMatroskaTransformer(
         metadataProbeAttempts++
         HevcDvRpuStripper.findRpuNalLengthDelimited(sample, sampleLength, nalUnitLengthFieldLength)?.let { rpu ->
             metadataProbed = true
-            DolbyVisionConversionStats.recordRpuMetadata(
-                DoviBridge.getRpuStaticMetadata(sample, rpu.first, rpu.second)
+            val meta = DoviBridge.getRpuStaticMetadata(sample, rpu.first, rpu.second)
+            DolbyVisionConversionStats.recordRpuMetadata(meta)
+            android.util.Log.i(
+                "DVMetaProbe",
+                "hookA mkv rpuLen=${rpu.second} meta=${meta?.toDiagnosticLine() ?: "null"}"
             )
         }
     }

@@ -416,6 +416,12 @@ private class NativeOptimizedVideoTrackOutput(
             DoviBridge.isAvailable()
         ) {
             metadataProbeAttempts++
+            if (metadataProbeAttempts == 1) {
+                android.util.Log.i(
+                    "DVMetaProbe",
+                    "hookB entered fmt=$nalFormat pendingLen=$pendingLen"
+                )
+            }
             val rpu = if (nalFormat == NalFormat.LENGTH_DELIMITED) {
                 HevcDvRpuStripper.findRpuNalLengthDelimited(pendingBuf, pendingLen, nalLengthFieldLength)
             } else {
@@ -423,8 +429,11 @@ private class NativeOptimizedVideoTrackOutput(
             }
             if (rpu != null) {
                 metadataProbed = true
-                DolbyVisionConversionStats.recordRpuMetadata(
-                    DoviBridge.getRpuStaticMetadata(pendingBuf, rpu.first, rpu.second)
+                val meta = DoviBridge.getRpuStaticMetadata(pendingBuf, rpu.first, rpu.second)
+                DolbyVisionConversionStats.recordRpuMetadata(meta)
+                android.util.Log.i(
+                    "DVMetaProbe",
+                    "hookB fmt=$nalFormat rpuLen=${rpu.second} meta=${meta?.toDiagnosticLine() ?: "null"}"
                 )
             }
         }

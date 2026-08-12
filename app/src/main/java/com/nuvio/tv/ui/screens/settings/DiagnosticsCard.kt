@@ -122,7 +122,12 @@ internal fun LazyListScope.diagnosticsCardItems(
                 DiagnosticRow(stringResource(R.string.diag_label_dv_el_type), dv(elType))
             }
             diagnostics.dvHdrMastering?.let { mastering ->
-                DiagnosticRow(stringResource(R.string.diag_label_dv_hdr_mastering), dv(mastering))
+                // nt17: render the raw value, exempt from the dvEngaged dash. This
+                // row only ever has a value when an RPU was actually read this
+                // playback (stats reset per-playback, so never stale), and the
+                // strip-to-HDR10 case where dvEngaged is false is exactly where
+                // the source's mastering data is most useful to see.
+                DiagnosticRow(stringResource(R.string.diag_label_dv_hdr_mastering), mastering)
             }
             if (diagnostics.dv7RpuDrops > 0) {
                 DiagnosticRow(
