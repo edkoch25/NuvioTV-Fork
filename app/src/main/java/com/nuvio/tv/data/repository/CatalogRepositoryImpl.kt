@@ -7,7 +7,7 @@ import com.nuvio.tv.core.network.safeApiCall
 import com.nuvio.tv.core.health.AddonHealthStore
 import com.nuvio.tv.core.health.HealthOutcome
 import com.nuvio.tv.core.util.canonicalizeAddonUrl
-import com.nuvio.tv.data.mapper.toDomain
+import com.nuvio.tv.data.mapper.toDomainOrNull
 import com.nuvio.tv.data.remote.api.AddonApi
 import com.nuvio.tv.data.remote.dto.CatalogResponseDto
 import com.nuvio.tv.domain.model.CatalogRow
@@ -224,9 +224,13 @@ class CatalogRepositoryImpl @Inject constructor(
         // Main review F17: on duplicate IDs keep the FIRST (catalogue order is
         // meaningful) but backfill visual/metadata fields the first copy lacks from
         // the dropped duplicate, so a richer poster/background/description is not lost.
-        val merged = LinkedHashMap<String, MetaPreview>(data.metas.size)
+        // Build 1 / 0.8.4 merge: metas may contain null elements and entries with
+        // blank id/name (upstream malformed-entry guard). Skip those; toDomainOrNull
+        // returns null for a blank id or name.
+        val rawItemCount = data.metas.size
+        val merged = LinkedHashMap<String, MetaPreview>(rawItemCount)
         data.metas.forEach { dto ->
-            val item = dto.toDomain(type, addonBaseUrl)
+            val item = dto?.toDomainOrNull(type, addonBaseUrl) ?: return@forEach
             val prior = merged[item.id]
             merged[item.id] = if (prior == null) {
                 item
@@ -254,11 +258,11 @@ class CatalogRepositoryImpl @Inject constructor(
             rawType = type,
             items = items,
             isLoading = false,
-            hasMore = supportsSkip && items.isNotEmpty(),
+            hasMore = supportsSkip && rawItemCount > 0,
             currentPage = if (skipStep > 0) skip / skipStep else 0,
             supportsSkip = supportsSkip,
             skipStep = skipStep,
-            nextSkip = if (supportsSkip && items.isNotEmpty()) skip + items.size else skip,
+            nextSkip = if (supportsSkip && rawItemCount > 0) skip + rawItemCount else skip,
             extraArgs = extraArgs
         )
     }
