@@ -416,22 +416,28 @@ private class NativeOptimizedVideoTrackOutput(
             DoviBridge.isAvailable()
         ) {
             metadataProbeAttempts++
+            // The extractor's declared nalFormat is not reliable for the bytes
+            // that actually reach this track output: an Mp4Extractor stream can
+            // arrive Annex-B (a leading 00 00 (00) 01 start code) rather than
+            // length-delimited, so trusting nalFormat ran the wrong walker and
+            // found no RPU. Detect the framing from the sample itself (nt20).
+            val annexB = pendingLen >= 4 &&
+                pendingBuf[0].toInt() == 0 && pendingBuf[1].toInt() == 0 &&
+                (pendingBuf[2].toInt() == 1 ||
+                    (pendingBuf[2].toInt() == 0 && pendingBuf[3].toInt() == 1))
             if (metadataProbeAttempts == 1) {
-                val diag = if (nalFormat == NalFormat.LENGTH_DELIMITED) {
-                    "nlf=$nalLengthFieldLength nalTypes=" +
+                val diag = if (annexB) "framing=annexB" else
+                    "framing=LD nlf=$nalLengthFieldLength nalTypes=" +
                         HevcDvRpuStripper.listNalTypesLengthDelimited(pendingBuf, pendingLen, nalLengthFieldLength)
-                } else {
-                    "annexB"
-                }
                 android.util.Log.i(
                     "DVMetaProbe",
                     "hookB entered fmt=$nalFormat pendingLen=$pendingLen $diag"
                 )
             }
-            val rpu = if (nalFormat == NalFormat.LENGTH_DELIMITED) {
-                HevcDvRpuStripper.findRpuNalLengthDelimited(pendingBuf, pendingLen, nalLengthFieldLength)
-            } else {
+            val rpu = if (annexB) {
                 HevcDvRpuStripper.findRpuNalAnnexB(pendingBuf, pendingLen)
+            } else {
+                HevcDvRpuStripper.findRpuNalLengthDelimited(pendingBuf, pendingLen, nalLengthFieldLength)
             }
             if (rpu != null) {
                 metadataProbed = true
