@@ -40,6 +40,10 @@ internal class DolbyVisionMatroskaTransformer(
     // correctly. Null until first resolved; empty-checked before use.
     private var cachedHdr10SeiNals: List<ByteArray>? = null
 
+    // nt27: log the strip-path injection outcome once per stream (inject vs skip)
+    // so on-device testing can tell "injected" from "skipped as already-present".
+    private var injectOutcomeLogged = false
+
     // Reused across samples; grows to the largest frame once.
     private val scratch = ExposedByteArrayOutputStream(64 * 1024)
 
@@ -345,7 +349,10 @@ internal class DolbyVisionMatroskaTransformer(
         nalLengthFieldLength: Int
     ): ByteArray? {
         if (!injectHdr10Sei) return null
-        if (profile != 7 && profile != 8) return null
+        if (profile != 7 && profile != 8) {
+            logInjectOutcomeOnce("skipped: profile $profile not P7/P8.1")
+            return null
+        }
         val nals = cachedHdr10SeiNals ?: run {
             val meta = DolbyVisionConversionStats.getLastRpuMetadata() ?: return null
             val built = Hdr10SeiInjector.buildSeiNals(meta)
@@ -354,11 +361,20 @@ internal class DolbyVisionMatroskaTransformer(
             built
         }
         if (Hdr10SeiInjector.hasHdr10StaticSei(data, len, annexB = false, nalLengthFieldLength = nalLengthFieldLength)) {
+            logInjectOutcomeOnce("skipped: base already carries HDR10 SEI")
             return null
         }
         val injected = Hdr10SeiInjector.injectLengthDelimited(data, len, nalLengthFieldLength, nals)
+        logInjectOutcomeOnce("injected MDCV+CLLI (+${injected.size - len} bytes, ${nals.size} NAL(s))")
         lastTransformedLength = injected.size
         return injected
+    }
+
+    private fun logInjectOutcomeOnce(msg: String) {
+        if (!injectOutcomeLogged) {
+            injectOutcomeLogged = true
+            android.util.Log.i("DVInject", "MKV strip: $msg")
+        }
     }
 
     // ── Conversion + NAL helpers ──
