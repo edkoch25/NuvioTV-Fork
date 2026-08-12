@@ -12,6 +12,10 @@ import com.nuvio.tv.domain.model.AddonResource
 import com.nuvio.tv.domain.model.enabledAddons
 import com.nuvio.tv.domain.repository.AddonRepository
 import com.nuvio.tv.domain.repository.MetaRepository
+import com.nuvio.tv.core.health.AddonHealthStore
+import com.nuvio.tv.core.health.HealthOutcome
+import com.nuvio.tv.core.util.canonicalizeAddonUrl
+import kotlinx.coroutines.launch
 import com.nuvio.tv.R
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -33,7 +37,8 @@ import javax.inject.Singleton
 class MetaRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val api: AddonApi,
-    private val addonRepository: AddonRepository
+    private val addonRepository: AddonRepository,
+    private val healthStore: AddonHealthStore
 ) : MetaRepository {
     companion object {
         private const val TAG = "MetaRepository"
@@ -162,6 +167,7 @@ class MetaRepositoryImpl @Inject constructor(
 
         emit(NetworkResult.Loading)
 
+        val healthT0 = android.os.SystemClock.elapsedRealtime()
         val url = buildMetaUrl(addonBaseUrl, type, id)
         val deferred = inFlightMeta.getOrPut(cacheKey) {
             repositoryScope.async {
@@ -192,9 +198,12 @@ class MetaRepositoryImpl @Inject constructor(
         }
 
         val meta = deferred.await()
+        val healthMs = android.os.SystemClock.elapsedRealtime() - healthT0
         if (meta != null) {
+            recordAddonHealth(addonBaseUrl, HealthOutcome.SUCCESS, healthMs)
             emit(NetworkResult.Success(meta))
         } else {
+            recordAddonHealth(addonBaseUrl, HealthOutcome.FAILURE, healthMs)
             emit(NetworkResult.Error(context.getString(R.string.error_meta_not_found)))
         }
     }
@@ -509,6 +518,12 @@ class MetaRepositoryImpl @Inject constructor(
     private fun addonMetaCacheKey(addonBaseUrl: String, type: String, id: String): String {
         val (basePath, baseQuery) = splitAddonBaseUrl(addonBaseUrl)
         return "$basePath$baseQuery|$type:$id"
+    }
+
+    private fun recordAddonHealth(baseUrl: String, outcome: HealthOutcome, latencyMs: Long) {
+        repositoryScope.launch {
+            healthStore.record(AddonHealthStore.addonKey(canonicalizeAddonUrl(baseUrl)), outcome, latencyMs)
+        }
     }
 
     private fun buildMetaUrl(baseUrl: String, type: String, id: String): String {
