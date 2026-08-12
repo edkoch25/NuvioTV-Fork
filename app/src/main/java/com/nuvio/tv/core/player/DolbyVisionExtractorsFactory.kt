@@ -2,6 +2,7 @@ package com.nuvio.tv.core.player
 
 import android.net.Uri
 import androidx.media3.common.C
+import androidx.media3.common.ColorInfo
 import androidx.media3.common.DataReader
 import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
@@ -71,7 +72,7 @@ internal class DolbyVisionExtractorsFactory(
         // shouldTransform() returns false, so non-DV HEVC samples stream through
         // the stock write path at no extra cost.
         if (extractor.javaClass.name == STOCK_MATROSKA_EXTRACTOR) {
-            return DvMatroskaExtractor(
+            val mkv = DvMatroskaExtractor(
                 DefaultSubtitleParserFactory(),
                 /* flags= */ 0,
                 DolbyVisionMatroskaTransformer(
@@ -81,6 +82,11 @@ internal class DolbyVisionExtractorsFactory(
                     injectHdr10Sei = injectHdr10Sei,
                 )
             )
+            // nt26: on the MKV strip path the base layer is HDR10 but its Format
+            // carries no colorInfo; wrap so the video Format is tagged HDR10 and
+            // the display switches to HDR mode. Convert path is untouched (it
+            // outputs DV, whose own decoder path signals HDR).
+            return if (stripDvRpu && !config.active) HdrColorSignalingExtractor(mkv) else mkv
         }
         if (!config.active && !stripDvRpu && !stripHdr10PlusSei) return extractor
         val nalFormat = nalFormatFor(extractor) ?: return extractor
@@ -234,6 +240,83 @@ internal data class DolbyVisionConversionConfig(
     }
 }
 
+// nt26: fixed HDR10 (BT.2020 / limited-range / PQ) colour signalling. Applied to
+// the stripped base layer's Format so the Android display framework switches the
+// sink into HDR mode. The stripped stream is genuine HDR10 in-band (the SPS VUI
+// is preserved by the strip), but Format.colorInfo is usually null on DV
+// containers, and some sinks (e.g. Amlogic AM9 Pro) act on the framework's
+// colorInfo, not the in-band SPS - leaving the display in SDR (PQ shown as SDR
+// reads as a purple tint) until this is set.
+@UnstableApi
+private fun hdr10ColorInfo(): ColorInfo = ColorInfo.Builder()
+    .setColorSpace(C.COLOR_SPACE_BT2020)
+    .setColorRange(C.COLOR_RANGE_LIMITED)
+    .setColorTransfer(C.COLOR_TRANSFER_ST2084)
+    .build()
+
+/** DV profile from a codec string (dvhe/dvav/dvh1/dva1.NN.*), or null. */
+private fun dvProfileOf(codecs: String?): Int? {
+    if (codecs.isNullOrBlank()) return null
+    val m = Regex("^(?:dvhe|dvav|dvh1|dva1)\\.(\\d+)\\.").find(codecs.trim().lowercase()) ?: return null
+    return m.groupValues[1].toIntOrNull()
+}
+
+/**
+ * nt26: wraps the vendored MKV extractor on the strip path to add HDR10
+ * colorInfo to the video Format. The MKV path rewrites samples via the
+ * transformer but never touches the Format, so - unlike the native path's
+ * NativeOptimizedVideoTrackOutput.format() - it needs this thin output wrapper.
+ * P7/P8.1 only; leaves an already-HDR (ST2084) Format untouched.
+ */
+@UnstableApi
+private class HdrColorSignalingExtractor(
+    private val delegate: Extractor
+) : Extractor {
+    override fun init(output: ExtractorOutput) =
+        delegate.init(HdrColorSignalingExtractorOutput(output))
+
+    @Throws(IOException::class)
+    override fun sniff(input: ExtractorInput): Boolean = delegate.sniff(input)
+
+    @Throws(IOException::class)
+    override fun read(input: ExtractorInput, seekPosition: PositionHolder): Int =
+        delegate.read(input, seekPosition)
+
+    override fun seek(position: Long, timeUs: Long) = delegate.seek(position, timeUs)
+    override fun release() = delegate.release()
+    override fun getUnderlyingImplementation(): Extractor = delegate.underlyingImplementation
+}
+
+@UnstableApi
+private class HdrColorSignalingExtractorOutput(
+    private val delegate: ExtractorOutput
+) : ExtractorOutput {
+    override fun track(id: Int, type: Int): TrackOutput {
+        val track = delegate.track(id, type)
+        return if (type == C.TRACK_TYPE_VIDEO) HdrColorSignalingTrackOutput(track) else track
+    }
+
+    override fun endTracks() = delegate.endTracks()
+    override fun seekMap(seekMap: SeekMap) = delegate.seekMap(seekMap)
+}
+
+@UnstableApi
+private class HdrColorSignalingTrackOutput(
+    private val delegate: TrackOutput
+) : TrackOutput by delegate {
+    override fun format(format: Format) {
+        val profile = dvProfileOf(format.codecs)
+        val out = if ((profile == 7 || profile == 8) &&
+            format.colorInfo?.colorTransfer != C.COLOR_TRANSFER_ST2084
+        ) {
+            format.buildUpon().setColorInfo(hdr10ColorInfo()).build()
+        } else {
+            format
+        }
+        delegate.format(out)
+    }
+}
+
 /** Wraps an [Extractor] to inject a DV-rewriting [ExtractorOutput]. */
 @UnstableApi
 private class DolbyVisionExtractor(
@@ -348,6 +431,17 @@ private class NativeOptimizedVideoTrackOutput(
         }
         if (stripDvRpu && strippedCodecs != null) {
             outFormat = outFormat.buildUpon().setSampleMimeType(MimeTypes.VIDEO_H265).build()
+            // nt26: the stripped base layer is HDR10, but the container/DV Format
+            // rarely carries colorInfo, so on some sinks (e.g. Amlogic AM9 Pro)
+            // the Android display framework never learns the content is HDR and
+            // leaves the display in SDR - PQ shown as SDR reads as a purple tint.
+            // Populate colorInfo so the framework drives the HDR mode switch.
+            // P7/P8.1 only (P5's base is IPT-PQ, not BT.2020).
+            if ((profile == 7 || profile == 8) &&
+                outFormat.colorInfo?.colorTransfer != C.COLOR_TRANSFER_ST2084
+            ) {
+                outFormat = outFormat.buildUpon().setColorInfo(hdr10ColorInfo()).build()
+            }
         }
 
         val rewriteSamples = converting && !(profile == 5 && !config.convertDv5Rpu)
