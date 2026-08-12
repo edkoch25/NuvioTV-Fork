@@ -492,6 +492,14 @@ class PlayerViewModel @Inject constructor(
             rows += StatsRow("DV", text, dot)
         }
 
+        // nt18: DV source mastering metadata (static per stream), read from the
+        // RPU. Gated on its own value rather than the DV-conversion line above,
+        // so it also appears on strip/HDR10 paths where no source-profile line is
+        // emitted. Informational only — no health dot.
+        dvDiag.dvHdrMastering?.takeIf { it.isNotBlank() }?.let { mastering ->
+            rows += StatsRow("DV HDR", mastering, StatsDot.NONE)
+        }
+
         hud.videoDecoderName?.let { rows += StatsRow("Decoder", it) }
 
         // Under tunnelling the decoder's output goes straight to the display over a
