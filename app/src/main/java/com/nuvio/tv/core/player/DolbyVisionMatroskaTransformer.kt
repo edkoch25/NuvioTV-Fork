@@ -86,10 +86,32 @@ internal class DolbyVisionMatroskaTransformer(
     // the content class that uses it -- P8 hybrids with bare RPUs -- has no
     // enhancement layer to type.)
     private var elTypeProbed = false
+    // Item 2: once-per-stream RPU static-metadata probe state (diagnostics only).
+    private var metadataProbed = false
+    private var metadataProbeAttempts = 0
 
     private fun probeElType(sample: ByteArray, offset: Int, nalSize: Int) {
         val code = DoviBridge.detectRpuElType(sample, offset, nalSize)
         DolbyVisionConversionStats.recordElType(code)
+    }
+
+    /**
+     * Item 2: reads the RPU's static HDR metadata once per stream for
+     * Diagnostics. Called from the top of [transformHevcSample] so it covers
+     * both the strip (non-DV sink) and convert paths. Best-effort and
+     * read-only; attempt-bounded so a stream whose RPU never rides in-band
+     * (e.g. dual-track BlockAdditional, not covered here) can't scan forever.
+     */
+    private fun probeRpuMetadata(sample: ByteArray, sampleLength: Int, nalUnitLengthFieldLength: Int) {
+        if (metadataProbed || metadataProbeAttempts >= METADATA_PROBE_ATTEMPT_LIMIT) return
+        if (!DoviBridge.isAvailable()) return
+        metadataProbeAttempts++
+        HevcDvRpuStripper.findRpuNalLengthDelimited(sample, sampleLength, nalUnitLengthFieldLength)?.let { rpu ->
+            metadataProbed = true
+            DolbyVisionConversionStats.recordRpuMetadata(
+                DoviBridge.getRpuStaticMetadata(sample, rpu.first, rpu.second)
+            )
+        }
     }
 
     override fun onDolbyVisionBlockAdditionalData(
@@ -184,6 +206,8 @@ internal class DolbyVisionMatroskaTransformer(
         val profile = resolveProfile(null, dolbyVisionConfigBytes)
 
         lastTransformedLength = sampleLength
+
+        probeRpuMetadata(sample, sampleLength, nalUnitLengthFieldLength)
 
         if (stripRpuOnly) {
             if (profile == 5) {
@@ -499,6 +523,8 @@ internal class DolbyVisionMatroskaTransformer(
         // NALs on FraMeSToR-class UHD remuxes -- probe-verified 05 Jul 2026).
         const val NAL_TYPE_UNSPEC63 = 63
         const val DV5_DETECTION_SAMPLE_LIMIT = 15
+        // Item 2: bound the diagnostics RPU probe (see probeRpuMetadata).
+        const val METADATA_PROBE_ATTEMPT_LIMIT = 30
         const val TAG = "DolbyVisionMkvXform"
 
         // DV7 review F5: consecutive conversion failures before per-frame

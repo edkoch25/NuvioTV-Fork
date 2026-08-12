@@ -514,6 +514,69 @@ Java_com_nuvio_tv_core_player_DoviBridge_nativeDetectRpuElType(
 #endif
 }
 
+extern "C" JNIEXPORT jintArray JNICALL
+Java_com_nuvio_tv_core_player_DoviBridge_nativeGetRpuStaticMetadata(
+        JNIEnv* env,
+        jclass /* clazz */,
+        jbyteArray sample,
+        jint offset,
+        jint length) {
+    // Item 2 (RPU-informed diagnostics): reads the DV RPU's static HDR mastering
+    // metadata via the bundled libdovi 3.3.2 readers (no library bump) and returns
+    //   int[6] = { source_min_pq, source_max_pq,
+    //              L6 min_display_mastering_luminance, L6 max_display_mastering_luminance,
+    //              L6 max_content_light_level (MaxCLL), L6 max_frame_average_light_level (MaxFALL) }
+    // Any field absent from the RPU is -1 (L6 is a nullable block; source_*_pq are
+    // always present when vdr_dm_data exists). Returns null when the RPU carries no
+    // DM metadata, on parse failure, or in a stub build. Intended to run once per
+    // stream on the first RPU, mirroring nativeDetectRpuElType.
+#if DOVI_REAL_LINKED
+    if (sample == nullptr || offset < 0 || length <= 0) return nullptr;
+    const jsize arrLen = env->GetArrayLength(sample);
+    if (offset > arrLen - length) return nullptr;
+
+    std::vector<uint8_t> input(static_cast<size_t>(length));
+    env->GetByteArrayRegion(sample, offset, length, reinterpret_cast<jbyte*>(input.data()));
+
+    std::string parse_error;
+    DoviRpuOpaque* rpu = dovi_parse_any_rpu(input, &parse_error);
+    if (rpu == nullptr) return nullptr;
+
+    const DoviVdrDmData* dm = dovi_rpu_get_vdr_dm_data(rpu);
+    if (dm == nullptr) {
+        dovi_rpu_free(rpu);
+        return nullptr;
+    }
+
+    jint values[6];
+    values[0] = static_cast<jint>(dm->source_min_pq);
+    values[1] = static_cast<jint>(dm->source_max_pq);
+    const DoviExtMetadataBlockLevel6* l6 = dm->dm_data.level6;
+    if (l6 != nullptr) {
+        values[2] = static_cast<jint>(l6->min_display_mastering_luminance);
+        values[3] = static_cast<jint>(l6->max_display_mastering_luminance);
+        values[4] = static_cast<jint>(l6->max_content_light_level);
+        values[5] = static_cast<jint>(l6->max_frame_average_light_level);
+    } else {
+        values[2] = -1;
+        values[3] = -1;
+        values[4] = -1;
+        values[5] = -1;
+    }
+
+    dovi_rpu_free_vdr_dm_data(dm);
+    dovi_rpu_free(rpu);
+
+    jintArray out = env->NewIntArray(6);
+    if (out == nullptr) return nullptr;
+    env->SetIntArrayRegion(out, 0, 6, values);
+    return out;
+#else
+    (void) env; (void) sample; (void) offset; (void) length;
+    return nullptr;
+#endif
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_com_nuvio_tv_core_player_DoviBridge_nativeProcessVideoSample(
     JNIEnv* env,

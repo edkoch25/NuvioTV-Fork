@@ -121,6 +121,9 @@ internal fun LazyListScope.diagnosticsCardItems(
             diagnostics.dvElType?.let { elType ->
                 DiagnosticRow(stringResource(R.string.diag_label_dv_el_type), dv(elType))
             }
+            diagnostics.dvHdrMastering?.let { mastering ->
+                DiagnosticRow(stringResource(R.string.diag_label_dv_hdr_mastering), dv(mastering))
+            }
             if (diagnostics.dv7RpuDrops > 0) {
                 DiagnosticRow(
                     stringResource(R.string.diag_label_dv_rpu_drops),

@@ -3418,6 +3418,7 @@ private fun PlayerRuntimeController.recordFirstFrameDiagnostics(
             else -> null
         },
         dv7RpuDrops = DolbyVisionConversionStats.getRpuDropCount().toInt(),
+        dvHdrMastering = DolbyVisionConversionStats.getLastRpuMetadata()?.toDiagnosticLine(),
         videoResolution = if (currentVideoTrackWidth > 0 && currentVideoTrackHeight > 0)
             "${currentVideoTrackWidth}x${currentVideoTrackHeight}" else null,
         videoCodec = friendlyVideoCodecName(currentVideoTrackMimeType, currentVideoTrackCodecs),

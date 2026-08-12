@@ -788,6 +788,7 @@
     <string name="audio_dv7_preserve_mapping_sub">Requests mapping preservation, but the bundled libdovi C API cannot deliver it: playback falls back to the standard 8.1 conversion (mapping not preserved). A one-time DV7_NATIVE warning is logged.</string>
     <string name="diag_value_not_advertised">Not advertised (native playback may still work)</string>
     <string name="diag_label_dv_el_type">DV7 EL Type</string>
+    <string name="diag_label_dv_hdr_mastering">DV HDR Mastering</string>
     <string name="diag_label_dv_rpu_drops">DV RPU Drops</string>
     <string name="dv7_libdovi_mode_caption" translatable="false">Conversion mode (auto-selected, do not change unless instructed). Pick one to force it; None uses auto. Active only when DV7 Handling is Convert to DV8.1.</string>
     <string name="dv7_libdovi_mode_row_title" translatable="false">Conversion mode</string>

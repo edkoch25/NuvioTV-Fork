@@ -168,6 +168,11 @@ object DoviBridge {
             )
         }
 
+        // Item 2: exercise the RPU metadata reader once at startup so a JNI
+        // linkage error surfaces here rather than on first DV playback. A null
+        // result is expected — the synthetic payload carries no DM metadata.
+        runCatching { getRpuStaticMetadata(payload, 0, payload.size) }
+
         cachedSelfTestResult = result
         Log.i(
             TAG,
@@ -229,6 +234,74 @@ object DoviBridge {
         return runCatching { nativeDetectRpuElType(sample, offset, len) }
             .onFailure { Log.w(TAG, "EL-type detection failed: ${it.message}") }
             .getOrDefault(-2)
+    }
+
+    /**
+     * Item 2 (RPU-informed diagnostics): the DV RPU's static HDR mastering
+     * metadata. Fields absent from the RPU are null (L6 is optional; the
+     * source_*_pq pair is always present when DM metadata exists). Values are
+     * raw as libdovi reports them: source_*_pq are 12-bit PQ codes; the L6
+     * luminance and light-level values follow the ST2086/CTA-861.3 conventions.
+     */
+    data class RpuStaticMetadata(
+        val sourceMinPq: Int,
+        val sourceMaxPq: Int,
+        val l6MinMasteringLuminance: Int?,
+        val l6MaxMasteringLuminance: Int?,
+        val maxCll: Int?,
+        val maxFall: Int?
+    ) {
+        /**
+         * A one-line human-readable summary for the Diagnostics card. MaxCLL /
+         * MaxFALL are shown as libdovi reports them (nits); the mastering-display
+         * peak is derived from [sourceMaxPq] via the ST 2084 (PQ) EOTF, which is
+         * always available.
+         */
+        fun toDiagnosticLine(): String {
+            val parts = ArrayList<String>(3)
+            maxCll?.let { parts += "MaxCLL $it" }
+            maxFall?.let { parts += "MaxFALL $it" }
+            parts += "MDL peak ~${pqCodeToNits(sourceMaxPq)} nits"
+            return parts.joinToString(" · ")
+        }
+
+        /** SMPTE ST 2084 (PQ) EOTF applied to a 12-bit RPU code value. */
+        private fun pqCodeToNits(pq12: Int): Int {
+            val e = pq12.coerceIn(0, 4095).toDouble() / 4095.0
+            val m1 = 0.1593017578125
+            val m2 = 78.84375
+            val c1 = 0.8359375
+            val c2 = 18.8515625
+            val c3 = 18.6875
+            val ep = Math.pow(e, 1.0 / m2)
+            val num = (ep - c1).coerceAtLeast(0.0)
+            val den = c2 - c3 * ep
+            val l = if (den <= 0.0) 0.0 else Math.pow(num / den, 1.0 / m1)
+            return Math.round(l * 10000.0).toInt()
+        }
+    }
+
+    /**
+     * Reads [RpuStaticMetadata] from an RPU NAL via the bundled libdovi 3.3.2
+     * readers (no library bump). Returns null on a stub build, when the bridge
+     * is unavailable, on parse failure, or when the RPU carries no DM metadata.
+     * Intended to run once per stream on the first RPU, like [detectRpuElType].
+     */
+    fun getRpuStaticMetadata(sample: ByteArray, offset: Int, len: Int): RpuStaticMetadata? {
+        if (!isAvailable() || len <= 0) return null
+        val v = runCatching { nativeGetRpuStaticMetadata(sample, offset, len) }
+            .onFailure { Log.w(TAG, "RPU metadata read failed: ${it.message}") }
+            .getOrNull() ?: return null
+        if (v.size < 6) return null
+        fun opt(i: Int): Int? = v[i].takeIf { it >= 0 }
+        return RpuStaticMetadata(
+            sourceMinPq = v[0],
+            sourceMaxPq = v[1],
+            l6MinMasteringLuminance = opt(2),
+            l6MaxMasteringLuminance = opt(3),
+            maxCll = opt(4),
+            maxFall = opt(5)
+        )
     }
 
     fun convertDv7RpuToDv81NonAllocating(
@@ -343,6 +416,14 @@ object DoviBridge {
 
     // DV7 F3: FEL/MEL detection.
     private external fun nativeDetectRpuElType(sample: ByteArray, offset: Int, length: Int): Int
+
+    // Item 2: RPU static HDR metadata read (MDL + MaxCLL/MaxFALL). Returns
+    // int[6] or null; see [getRpuStaticMetadata].
+    private external fun nativeGetRpuStaticMetadata(
+        sample: ByteArray,
+        offset: Int,
+        length: Int
+    ): IntArray?
 
     @JvmStatic
     private external fun nativeConvertDv7RpuToDv81NonAllocating(

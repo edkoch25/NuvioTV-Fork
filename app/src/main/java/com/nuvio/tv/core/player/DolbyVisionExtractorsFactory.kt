@@ -116,6 +116,8 @@ internal object DolbyVisionConversionStats {
     @Volatile private var lastConversionMode: Int? = null
     // DV7 F3: EL type of the current stream (DoviBridge.EL_TYPE_* / -1 / -2).
     @Volatile private var lastElType: Int? = null
+    // Item 2: static HDR metadata read from the current stream's first RPU.
+    @Volatile private var lastRpuMetadata: DoviBridge.RpuStaticMetadata? = null
 
     fun reset() {
         codecStringRewriteCount.set(0)
@@ -123,6 +125,7 @@ internal object DolbyVisionConversionStats {
         lastSourceProfile = null
         lastConversionMode = null
         lastElType = null
+        lastRpuMetadata = null
     }
 
     fun recordElType(code: Int) {
@@ -130,6 +133,12 @@ internal object DolbyVisionConversionStats {
     }
 
     fun getLastElType(): Int? = lastElType
+
+    fun recordRpuMetadata(metadata: DoviBridge.RpuStaticMetadata?) {
+        if (metadata != null) lastRpuMetadata = metadata
+    }
+
+    fun getLastRpuMetadata(): DoviBridge.RpuStaticMetadata? = lastRpuMetadata
 
     fun recordRpuDrop() {
         rpuDropCount.incrementAndGet()
@@ -300,6 +309,9 @@ private class NativeOptimizedVideoTrackOutput(
     private var profile: Int? = null
     private var codecs: String? = null
     private var nalLengthFieldLength = 4
+    // Item 2: once-per-stream RPU static-metadata probe state (diagnostics only).
+    private var metadataProbed = false
+    private var metadataProbeAttempts = 0
 
     private fun ensurePendingCapacity(extra: Int) {
         val need = pendingLen + extra
@@ -396,6 +408,27 @@ private class NativeOptimizedVideoTrackOutput(
             return
         }
 
+        // Item 2: read the RPU's static HDR metadata once per stream for
+        // Diagnostics. Covers MP4/fMP4/TS on both the convert and strip paths
+        // (both reach here with shouldProcess). Best-effort and read-only — it
+        // never alters the sample or the output below.
+        if (!metadataProbed && metadataProbeAttempts < METADATA_PROBE_ATTEMPT_LIMIT &&
+            DoviBridge.isAvailable()
+        ) {
+            metadataProbeAttempts++
+            val rpu = if (nalFormat == NalFormat.LENGTH_DELIMITED) {
+                HevcDvRpuStripper.findRpuNalLengthDelimited(pendingBuf, pendingLen, nalLengthFieldLength)
+            } else {
+                HevcDvRpuStripper.findRpuNalAnnexB(pendingBuf, pendingLen)
+            }
+            if (rpu != null) {
+                metadataProbed = true
+                DolbyVisionConversionStats.recordRpuMetadata(
+                    DoviBridge.getRpuStaticMetadata(pendingBuf, rpu.first, rpu.second)
+                )
+            }
+        }
+
         val carrySize = offset.coerceIn(0, pendingLen)
         val sampleEnd = pendingLen - carrySize
 
@@ -430,6 +463,10 @@ private class NativeOptimizedVideoTrackOutput(
     }
 
     private companion object {
+        // Item 2: bound the diagnostics RPU probe so a mis-signalled stream that
+        // never yields an RPU can't walk NALs on every sample indefinitely.
+        const val METADATA_PROBE_ATTEMPT_LIMIT = 30
+
         fun parseDvProfile(codecs: String?): Int? {
             if (codecs.isNullOrBlank()) return null
             val m = Regex("^(?:dvhe|dvav|dvh1|dva1)\\.(\\d+)\\.")

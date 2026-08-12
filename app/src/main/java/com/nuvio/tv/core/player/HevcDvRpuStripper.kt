@@ -116,6 +116,58 @@ internal object HevcDvRpuStripper {
         }
         return found
     }
+
+    /**
+     * Item 2: locates the first DV RPU NAL (HEVC type 62) in a length-delimited
+     * (MP4/fMP4/MKV) sample and returns (nalOffset, nalSize) pointing at the NAL
+     * *including* its 2-byte header — the exact slice
+     * [DoviBridge.getRpuStaticMetadata] / [DoviBridge.detectRpuElType] expect.
+     * Returns null when no RPU NAL is present. Read-only; does not mutate.
+     */
+    fun findRpuNalLengthDelimited(
+        sample: ByteArray,
+        sampleLen: Int,
+        nalLengthFieldLength: Int
+    ): Pair<Int, Int>? {
+        if (nalLengthFieldLength !in 1..4) return null
+        var pos = 0
+        while (pos + nalLengthFieldLength <= sampleLen) {
+            val nalSize = readLengthField(sample, pos, nalLengthFieldLength)
+            val nalStart = pos + nalLengthFieldLength
+            if (nalSize <= 0 || nalStart + nalSize > sampleLen) return null
+            val nalType = (sample[nalStart].toInt() ushr 1) and 0x3F
+            if (nalType == NAL_TYPE_DV_RPU) return nalStart to nalSize
+            pos = nalStart + nalSize
+        }
+        return null
+    }
+
+    /**
+     * Annex-B (TS/raw HEVC) counterpart of [findRpuNalLengthDelimited]. Returns
+     * (nalOffset, nalSize) of the first DV RPU NAL payload (excluding the start
+     * code, including the 2-byte NAL header), or null when none is present.
+     */
+    fun findRpuNalAnnexB(
+        sample: ByteArray,
+        sampleLen: Int
+    ): Pair<Int, Int>? {
+        var scan = 0
+        while (scan < sampleLen) {
+            val startCode = findStartCode(sample, scan, sampleLen)
+            if (startCode < 0) break
+            val scLen = startCodeLength(sample, startCode, sampleLen)
+            val nalBegin = startCode + scLen
+            val nextStartCode = findStartCode(sample, nalBegin + 2, sampleLen)
+            val nalEnd = if (nextStartCode < 0) sampleLen else nextStartCode
+            if (nalBegin < nalEnd) {
+                val nalType = (sample[nalBegin].toInt() ushr 1) and 0x3F
+                if (nalType == NAL_TYPE_DV_RPU) return nalBegin to (nalEnd - nalBegin)
+            }
+            scan = nalEnd
+        }
+        return null
+    }
+
     /**
      * Rewrites a length-delimited (MP4/fMP4) sample, removing any NAL unit
      * whose type is 62 (DV RPU). Returns the rewritten bytes, or null if
