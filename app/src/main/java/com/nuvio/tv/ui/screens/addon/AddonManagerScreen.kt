@@ -553,7 +553,7 @@ fun AddonManagerScreen(
                         onEnabledChange = { enabled -> viewModel.setAddonEnabled(addon.baseUrl, enabled) },
                         isReadOnly = viewModel.isReadOnly,
                         showReorder = !isEssential,
-                        healthLevel = uiState.healthByUrl[canonicalizeAddonUrl(addon.baseUrl)],
+                        healthLevel = uiState.healthByUrl[AddonHealthStore.addonKey(canonicalizeAddonUrl(addon.baseUrl))],
                         toggleFocusRequester = if (index == 0) firstAddonToggleFocusRequester else null
                     )
                 }

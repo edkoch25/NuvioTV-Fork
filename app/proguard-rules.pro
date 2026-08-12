@@ -41,6 +41,8 @@
 # Keep all DTO classes used with Moshi/Retrofit
 -keep class com.nuvio.tv.data.remote.dto.** { *; }
 -keep class com.nuvio.tv.domain.model.** { *; }
+# Gson-serialised health records (nested custom class + enum) must survive R8
+-keep class com.nuvio.tv.core.health.** { *; }
 
 # ── Kotlin ─────────────────────────────────────────────────────────────────────
 -keepattributes *Annotation*

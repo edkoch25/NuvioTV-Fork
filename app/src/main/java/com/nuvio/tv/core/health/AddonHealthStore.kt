@@ -74,14 +74,18 @@ class AddonHealthStore @Inject constructor(
             } else {
                 effectiveProfileIdFlow.flatMapLatest { pid ->
                     factory.get(pid, FEATURE).data.map { preferences ->
-                        val now = System.currentTimeMillis()
-                        parseRecords(preferences[recordsKey]).mapValues { (key, record) ->
-                            val slow = if (key.startsWith(METADATA_PREFIX)) {
-                                AddonHealthModel.METADATA_SLOW_LATENCY_MS
-                            } else {
-                                AddonHealthModel.SLOW_LATENCY_MS
+                        try {
+                            val now = System.currentTimeMillis()
+                            parseRecords(preferences[recordsKey]).mapValues { (key, record) ->
+                                val slow = if (key.startsWith(METADATA_PREFIX)) {
+                                    AddonHealthModel.METADATA_SLOW_LATENCY_MS
+                                } else {
+                                    AddonHealthModel.SLOW_LATENCY_MS
+                                }
+                                AddonHealthModel.deriveLevel(record, now, slow)
                             }
-                            AddonHealthModel.deriveLevel(record, now, slow)
+                        } catch (e: Exception) {
+                            emptyMap()
                         }
                     }
                 }
