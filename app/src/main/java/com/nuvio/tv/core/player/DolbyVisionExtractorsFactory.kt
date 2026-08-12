@@ -417,9 +417,15 @@ private class NativeOptimizedVideoTrackOutput(
         ) {
             metadataProbeAttempts++
             if (metadataProbeAttempts == 1) {
+                val diag = if (nalFormat == NalFormat.LENGTH_DELIMITED) {
+                    "nlf=$nalLengthFieldLength nalTypes=" +
+                        HevcDvRpuStripper.listNalTypesLengthDelimited(pendingBuf, pendingLen, nalLengthFieldLength)
+                } else {
+                    "annexB"
+                }
                 android.util.Log.i(
                     "DVMetaProbe",
-                    "hookB entered fmt=$nalFormat pendingLen=$pendingLen"
+                    "hookB entered fmt=$nalFormat pendingLen=$pendingLen $diag"
                 )
             }
             val rpu = if (nalFormat == NalFormat.LENGTH_DELIMITED) {

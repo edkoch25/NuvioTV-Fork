@@ -72,7 +72,7 @@ data class StatsSection(
 private val STATS_GROUP_BY_LABEL: Map<String, StatsGroup> = buildMap {
     listOf("Add-on", "Provider", "Server", "File", "Size")
         .forEach { put(it, StatsGroup.SOURCE) }
-    listOf("Video", "HDR", "V bitrate", "DV", "Decoder", "Dropped", "Frame lead", "Display")
+    listOf("Video", "HDR", "V bitrate", "DV", "DV HDR", "Decoder", "Dropped", "Frame lead", "Display")
         .forEach { put(it, StatsGroup.VIDEO) }
     listOf("Audio", "A bitrate", "Underruns", "Route", "A jitter")
         .forEach { put(it, StatsGroup.AUDIO) }

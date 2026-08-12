@@ -143,6 +143,31 @@ internal object HevcDvRpuStripper {
     }
 
     /**
+     * nt19 diagnostic: lists the HEVC NAL types in a length-delimited sample, in
+     * walk order, so a probe that finds no RPU can be told apart from a framing
+     * desync. An empty/short list or implausible types means the length-field
+     * size is wrong; a sensible list without 62 means the sample carries no RPU.
+     * Capped to avoid log spam.
+     */
+    fun listNalTypesLengthDelimited(
+        sample: ByteArray,
+        sampleLen: Int,
+        nalLengthFieldLength: Int
+    ): List<Int> {
+        if (nalLengthFieldLength !in 1..4) return emptyList()
+        val types = ArrayList<Int>(16)
+        var pos = 0
+        while (pos + nalLengthFieldLength <= sampleLen && types.size < 64) {
+            val nalSize = readLengthField(sample, pos, nalLengthFieldLength)
+            val nalStart = pos + nalLengthFieldLength
+            if (nalSize <= 0 || nalStart + nalSize > sampleLen) break
+            types += (sample[nalStart].toInt() ushr 1) and 0x3F
+            pos = nalStart + nalSize
+        }
+        return types
+    }
+
+    /**
      * Annex-B (TS/raw HEVC) counterpart of [findRpuNalLengthDelimited]. Returns
      * (nalOffset, nalSize) of the first DV RPU NAL payload (excluding the start
      * code, including the 2-byte NAL header), or null when none is present.
