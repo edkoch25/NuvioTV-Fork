@@ -2,7 +2,7 @@
 ## 0.8.3-beta-nt16 → nt20 (versionCode 1274 → 1278)
 
 **Build date:** 2026-08-12 · **Branch:** `nuvio-test`
-**Status:** Built, installed and device-verified on the Ugoos AM9 Pro (Amlogic, arm64-capable, running the armeabi-v7a build); pending push. Finalise once `git ls-remote` confirms head `<fill after push>`. No public release/tag is cut for this build; fold these into the next public release's notes.
+**Status:** FINAL — built, installed and device-verified on the Ugoos AM9 Pro (Amlogic, arm64-capable, running the armeabi-v7a build), then pushed. Remote head `f1f688d2c` (nt20 / versionCode 1278). No public release/tag is cut for this build; fold these into the next public release's notes.
 
 One new diagnostic readout, delivered across five builds. **No engine, playback, passthrough, AFR or Dolby Vision output behaviour changed** — this reads the Dolby Vision RPU and reports what it finds; it does not alter a single output byte. It is the read half of the planned RPU-informed HDR10 output work, shipped and proven on its own first.
 
