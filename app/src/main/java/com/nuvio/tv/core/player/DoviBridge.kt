@@ -259,8 +259,11 @@ object DoviBridge {
          */
         fun toDiagnosticLine(): String {
             val parts = ArrayList<String>(3)
-            maxCll?.let { parts += "MaxCLL $it" }
-            maxFall?.let { parts += "MaxFALL $it" }
+            // A present L6 block with a zero content-light value means "unknown"
+            // (common in WEB-DL masters), not literally zero nits - show a dash
+            // rather than a misleading "0". A wholly absent L6 stays omitted.
+            maxCll?.let { parts += "MaxCLL ${if (it > 0) it.toString() else "-"}" }
+            maxFall?.let { parts += "MaxFALL ${if (it > 0) it.toString() else "-"}" }
             parts += "MDL peak ~${pqCodeToNits(sourceMaxPq)} nits"
             return parts.joinToString(" · ")
         }
