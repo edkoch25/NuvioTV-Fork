@@ -1,0 +1,94 @@
+package com.nuvio.tv.core.health
+
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+import com.nuvio.tv.core.profile.ProfileManager
+import com.nuvio.tv.data.local.ProfileDataStoreFactory
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/**
+ * Persisted, profile-scoped passive health for add-ons and resolvers. Keys are
+ * opaque: [ADDON_PREFIX] + canonical base URL, or [RESOLVER_PREFIX] + provider.
+ * Gson + per-profile DataStore, same pattern as AddonPreferences. No polling.
+ */
+@Singleton
+@OptIn(ExperimentalCoroutinesApi::class)
+class AddonHealthStore @Inject constructor(
+    private val factory: ProfileDataStoreFactory,
+    private val profileManager: ProfileManager
+) {
+    companion object {
+        private const val FEATURE = "addon_health"
+        const val ADDON_PREFIX = "addon:"
+        const val RESOLVER_PREFIX = "resolver:"
+
+        fun addonKey(canonicalBaseUrl: String): String = ADDON_PREFIX + canonicalBaseUrl
+        fun resolverKey(provider: String): String = RESOLVER_PREFIX + provider
+    }
+
+    private val gson = Gson()
+    private val recordsKey = stringPreferencesKey("health_records")
+    private val recordMapType = object : TypeToken<Map<String, HealthRecord>>() {}.type
+
+    private fun effectiveProfileId(): Int {
+        val active = profileManager.activeProfile
+        return if (active != null && active.usesPrimaryAddons) 1 else profileManager.activeProfileId.value
+    }
+
+    private fun store(profileId: Int = effectiveProfileId()) = factory.get(profileId, FEATURE)
+
+    private val effectiveProfileIdFlow: Flow<Int> = combine(
+        profileManager.activeProfileId,
+        profileManager.profiles
+    ) { activeProfileId, profiles ->
+        val activeProfile = profiles.firstOrNull { it.id == activeProfileId }
+        if (activeProfile?.usesPrimaryAddons == true) 1 else activeProfileId
+    }.distinctUntilChanged()
+
+    /** Derived traffic-light levels, keyed as above. Recomputed on every write. */
+    val levels: Flow<Map<String, AddonHealthLevel>> = effectiveProfileIdFlow.flatMapLatest { pid ->
+        factory.get(pid, FEATURE).data.map { preferences ->
+            val now = System.currentTimeMillis()
+            parseRecords(preferences[recordsKey]).mapValues { (_, record) ->
+                AddonHealthModel.deriveLevel(record, now)
+            }
+        }
+    }
+
+    /** Record one request outcome against [key]. Never throws. */
+    suspend fun record(key: String, outcome: HealthOutcome, latencyMs: Long) {
+        val sample = HealthSample(
+            atMs = System.currentTimeMillis(),
+            outcome = outcome,
+            latencyMs = latencyMs
+        )
+        store().edit { preferences ->
+            val current = parseRecords(preferences[recordsKey]).toMutableMap()
+            val updated = AddonHealthModel.applySample(
+                current[key] ?: HealthRecord(),
+                sample
+            )
+            current[key] = updated
+            preferences[recordsKey] = gson.toJson(current)
+        }
+    }
+
+    private fun parseRecords(json: String?): Map<String, HealthRecord> {
+        if (json.isNullOrBlank()) return emptyMap()
+        return try {
+            val parsed: Map<String, HealthRecord>? = gson.fromJson(json, recordMapType)
+            parsed ?: emptyMap()
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+}
