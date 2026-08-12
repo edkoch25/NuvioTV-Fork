@@ -175,7 +175,7 @@ object DoviBridge {
 
         // Task 1: validate the HDR10 SEI toolkit's byte layouts at startup via a
         // build-then-parse round trip (no device dependency, no output touched).
-        Log.i(TAG, "Hdr10SeiInjector self-test: ${if (Hdr10SeiInjector.selfTest()) "PASS" else "FAIL"}")
+        Log.i(TAG, "Hdr10SeiInjector self-test: ${Hdr10SeiInjector.selfTest()}")
 
         cachedSelfTestResult = result
         Log.i(

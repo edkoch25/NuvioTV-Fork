@@ -61,7 +61,8 @@ internal object Hdr10SeiInjector {
         val ep = Math.pow(e, 1.0 / m2)
         val num = (ep - c1).coerceAtLeast(0.0)
         val den = c2 - c3 * ep
-        return if (den <= 0.0) 0.0 else Math.pow(num / den, 1.0 / m1)
+        val l = if (den <= 0.0) 0.0 else Math.pow(num / den, 1.0 / m1)
+        return l * 10000.0   // normalized display luminance -> nits (PQ peak is 10000 cd/m^2)
     }
 
     /** MDCV (mastering_display_colour_volume) prefix-SEI NAL, 24-byte payload. */
@@ -349,40 +350,40 @@ internal object Hdr10SeiInjector {
         ((a[off].toLong() and 0xFF) shl 24) or ((a[off + 1].toLong() and 0xFF) shl 16) or
             ((a[off + 2].toLong() and 0xFF) shl 8) or (a[off + 3].toLong() and 0xFF)
 
-    fun selfTest(): Boolean {
+    fun selfTest(): String {
         // MDCV round trip (~0.005 and ~1000 nits from representative PQ codes).
         val mdcv = buildMdcvSeiNal(sourceMinPq = 62, sourceMaxPq = 3079)
-        val pm = parseSeiNal(mdcv) ?: return false
-        if (pm.type != SEI_TYPE_MDCV || pm.payload.size != 24) return false
-        if (readU16(pm.payload, 0) != PRIM_G_X || readU16(pm.payload, 14) != WHITE_Y) return false
+        val pm = parseSeiNal(mdcv) ?: return "FAIL:mdcv-parse"
+        if (pm.type != SEI_TYPE_MDCV || pm.payload.size != 24) return "FAIL:mdcv-header"
+        if (readU16(pm.payload, 0) != PRIM_G_X || readU16(pm.payload, 14) != WHITE_Y) return "FAIL:mdcv-primaries"
         val maxLum = readU32(pm.payload, 16)
-        if (maxLum < 9_000_000L || maxLum > 11_000_000L) return false   // ~1000 nits * 10000
+        if (maxLum < 9_000_000L || maxLum > 11_000_000L) return "FAIL:mdcv-luminance($maxLum)"
 
         // CLLI round trip + zero-suppression.
-        val clli = buildClliSeiNal(617, 496) ?: return false
-        val pc = parseSeiNal(clli) ?: return false
-        if (pc.type != SEI_TYPE_CLLI) return false
-        if (readU16(pc.payload, 0) != 617 || readU16(pc.payload, 2) != 496) return false
-        if (buildClliSeiNal(0, 0) != null) return false
+        val clli = buildClliSeiNal(617, 496) ?: return "FAIL:clli-null"
+        val pc = parseSeiNal(clli) ?: return "FAIL:clli-parse"
+        if (pc.type != SEI_TYPE_CLLI) return "FAIL:clli-type"
+        if (readU16(pc.payload, 0) != 617 || readU16(pc.payload, 2) != 496) return "FAIL:clli-values"
+        if (buildClliSeiNal(0, 0) != null) return "FAIL:clli-zero-not-suppressed"
 
         // Emulation-prevention round trip: a payload forcing 00 00 00 must survive.
         val forced = wrapSeiNal(5, byteArrayOf(0, 0, 0, 1, 2))
-        val pf = parseSeiNal(forced) ?: return false
-        if (!pf.payload.contentEquals(byteArrayOf(0, 0, 0, 1, 2))) return false
+        val pf = parseSeiNal(forced) ?: return "FAIL:escape-parse"
+        if (!pf.payload.contentEquals(byteArrayOf(0, 0, 0, 1, 2))) return "FAIL:escape-roundtrip"
 
         // Injection ordering (length-delimited): SPS(33) + slice(1) -> SEI before slice.
         val ld = syntheticLd()
         val injLd = injectLengthDelimited(ld, ld.size, 4, listOf(mdcv))
-        if (nalTypeSequenceLd(injLd, 4) != listOf(33, 39, 1)) return false
-        if (!hasHdr10StaticSei(injLd, injLd.size, annexB = false, nalLengthFieldLength = 4)) return false
+        if (nalTypeSequenceLd(injLd, 4) != listOf(33, 39, 1)) return "FAIL:inject-ld-order"
+        if (!hasHdr10StaticSei(injLd, injLd.size, annexB = false, nalLengthFieldLength = 4)) return "FAIL:detect-ld"
 
         // Injection ordering (Annex-B): SPS(33) + slice(1) -> SEI before slice.
         val ab = syntheticAnnexB()
         val injAb = injectAnnexB(ab, ab.size, listOf(mdcv))
-        if (nalTypeSequenceAnnexB(injAb, injAb.size) != listOf(33, 39, 1)) return false
-        if (!hasHdr10StaticSei(injAb, injAb.size, annexB = true, nalLengthFieldLength = 4)) return false
+        if (nalTypeSequenceAnnexB(injAb, injAb.size) != listOf(33, 39, 1)) return "FAIL:inject-annexb-order"
+        if (!hasHdr10StaticSei(injAb, injAb.size, annexB = true, nalLengthFieldLength = 4)) return "FAIL:detect-annexb"
 
-        return true
+        return "PASS"
     }
 
     private fun spsNal() = byteArrayOf((33 shl 1).toByte(), 0x01, 0x11, 0x22)
