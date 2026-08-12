@@ -1,6 +1,8 @@
 package com.nuvio.tv.ui.screens.addon
 
 import com.nuvio.tv.ui.theme.NuvioTheme
+import com.nuvio.tv.core.health.AddonHealthLevel
+import com.nuvio.tv.core.util.canonicalizeAddonUrl
 
 import android.graphics.Bitmap
 import androidx.activity.compose.BackHandler
@@ -474,6 +476,7 @@ fun AddonManagerScreen(
                         onEnabledChange = { enabled -> viewModel.setAddonEnabled(addon.baseUrl, enabled) },
                         isReadOnly = viewModel.isReadOnly,
                         showReorder = !isEssential,
+                        healthLevel = uiState.healthByUrl[canonicalizeAddonUrl(addon.baseUrl)],
                         toggleFocusRequester = if (index == 0) firstAddonToggleFocusRequester else null
                     )
                 }
@@ -1210,7 +1213,8 @@ private fun AddonCard(
     onEnabledChange: (Boolean) -> Unit,
     isReadOnly: Boolean = false,
     showReorder: Boolean = true,
-    toggleFocusRequester: FocusRequester? = null
+    toggleFocusRequester: FocusRequester? = null,
+    healthLevel: AddonHealthLevel? = null
 ) {
     if (isReadOnly) {
         Surface(
@@ -1231,7 +1235,7 @@ private fun AddonCard(
             shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(NuvioTheme.radii.md)),
             scale = ClickableSurfaceDefaults.scale(focusedScale = 1f)
         ) {
-            AddonCardContent(addon = addon, isReadOnly = true)
+            AddonCardContent(addon = addon, isReadOnly = true, healthLevel = healthLevel)
         }
     } else {
         val internalToggleFocusRequester = remember { FocusRequester() }
@@ -1257,6 +1261,7 @@ private fun AddonCard(
                 onRemove = onRemove,
                 onEnabledChange = onEnabledChange,
                 showReorder = showReorder,
+                healthLevel = healthLevel,
                 toggleFocusRequester = effectiveToggleFocusRequester
             )
         }
@@ -1275,7 +1280,8 @@ private fun AddonCardContent(
     onRemove: () -> Unit = {},
     onEnabledChange: (Boolean) -> Unit = {},
     showReorder: Boolean = true,
-    toggleFocusRequester: FocusRequester? = null
+    toggleFocusRequester: FocusRequester? = null,
+    healthLevel: AddonHealthLevel? = null
 ) {
     Column(modifier = Modifier.padding(20.dp)) {
         Row(
@@ -1299,6 +1305,23 @@ private fun AddonCardContent(
                             style = MaterialTheme.typography.bodySmall,
                             color = NuvioTheme.colors.TextSecondary
                         )
+                    }
+                    if (addon.enabled) {
+                        val setup = addon.behaviorHints?.configurationRequired == true
+                        val chip = when {
+                            setup -> "Setup" to NuvioTheme.colors.Warning
+                            healthLevel == AddonHealthLevel.HEALTHY -> "OK" to NuvioTheme.colors.Success
+                            healthLevel == AddonHealthLevel.DEGRADED -> "Slow" to NuvioTheme.colors.Warning
+                            healthLevel == AddonHealthLevel.DOWN -> "Down" to NuvioTheme.colors.Error
+                            else -> null
+                        }
+                        if (chip != null) {
+                            Text(
+                                text = chip.first,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = chip.second
+                            )
+                        }
                     }
                     if (!addon.enabled) {
                         Text(

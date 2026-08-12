@@ -3,6 +3,7 @@ package com.nuvio.tv.ui.screens.addon
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.nuvio.tv.core.health.AddonHealthStore
 import com.nuvio.tv.R
 import com.nuvio.tv.core.sync.CollectionSyncService
 import com.nuvio.tv.core.sync.HomeCatalogSettingsSyncService
@@ -74,7 +75,8 @@ class AddonManagerViewModel @Inject constructor(
     private val profileManager: ProfileManager,
     private val tmdbCollectionSourceResolver: TmdbCollectionSourceResolver,
     private val traktPublicListSourceResolver: TraktPublicListSourceResolver,
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val healthStore: AddonHealthStore
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AddonManagerUiState())
@@ -102,9 +104,18 @@ class AddonManagerViewModel @Inject constructor(
 
     init {
         observeInstalledAddons()
+        observeHealth()
         observeCatalogPreferences()
         observeCollections()
         loadLogoBytes()
+    }
+
+    private fun observeHealth() {
+        viewModelScope.launch {
+            healthStore.levels.collect { levels ->
+                _uiState.update { it.copy(healthByUrl = levels) }
+            }
+        }
     }
 
     fun requestAddonSyncNow() {
