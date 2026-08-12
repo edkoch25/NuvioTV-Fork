@@ -762,7 +762,6 @@ class MetaDetailsViewModel @Inject constructor(
         // Re-calculate next-to-watch when "furthest episode" preference changes
         viewModelScope.launch {
             layoutPreferenceDataStore.nextUpFromFurthestEpisode
-                .distinctUntilChanged()
                 .collectLatest {
                     calculateNextToWatch()
                 }
