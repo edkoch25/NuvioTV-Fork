@@ -349,8 +349,8 @@ internal class DolbyVisionMatroskaTransformer(
         nalLengthFieldLength: Int
     ): ByteArray? {
         if (!injectHdr10Sei) return null
-        if (profile != 7 && profile != 8) {
-            logInjectOutcomeOnce("skipped: profile $profile not P7/P8.1")
+        if (profile != 8) {
+            logInjectOutcomeOnce("skipped: profile $profile not DV8 (P8.1)")
             return null
         }
         val nals = cachedHdr10SeiNals ?: run {

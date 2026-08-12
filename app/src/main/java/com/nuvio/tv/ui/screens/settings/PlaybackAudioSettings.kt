@@ -450,7 +450,10 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
                 isChecked = playerSettings.injectHdr10MetadataOnStrip,
                 onCheckedChange = onSetInjectHdr10Sei,
                 onFocused = onItemFocused,
-                enabled = enabled
+                enabled = enabled && (
+                    playerSettings.dv7HandlingMode == Dv7HandlingMode.STRIP_DV ||
+                        playerSettings.dv7HandlingMode == Dv7HandlingMode.HDR10_BASE_LAYER
+                )
             )
         }
     }
