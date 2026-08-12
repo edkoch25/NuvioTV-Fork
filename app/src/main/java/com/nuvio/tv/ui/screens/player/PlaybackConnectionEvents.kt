@@ -149,6 +149,9 @@ internal class PlaybackConnectionEventListener(
         headersT = now()
         headersMs = headersT - callT0
         code = response.code
+        if (!response.isRedirect) {
+            PlaybackConnectionEvents.setResolvedHost(response.request.url.host)
+        }
     }
 
     override fun callEnd(call: Call) {
@@ -209,6 +212,16 @@ internal object PlaybackConnectionEvents : EventListener.Factory {
     // emit() (the single terminal path for callEnd and callFailed).
     private val inflightTotal = AtomicInteger(0)
     private val inflightPerHost = ConcurrentHashMap<String, AtomicInteger>()
+
+    // N6 V2: host that served the bytes on the last non-redirect hop of a
+    // call. Written from OkHttp dispatcher threads (responseHeadersEnd), read
+    // by the ~1 Hz HUD sampler, cleared per play session. The redirector
+    // sends cf-cache-status: BYPASS so the CDN rotates per session -- read
+    // live, never cached -- which the per-session clear satisfies.
+    @Volatile private var resolvedServingHost: String? = null
+    fun setResolvedHost(host: String?) { resolvedServingHost = host?.takeIf { it.isNotBlank() } }
+    fun resolvedHost(): String? = resolvedServingHost
+    fun clearResolvedHost() { resolvedServingHost = null }
 
     /** Returns [totalBefore, hostBefore] - the counts prior to this call. */
     fun enter(host: String): IntArray {

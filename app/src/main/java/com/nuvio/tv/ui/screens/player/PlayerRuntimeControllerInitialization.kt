@@ -2542,6 +2542,10 @@ internal fun PlayerRuntimeController.buildStartupSubtitleConfigurations(startupS
 }
 
 internal fun PlayerRuntimeController.resetLoadingOverlayForNewStream() {
+    // N6 V2: drop the previous session's resolved serving host so a new
+    // stream (initial play or any switch) never shows the prior title's
+    // CDN host during TTFF.
+    PlaybackConnectionEvents.clearResolvedHost()
     cancelFirstFrameWatchdog()
     cancelStallWatchdog()
     cancelStartupWatchdog()

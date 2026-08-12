@@ -352,7 +352,11 @@ class PlayerViewModel @Inject constructor(
             addonName = statsUi.currentStreamAddonName,
             host = host
         )?.let { rows += StatsRow("Provider", it) }
-        host?.let { rows += StatsRow("Server", it) }
+        // N6 V2: Server shows the real serving host -- the post-redirect CDN
+        // once a redirect resolves, falling back to the URL host (the
+        // redirector during TTFF, or a direct source) until then / when there
+        // is no redirect.
+        (PlaybackConnectionEvents.resolvedHost() ?: host)?.let { rows += StatsRow("Server", it) }
         val urlFileName = streamUrl
             ?.let { runCatching { URI(it).path }.getOrNull() }
             ?.substringAfterLast('/')
