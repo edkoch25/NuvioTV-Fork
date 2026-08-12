@@ -29,6 +29,8 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import com.nuvio.tv.core.network.ADDON_REQUEST_TIMEOUT_MS
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import com.nuvio.tv.core.auth.AuthManager
@@ -146,7 +148,7 @@ class AddonRepositoryImpl @Inject constructor(
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    override fun getInstalledAddons(): Flow<List<Addon>> =
+    private val installedAddonsFlow: kotlinx.coroutines.flow.StateFlow<List<Addon>> =
         combine(
             preferences.installedAddonUrls,
             preferences.userSetNames,
@@ -205,6 +207,9 @@ class AddonRepositoryImpl @Inject constructor(
                 }
             }.flowOn(Dispatchers.IO)
         }
+        .stateIn(syncScope, SharingStarted.Eagerly, emptyList<Addon>())
+
+    override fun getInstalledAddons(): Flow<List<Addon>> = installedAddonsFlow
 
     override suspend fun fetchAddon(baseUrl: String): NetworkResult<Addon> {
         val cleanBaseUrl = canonicalizeUrl(baseUrl)

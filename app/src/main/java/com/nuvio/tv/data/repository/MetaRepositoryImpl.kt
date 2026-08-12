@@ -181,7 +181,9 @@ class MetaRepositoryImpl @Inject constructor(
                         val metaDto = response.body()?.meta ?: return@async null
                         val meta = metaDto.toDomain(context.getString(R.string.episodes_episode))
                         val ttlMs = parseMaxAgeMs(response.headers()["Cache-Control"])
-                        metaCache[cacheKey] = CachedMeta(meta, System.currentTimeMillis() + ttlMs)
+                        val cached = CachedMeta(meta, System.currentTimeMillis() + ttlMs)
+                        metaCache[cacheKey] = cached
+                        addonMetaCache["$type:$id"] = cached
                         meta
                     } else {
                         null
@@ -225,6 +227,22 @@ class MetaRepositoryImpl @Inject constructor(
         if (metaMissCache[cacheKey] != null) {
             emit(NetworkResult.Error(context.getString(R.string.error_meta_not_found)))
             return@flow
+        }
+
+        inFlightAddonMeta[cacheKey]?.let { existingDeferred ->
+            when (val lookupResult = existingDeferred.await()) {
+                is MetaLookupResult.Found -> {
+                    emit(NetworkResult.Success(lookupResult.meta))
+                    return@flow
+                }
+                is MetaLookupResult.SourceSufficient -> {
+                    emit(NetworkResult.Error("Source addon sufficient", NetworkResult.SOURCE_SUFFICIENT_CODE))
+                    return@flow
+                }
+                is MetaLookupResult.NotFound -> {
+                    // Fall through — the in-flight request failed, try ourselves
+                }
+            }
         }
 
         emit(NetworkResult.Loading)
@@ -675,5 +693,10 @@ class MetaRepositoryImpl @Inject constructor(
         inFlightMeta.clear()
         inFlightAddonMeta.clear()
         inFlightPrimaryMeta.clear()
+    }
+
+    override fun getCachedMeta(type: String, id: String): Meta? {
+        val cacheKey = "$type:$id"
+        return addonMetaCache[cacheKey]?.takeIf { !it.isExpired() }?.meta
     }
 }

@@ -81,6 +81,7 @@ import com.nuvio.tv.domain.model.TraktListPrivacy
 import com.nuvio.tv.ui.components.EmptyScreenState
 import com.nuvio.tv.ui.components.GridContentCard
 import com.nuvio.tv.ui.screens.detail.requestFocusAfterFrames
+import com.nuvio.tv.ui.screens.home.HeroBackdropState
 import kotlinx.coroutines.delay
 import com.nuvio.tv.ui.components.PosterCardDefaults
 import com.nuvio.tv.ui.components.LoadingIndicator
@@ -169,7 +170,9 @@ fun LibraryScreen(
 
             var focused = false
             if (restoreIndex != null && restoreRequester != null) {
-                runCatching { gridState.scrollToItem(restoreIndex) }
+                if (gridState.firstVisibleItemIndex == 0 && gridState.firstVisibleItemScrollOffset == 0) {
+                    runCatching { gridState.scrollToItem(restoreIndex) }
+                }
                 focused = runCatching { restoreRequester.requestFocus() }.isSuccess
                 if (!focused) {
                     delay(16)
@@ -417,9 +420,12 @@ fun LibraryScreen(
                     showLabel = true,
                     onFocused = {
                         lastFocusedPosterKey = focusKey
+                        viewModel.prefetchMetaOnFocus(item.id, item.type)
                     },
                     onClick = {
                         lastFocusedPosterKey = focusKey
+                        val backdrop = viewModel.getCachedBackdrop(item.id, item.type)
+                        HeroBackdropState.update(backdrop)
                         onNavigateToDetail(item.id, item.type, item.addonBaseUrl)
                     },
                     onLongPress = {

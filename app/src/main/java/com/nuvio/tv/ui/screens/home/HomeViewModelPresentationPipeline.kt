@@ -25,7 +25,11 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+
+private const val TMDB_HERO_ENRICHMENT_CONCURRENCY = 4
 
 private data class CoreLayoutPrefs(
     val layout: HomeLayout,
@@ -274,7 +278,7 @@ internal fun HomeViewModel.observeModernHomePresentationPipeline() {
                 if (catalogsLoadInProgress) 300L else 80L
             }
             .collectLatest { input ->
-                val shouldWarmStart = uiState.value.modernHomePresentation.rows.list.isEmpty()
+                val shouldWarmStart = _modernHomePresentation.value.rows.list.isEmpty()
                 val visibleCatalogRowCount = input.catalogRows.count { it.items.isNotEmpty() }
                 val warmStartCatalogRowCount = if (input.continueWatchingItems.isNotEmpty()) 2 else 3
 
@@ -287,12 +291,8 @@ internal fun HomeViewModel.observeModernHomePresentationPipeline() {
                             maxCatalogRows = warmStartCatalogRowCount
                         )
                     }
-                    _uiState.update { state ->
-                        if (state.modernHomePresentation == warmStartPresentation) {
-                            state
-                        } else {
-                            state.copy(modernHomePresentation = warmStartPresentation)
-                        }
+                    if (_modernHomePresentation.value != warmStartPresentation) {
+                        _modernHomePresentation.value = warmStartPresentation
                     }
                 }
 
@@ -303,12 +303,8 @@ internal fun HomeViewModel.observeModernHomePresentationPipeline() {
                         context = appContext
                     )
                 }
-                _uiState.update { state ->
-                    if (state.modernHomePresentation == presentation) {
-                        state
-                    } else {
-                        state.copy(modernHomePresentation = presentation)
-                    }
+                if (_modernHomePresentation.value != presentation) {
+                    _modernHomePresentation.value = presentation
                 }
             }
     }
@@ -317,7 +313,6 @@ internal fun HomeViewModel.observeModernHomePresentationPipeline() {
 internal fun HomeViewModel.observeExternalMetaPrefetchPreferencePipeline() {
     viewModelScope.launch {
         layoutPreferenceDataStore.preferExternalMetaAddonDetail
-            .distinctUntilChanged()
             .collectLatest { enabled ->
                 externalMetaPrefetchEnabled = enabled
                 if (!enabled) {
@@ -444,9 +439,19 @@ internal fun HomeViewModel.onItemFocusPipeline(item: MetaPreview) {
             // before the user focused on it).
             if (item.id !in _enrichedPreviews.value) {
                 val enriched = findCatalogItemById(item.id) ?: item
-                _enrichedPreviews.update { it + (item.id to enriched) }
+                addEnrichedPreview(item.id, enriched)
             }
             if (_enrichingItemId.value == item.id) setEnrichingItemId(null)
+            // Still prefetch full meta in background for instant detail screen.
+            if (item.id !in backgroundMetaPrefetchedIds) {
+                backgroundMetaPrefetchedIds.add(item.id)
+                viewModelScope.launch {
+                    metaRepository.getMetaFromAllAddons(
+                        type = item.apiType,
+                        id = item.id
+                    ).first { it !is NetworkResult.Loading }
+                }
+            }
             return
         }
     }
@@ -461,8 +466,6 @@ internal fun HomeViewModel.onItemFocusPipeline(item: MetaPreview) {
         (_uiState.value.homeLayout != HomeLayout.MODERN || currentTmdbSettings.modernHomeEnabled)
     val willEnrich = tmdbEnabledForCurrentLayout || externalMetaPrefetchEnabled
 
-    if (willEnrich) setEnrichingItemId(item.id)
-
     pendingTmdbEnrichItemId = item.id
     tmdbEnrichFocusJob?.cancel()
     tmdbEnrichFocusJob = viewModelScope.launch(Dispatchers.IO) {
@@ -471,6 +474,7 @@ internal fun HomeViewModel.onItemFocusPipeline(item: MetaPreview) {
             if (_enrichingItemId.value == item.id) setEnrichingItemId(null)
             return@launch
         }
+        if (willEnrich) setEnrichingItemId(item.id)
         if (item.id in prefetchedTmdbIds || item.id in prefetchedExternalMetaIds) {
             val artworkStillNeeded = item.id !in prefetchedExternalMetaIds &&
                 externalMetaPrefetchEnabled &&
@@ -478,17 +482,28 @@ internal fun HomeViewModel.onItemFocusPipeline(item: MetaPreview) {
                 item.logo.isNullOrBlank()
             if (!artworkStillNeeded) {
                 if (_enrichingItemId.value == item.id) setEnrichingItemId(null)
+                // Still prefetch full meta in background for instant detail screen.
+                if (item.id !in backgroundMetaPrefetchedIds) {
+                    backgroundMetaPrefetchedIds.add(item.id)
+                    launch {
+                        metaRepository.getMetaFromAllAddons(
+                            type = item.apiType,
+                            id = item.id
+                        ).first { it !is NetworkResult.Loading }
+                    }
+                }
                 return@launch
             }
         }
 
         try {
-            var tmdbEnriched = false
-
-            if (tmdbEnabledForCurrentLayout) {
+            // Launch TMDB and external meta addon fetch in parallel.
+            // Which sources are used depends on settings:
+            // - tmdbEnabledForCurrentLayout: controls TMDB enrichment
+            // - externalMetaPrefetchEnabled: controls external meta addon fetch
+            val tmdbDeferred = if (tmdbEnabledForCurrentLayout) {
                 val tmdbId = runCatching { tmdbService.ensureTmdbId(item.id, item.apiType) }.getOrNull()
-
-                val enrichmentDeferred = if (tmdbId != null) async {
+                if (tmdbId != null) async {
                     runCatching {
                         tmdbMetadataService.fetchEnrichment(
                             tmdbId = tmdbId,
@@ -497,55 +512,66 @@ internal fun HomeViewModel.onItemFocusPipeline(item: MetaPreview) {
                         )
                     }.getOrNull()
                 } else null
+            } else null
 
-                val enrichment = enrichmentDeferred?.await()
-
-                if (enrichment != null) {
-                    prefetchedTmdbIds.add(item.id)
-                    // Only mark external meta as done if TMDB covered artwork too.
-                    if (currentTmdbSettings.useArtwork || !item.logo.isNullOrBlank()) {
-                        prefetchedExternalMetaIds.add(item.id)
-                    }
-                    updateCatalogItemWithTmdb(item.id, enrichment)
-                    tmdbEnriched = true
-                }
-            }
-            // Fall through to external addon when:
-            // 1. TMDB didn't enrich at all, OR
-            // 2. TMDB enriched but useArtwork is off and the item still lacks a logo.
-            val artworkStillMissing = tmdbEnriched && !currentTmdbSettings.useArtwork &&
-                item.logo.isNullOrBlank()
-            val needsExternalAddon = !tmdbEnriched || artworkStillMissing
-            if (needsExternalAddon && externalMetaPrefetchEnabled &&
+            val externalMetaDeferred = if (externalMetaPrefetchEnabled &&
                 item.id !in prefetchedExternalMetaIds &&
-                externalMetaPrefetchInFlightIds.add(item.id)) {
-                try {
-                    val result = metaRepository.getMetaFromAllAddons(item.apiType, item.id, item.sourceAddonBaseUrl)
-                        .first { it is NetworkResult.Success || it is NetworkResult.Error }
-                    when {
-                        result is NetworkResult.Success -> {
-                            prefetchedExternalMetaIds.add(item.id)
-                            if (artworkStillMissing) {
-                                updateCatalogItemArtworkOnly(item.id, result.data)
-                            } else {
-                                updateCatalogItemWithMeta(item.id, result.data)
-                            }
+                externalMetaPrefetchInFlightIds.add(item.id)
+            ) {
+                async {
+                    try {
+                        val result = metaRepository.getMetaFromAllAddons(item.apiType, item.id, item.sourceAddonBaseUrl)
+                            .first { it is NetworkResult.Success || it is NetworkResult.Error }
+                        when {
+                            result is NetworkResult.Success -> result.data
+                            result is NetworkResult.Error && result.code == NetworkResult.SOURCE_SUFFICIENT_CODE -> null
+                            else -> null
                         }
-                        result is NetworkResult.Error && result.code == NetworkResult.SOURCE_SUFFICIENT_CODE -> {
-                            // Catalog already has the best available meta from this addon —
-                            // mark as resolved without making any changes.
-                            prefetchedExternalMetaIds.add(item.id)
-                            // Also mark in enrichedPreviews so the finally-block doesn't
-                            // treat this item as a failed enrichment.
-                            _enrichedPreviews.update { it + (item.id to item) }
-                        }
-                        else -> { /* Error — leave unresolved */ }
+                    } finally {
+                        externalMetaPrefetchInFlightIds.remove(item.id)
                     }
-                } finally {
-                    externalMetaPrefetchInFlightIds.remove(item.id)
-                    if (pendingTmdbEnrichItemId == item.id) pendingTmdbEnrichItemId = null
+                }
+            } else null
+
+            // Await both results
+            val tmdbEnrichment = tmdbDeferred?.await()
+            val externalMeta = externalMetaDeferred?.await()
+
+            // Mark as prefetched
+            if (tmdbEnrichment != null) prefetchedTmdbIds.add(item.id)
+            if (externalMetaDeferred != null) prefetchedExternalMetaIds.add(item.id)
+
+            // Merge results: apply external meta first (base layer), then TMDB on top
+            // respecting which TMDB settings are enabled.
+            if (externalMeta != null) {
+                updateCatalogItemWithMeta(item.id, externalMeta)
+            }
+            if (tmdbEnrichment != null) {
+                updateCatalogItemWithTmdb(item.id, tmdbEnrichment)
+            }
+
+            // If neither source produced anything, mark enrichment in previews
+            // so UI doesn't keep showing spinner.
+            if (tmdbEnrichment == null && externalMeta == null) {
+                addEnrichedPreview(item.id, item)
+            }
+
+            // Always prefetch full meta in background for instant detail screen loading.
+            if (item.id !in backgroundMetaPrefetchedIds) {
+                backgroundMetaPrefetchedIds.add(item.id)
+                viewModelScope.launch {
+                    metaRepository.getMetaFromAllAddons(
+                        type = item.apiType,
+                        id = item.id
+                    ).first { it !is NetworkResult.Loading }
                 }
             }
+
+            // Warm up watch progress pipeline so detail screen reads are fast.
+            viewModelScope.launch {
+                watchProgressRepository.getAllEpisodeProgress(item.id.substringBefore(":")).first()
+            }
+
         } finally {
             if (_enrichingItemId.value == item.id) {
                 setEnrichingItemId(null)
@@ -577,55 +603,67 @@ internal fun HomeViewModel.preloadAdjacentItemPipeline(item: MetaPreview) {
         if (item.id in prefetchedTmdbIds || item.id in prefetchedExternalMetaIds) return@launch
 
         try {
-            var tmdbEnriched = false
-            if (tmdbEnabledForCurrentLayout) {
+            // Launch TMDB and external meta addon fetch in parallel (same as focused pipeline).
+            val tmdbDeferred = if (tmdbEnabledForCurrentLayout) {
                 val tmdbId = runCatching { tmdbService.ensureTmdbId(item.id, item.apiType) }.getOrNull()
-                val enrichment = if (tmdbId != null) runCatching {
-                    tmdbMetadataService.fetchEnrichment(
-                        tmdbId = tmdbId,
-                        contentType = item.type,
-                        language = currentTmdbSettings.language
-                    )
-                }.getOrNull() else null
-                if (enrichment != null) {
-                    prefetchedTmdbIds.add(item.id)
-                    if (currentTmdbSettings.useArtwork || !item.logo.isNullOrBlank()) {
-                        prefetchedExternalMetaIds.add(item.id)
-                    }
-                    updateCatalogItemWithTmdb(item.id, enrichment)
-                    tmdbEnriched = true
-                }
-            }
-            val artworkStillMissing = tmdbEnriched && !currentTmdbSettings.useArtwork &&
-                item.logo.isNullOrBlank()
-            val needsExternalAddon = !tmdbEnriched || artworkStillMissing
-            if (needsExternalAddon &&
-                externalMetaPrefetchEnabled &&
+                if (tmdbId != null) async {
+                    runCatching {
+                        tmdbMetadataService.fetchEnrichment(
+                            tmdbId = tmdbId,
+                            contentType = item.type,
+                            language = currentTmdbSettings.language
+                        )
+                    }.getOrNull()
+                } else null
+            } else null
+
+            val externalMetaDeferred = if (externalMetaPrefetchEnabled &&
                 item.id !in prefetchedExternalMetaIds &&
                 externalMetaPrefetchInFlightIds.add(item.id)
             ) {
-                try {
-                    val result = metaRepository.getMetaFromAllAddons(item.apiType, item.id, item.sourceAddonBaseUrl)
-                        .first { it is NetworkResult.Success || it is NetworkResult.Error }
-                    when {
-                        result is NetworkResult.Success -> {
-                            prefetchedExternalMetaIds.add(item.id)
-                            if (artworkStillMissing) {
-                                updateCatalogItemArtworkOnly(item.id, result.data)
-                            } else {
-                                updateCatalogItemWithMeta(item.id, result.data)
-                            }
+                async {
+                    try {
+                        val result = metaRepository.getMetaFromAllAddons(item.apiType, item.id, item.sourceAddonBaseUrl)
+                            .first { it is NetworkResult.Success || it is NetworkResult.Error }
+                        when {
+                            result is NetworkResult.Success -> result.data
+                            result is NetworkResult.Error && result.code == NetworkResult.SOURCE_SUFFICIENT_CODE -> null
+                            else -> null
                         }
-                        result is NetworkResult.Error && result.code == NetworkResult.SOURCE_SUFFICIENT_CODE -> {
-                            prefetchedExternalMetaIds.add(item.id)
-                            _enrichedPreviews.update { it + (item.id to item) }
-                        }
-                        else -> { /* Error — leave unresolved */ }
+                    } finally {
+                        externalMetaPrefetchInFlightIds.remove(item.id)
                     }
-                } finally {
-                    externalMetaPrefetchInFlightIds.remove(item.id)
+                }
+            } else null
+
+            val tmdbEnrichment = tmdbDeferred?.await()
+            val externalMeta = externalMetaDeferred?.await()
+
+            if (tmdbEnrichment != null) prefetchedTmdbIds.add(item.id)
+            if (externalMetaDeferred != null) prefetchedExternalMetaIds.add(item.id)
+
+            if (externalMeta != null) {
+                updateCatalogItemWithMeta(item.id, externalMeta)
+            }
+            if (tmdbEnrichment != null) {
+                updateCatalogItemWithTmdb(item.id, tmdbEnrichment)
+            }
+
+            if (tmdbEnrichment == null && externalMeta == null) {
+                addEnrichedPreview(item.id, item)
+            }
+
+            // Background prefetch for detail screen cache.
+            if (item.id !in backgroundMetaPrefetchedIds) {
+                backgroundMetaPrefetchedIds.add(item.id)
+                viewModelScope.launch {
+                    metaRepository.getMetaFromAllAddons(
+                        type = item.apiType,
+                        id = item.id
+                    ).first { it !is NetworkResult.Loading }
                 }
             }
+
         } finally {
             if (pendingAdjacentPrefetchItemId == item.id) {
                 pendingAdjacentPrefetchItemId = null
@@ -693,7 +731,7 @@ private fun HomeViewModel.updateCatalogItemWithTmdb(itemId: String, enrichment: 
 
     findCatalogItemById(itemId)?.let { enriched ->
         _lastEnrichedPreview.value = enriched
-        _enrichedPreviews.update { it + (itemId to enriched) }
+        addEnrichedPreview(itemId, enriched)
     }
 }
 
@@ -770,7 +808,7 @@ private fun HomeViewModel.updateCatalogItemWithMeta(itemId: String, meta: Meta) 
     }
     findCatalogItemById(itemId)?.let { enriched ->
         _lastEnrichedPreview.value = enriched
-        _enrichedPreviews.update { it + (itemId to enriched) }
+        addEnrichedPreview(itemId, enriched)
     }
 
     // If external meta brought new trailerYtIds and the item has no trailer resolved yet, retry.
@@ -816,7 +854,7 @@ private fun HomeViewModel.updateCatalogItemArtworkOnly(itemId: String, meta: Met
     }
     findCatalogItemById(itemId)?.let { enriched ->
         _lastEnrichedPreview.value = enriched
-        _enrichedPreviews.update { it + (itemId to enriched) }
+        addEnrichedPreview(itemId, enriched)
     }
 }
 
@@ -829,66 +867,69 @@ internal suspend fun HomeViewModel.enrichHeroItemsPipeline(
     val mdbEnabled = mdbSettings.enabled && mdbSettings.apiKey.isNotBlank()
 
     return coroutineScope {
+        val semaphore = Semaphore(TMDB_HERO_ENRICHMENT_CONCURRENCY)
         items.map { item ->
             async(Dispatchers.IO) {
-                try {
-                    val tmdbDeferred = async {
-                        val tmdbId = tmdbService.ensureTmdbId(item.id, item.apiType) ?: return@async null
-                        tmdbId.toIntOrNull()?.let { numericId ->
-                            runCatching { tmdbService.tmdbToImdb(numericId, item.apiType) }
+                semaphore.withPermit {
+                    try {
+                        val tmdbDeferred = async {
+                            val tmdbId = tmdbService.ensureTmdbId(item.id, item.apiType) ?: return@async null
+                            tmdbId.toIntOrNull()?.let { numericId ->
+                                runCatching { tmdbService.tmdbToImdb(numericId, item.apiType) }
+                            }
+                            tmdbMetadataService.fetchEnrichment(
+                                tmdbId = tmdbId,
+                                contentType = item.type,
+                                language = settings.language
+                            )
                         }
-                        tmdbMetadataService.fetchEnrichment(
-                            tmdbId = tmdbId,
-                            contentType = item.type,
-                            language = settings.language
-                        )
+                        val mdbDeferred = if (mdbEnabled) async {
+                            runCatching { mdbListRepository.getImdbRatingForItem(item.id, item.apiType) }.getOrNull()
+                        } else null
+
+                        val enrichment = tmdbDeferred.await() ?: return@withPermit item
+                        val mdbImdbRating = mdbDeferred?.await()
+
+                        var enriched = item
+
+                        if (settings.useArtwork) {
+                            enriched = enriched.copy(
+                                background = enrichment.backdrop ?: enriched.background,
+                                logo = enrichment.logo ?: enriched.logo,
+                                poster = enrichment.poster ?: enriched.poster
+                            )
+                        }
+
+                        if (settings.useBasicInfo) {
+                            enriched = enriched.copy(
+                                name = enrichment.localizedTitle ?: enriched.name,
+                                description = enrichment.description ?: enriched.description,
+                                genres = if (enrichment.genres.isNotEmpty()) enrichment.genres else enriched.genres,
+                                imdbRating = mdbImdbRating?.toFloat() ?: enriched.imdbRating
+                            )
+                        }
+
+                        if (settings.useDetails) {
+                            enriched = enriched.copy(
+                                runtime = enrichment.runtimeMinutes?.toString() ?: enriched.runtime,
+                                status = enrichment.status ?: enriched.status,
+                                ageRating = enrichment.ageRating ?: enriched.ageRating,
+                                country = enrichment.countries?.joinToString(", ") ?: enriched.country,
+                                language = enrichment.language ?: enriched.language
+                            )
+                        }
+
+                        if (settings.useReleaseDates) {
+                            enriched = enriched.copy(
+                                releaseInfo = enrichment.releaseInfo ?: enriched.releaseInfo
+                            )
+                        }
+
+                        enriched
+                    } catch (e: Exception) {
+                        Log.w(HomeViewModel.TAG, "Hero enrichment failed for ${item.id}: ${e.message}")
+                        item
                     }
-                    val mdbDeferred = if (mdbEnabled) async {
-                        runCatching { mdbListRepository.getImdbRatingForItem(item.id, item.apiType) }.getOrNull()
-                    } else null
-
-                    val enrichment = tmdbDeferred.await() ?: return@async item
-                    val mdbImdbRating = mdbDeferred?.await()
-
-                    var enriched = item
-
-                    if (settings.useArtwork) {
-                        enriched = enriched.copy(
-                            background = enrichment.backdrop ?: enriched.background,
-                            logo = enrichment.logo ?: enriched.logo,
-                            poster = enrichment.poster ?: enriched.poster
-                        )
-                    }
-
-                    if (settings.useBasicInfo) {
-                        enriched = enriched.copy(
-                            name = enrichment.localizedTitle ?: enriched.name,
-                            description = enrichment.description ?: enriched.description,
-                            genres = if (enrichment.genres.isNotEmpty()) enrichment.genres else enriched.genres,
-                            imdbRating = mdbImdbRating?.toFloat() ?: enriched.imdbRating
-                        )
-                    }
-
-                    if (settings.useDetails) {
-                        enriched = enriched.copy(
-                            runtime = enrichment.runtimeMinutes?.toString() ?: enriched.runtime,
-                            status = enrichment.status ?: enriched.status,
-                            ageRating = enrichment.ageRating ?: enriched.ageRating,
-                            country = enrichment.countries?.joinToString(", ") ?: enriched.country,
-                            language = enrichment.language ?: enriched.language
-                        )
-                    }
-
-                    if (settings.useReleaseDates) {
-                        enriched = enriched.copy(
-                            releaseInfo = enrichment.releaseInfo ?: enriched.releaseInfo
-                        )
-                    }
-
-                    enriched
-                } catch (e: Exception) {
-                    Log.w(HomeViewModel.TAG, "Hero enrichment failed for ${item.id}: ${e.message}")
-                    item
                 }
             }
         }.awaitAll()
