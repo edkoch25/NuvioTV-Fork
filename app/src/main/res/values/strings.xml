@@ -784,6 +784,8 @@
     <string name="audio_dv5_to_dv81_sub">Signal Profile 5 streams as Profile 8.1 for HDR10-compatible output. Helps on devices that do not have a native DV5 decoder.</string>
     <string name="audio_strip_hdr10plus_title">Strip HDR10+ Metadata</string>
     <string name="audio_strip_hdr10plus_sub">Remove HDR10+ dynamic metadata from streams. When Convert to DV8.1 is also enabled, stripping runs after conversion.</string>
+    <string name="audio_inject_hdr10_sei_title">Inject HDR10 Metadata on Strip</string>
+    <string name="audio_inject_hdr10_sei_sub">When Dolby Vision is stripped to an HDR10 base layer, add the source\'s mastering metadata (MaxCLL/MaxFALL and peak luminance) so non-DV HDR10 TVs tone-map correctly. Experimental; no effect on Dolby Vision playback.</string>
     <string name="audio_dv7_preserve_mapping_title">Preserve DV mapping (DV7 to DV8.1)</string>
     <string name="audio_dv7_preserve_mapping_sub">Requests mapping preservation, but the bundled libdovi C API cannot deliver it: playback falls back to the standard 8.1 conversion (mapping not preserved). A one-time DV7_NATIVE warning is logged.</string>
     <string name="diag_value_not_advertised">Not advertised (native playback may still work)</string>

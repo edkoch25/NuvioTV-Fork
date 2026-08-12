@@ -319,6 +319,9 @@ fun PlaybackSettingsContent(
                 onSetStripHdr10PlusSei = { enabled ->
                     coroutineScope.launch { viewModel.setStripHdr10PlusSei(enabled) }
                 },
+                onSetInjectHdr10Sei = { enabled ->
+                    coroutineScope.launch { viewModel.setInjectHdr10MetadataOnStrip(enabled) }
+                },
                 onSetBufferEngineEnabled = { enabled ->
                     coroutineScope.launch { viewModel.setBufferEngineEnabled(enabled) }
                     if (enabled) memoryUsageTrigger++

@@ -238,6 +238,10 @@ class PlaybackSettingsViewModel @Inject constructor(
         playerSettingsDataStore.setStripHdr10PlusSei(enabled)
     }
 
+    suspend fun setInjectHdr10MetadataOnStrip(enabled: Boolean) {
+        playerSettingsDataStore.setInjectHdr10MetadataOnStrip(enabled)
+    }
+
     suspend fun setUseLibass(enabled: Boolean) {
         playerSettingsDataStore.setUseLibass(enabled)
     }

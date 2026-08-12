@@ -30,9 +30,15 @@ internal class DolbyVisionMatroskaTransformer(
     private val config: DolbyVisionConversionConfig,
     private val stripRpuOnly: Boolean = false,
     private val stripHdr10PlusSei: Boolean = false,
+    private val injectHdr10Sei: Boolean = false,
 ) : MatroskaExtractor.DolbyVisionSampleTransformer {
 
     private var lastTransformedLength = 0
+
+    // Task 1: HDR10 SEI NALs (MDCV/CLLI) built once per stream from the RPU
+    // static metadata, injected on the strip path so non-DV HDR10 sinks tone-map
+    // correctly. Null until first resolved; empty-checked before use.
+    private var cachedHdr10SeiNals: List<ByteArray>? = null
 
     // Reused across samples; grows to the largest frame once.
     private val scratch = ExposedByteArrayOutputStream(64 * 1024)
@@ -224,7 +230,11 @@ internal class DolbyVisionMatroskaTransformer(
             )
             if (changed) {
                 val stripped = finishScratch()
-                return stripHdr10PlusIfEnabled(stripped, lastTransformedLength, nalUnitLengthFieldLength) ?: stripped
+                val afterHdr10Plus =
+                    stripHdr10PlusIfEnabled(stripped, lastTransformedLength, nalUnitLengthFieldLength) ?: stripped
+                return injectHdr10SeiIfEnabled(
+                    afterHdr10Plus, lastTransformedLength, profile, nalUnitLengthFieldLength
+                ) ?: afterHdr10Plus
             }
             return stripHdr10PlusIfEnabled(sample, sampleLength, nalUnitLengthFieldLength) ?: sample
         }
@@ -316,6 +326,39 @@ internal class DolbyVisionMatroskaTransformer(
             return stripped
         }
         return null
+    }
+
+    /**
+     * Task 1: inject the source RPU's HDR10 static-metadata SEI (MDCV always,
+     * CLLI when known) into [data] on the strip path, so a non-DV HDR10 sink
+     * tone-maps against the master. Only for P7/P8.1, only when the base layer
+     * does not already carry HDR10 static SEI, and only once the RPU metadata has
+     * been read this stream. Returns null (caller keeps [data]) when nothing is
+     * injected; otherwise returns the enlarged bytes and updates
+     * [lastTransformedLength]. [len] is the valid length of [data], which may be
+     * an oversized scratch buffer.
+     */
+    private fun injectHdr10SeiIfEnabled(
+        data: ByteArray,
+        len: Int,
+        profile: Int?,
+        nalLengthFieldLength: Int
+    ): ByteArray? {
+        if (!injectHdr10Sei) return null
+        if (profile != 7 && profile != 8) return null
+        val nals = cachedHdr10SeiNals ?: run {
+            val meta = DolbyVisionConversionStats.getLastRpuMetadata() ?: return null
+            val built = Hdr10SeiInjector.buildSeiNals(meta)
+            if (built.isEmpty()) return null   // don't cache empty; retry next sample
+            cachedHdr10SeiNals = built
+            built
+        }
+        if (Hdr10SeiInjector.hasHdr10StaticSei(data, len, annexB = false, nalLengthFieldLength = nalLengthFieldLength)) {
+            return null
+        }
+        val injected = Hdr10SeiInjector.injectLengthDelimited(data, len, nalLengthFieldLength, nals)
+        lastTransformedLength = injected.size
+        return injected
     }
 
     // ── Conversion + NAL helpers ──

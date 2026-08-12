@@ -47,7 +47,8 @@ internal class DolbyVisionExtractorsFactory(
     private val delegate: ExtractorsFactory,
     private val config: DolbyVisionConversionConfig,
     private val stripDvRpu: Boolean = false,
-    private val stripHdr10PlusSei: Boolean = false
+    private val stripHdr10PlusSei: Boolean = false,
+    private val injectHdr10Sei: Boolean = false
 ) : ExtractorsFactory {
 
     override fun createExtractors(): Array<Extractor> =
@@ -77,6 +78,7 @@ internal class DolbyVisionExtractorsFactory(
                     config = if (config.active) config else DolbyVisionConversionConfig(active = false),
                     stripRpuOnly = stripDvRpu && !config.active,
                     stripHdr10PlusSei = stripHdr10PlusSei,
+                    injectHdr10Sei = injectHdr10Sei,
                 )
             )
         }

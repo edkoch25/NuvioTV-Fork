@@ -1146,7 +1146,8 @@ internal fun PlayerRuntimeController.initializePlayer(
                             manualDv81 = manualDv81Selected && !dv7Mode1Forced
                         ),
                         stripDvRpu = stripDvRpuEnabled,
-                        stripHdr10PlusSei = stripHdr10PlusSei
+                        stripHdr10PlusSei = stripHdr10PlusSei,
+                        injectHdr10Sei = playerSettings.injectHdr10MetadataOnStrip
                     )
 
             setLoadingStatus(

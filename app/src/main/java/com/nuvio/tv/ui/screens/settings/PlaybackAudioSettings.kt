@@ -85,6 +85,7 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
     onSetAllowDtsHdPassthrough: (Boolean) -> Unit,
     onSetDv5ToDv81Enabled: (Boolean) -> Unit,
     onSetStripHdr10PlusSei: (Boolean) -> Unit,
+    onSetInjectHdr10Sei: (Boolean) -> Unit,
     onItemFocused: () -> Unit = {},
     enabled: Boolean = true,
     videoExtraItems: (LazyListScope.() -> Unit)? = null
@@ -436,6 +437,18 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
                 subtitle = stringResource(R.string.audio_strip_hdr10plus_sub),
                 isChecked = playerSettings.stripHdr10PlusSei,
                 onCheckedChange = onSetStripHdr10PlusSei,
+                onFocused = onItemFocused,
+                enabled = enabled
+            )
+        }
+
+        item(key = "audio_inject_hdr10_sei") {
+            ToggleSettingsItem(
+                icon = Icons.Default.Tune,
+                title = stringResource(R.string.audio_inject_hdr10_sei_title),
+                subtitle = stringResource(R.string.audio_inject_hdr10_sei_sub),
+                isChecked = playerSettings.injectHdr10MetadataOnStrip,
+                onCheckedChange = onSetInjectHdr10Sei,
                 onFocused = onItemFocused,
                 enabled = enabled
             )
