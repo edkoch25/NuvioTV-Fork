@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -36,12 +37,17 @@ class AddonHealthStore @Inject constructor(
         const val RESOLVER_PREFIX = "resolver:"
         const val METADATA_PREFIX = "metadata:"
         const val METADATA_KEY = "metadata:pipeline"
+        // Redundant fast successes for the same key within this window are
+        // dropped (collapses e.g. one addon serving many catalog rows on
+        // startup). Failures, empties and slow successes are never coalesced.
+        private const val COALESCE_WINDOW_MS = 30_000L
 
         fun addonKey(canonicalBaseUrl: String): String = ADDON_PREFIX + canonicalBaseUrl
         fun resolverKey(provider: String): String = RESOLVER_PREFIX + provider
     }
 
     private val gson = Gson()
+    private val lastFastSuccessAtMs = ConcurrentHashMap<String, Long>()
     private val recordsKey = stringPreferencesKey("health_records")
     private val recordMapType = object : TypeToken<Map<String, HealthRecord>>() {}.type
 
@@ -85,8 +91,21 @@ class AddonHealthStore @Inject constructor(
     /** Record one request outcome against [key]. Never throws. */
     suspend fun record(key: String, outcome: HealthOutcome, latencyMs: Long) {
         if (!layoutPreferenceDataStore.addonHealthEnabled.first()) return
+        val now = System.currentTimeMillis()
+        if (outcome == HealthOutcome.SUCCESS) {
+            val slow = if (key.startsWith(METADATA_PREFIX)) {
+                AddonHealthModel.METADATA_SLOW_LATENCY_MS
+            } else {
+                AddonHealthModel.SLOW_LATENCY_MS
+            }
+            if (latencyMs <= slow) {
+                val lastFast = lastFastSuccessAtMs[key] ?: 0L
+                if (now - lastFast < COALESCE_WINDOW_MS) return
+                lastFastSuccessAtMs[key] = now
+            }
+        }
         val sample = HealthSample(
-            atMs = System.currentTimeMillis(),
+            atMs = now,
             outcome = outcome,
             latencyMs = latencyMs
         )
