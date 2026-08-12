@@ -102,7 +102,7 @@ of person who tunes buffer settings for fun.
 
 ## Stats for Nerds Overlay -
 
-<img width="1920" height="1080" alt="screenshot1" src="https://github.com/user-attachments/assets/9f4eba71-389e-47da-95a1-fc1b22e5a86c" />
+<img width="1920" height="1080" alt="IMG_3835" src="https://github.com/user-attachments/assets/623b334f-01fd-464f-a49a-c58eb5548e59" />
 
 ## MDBList Tracking Integration -
 
@@ -127,6 +127,7 @@ of person who tunes buffer settings for fun.
 - **Home layout picker** -- the app is now **Modern-layout only**. The picker was removed from both
   first-run setup and Settings. The Modern-specific options (landscape posters, full-screen hero
   backdrop, poster/card styling) remain.
+- **Color Themes** - largely disabled as the UI moves toward monochrome
 - **IAMF** and **MPEG-H** audio decoder components, and an unused UI component -- dropped to slim
   the build. No user-facing loss.
 - **Android TV channel / preview-program sync** -- not used on this fork's target setup.
@@ -140,8 +141,8 @@ manager**, and **subtitle add-on support** are intact. Only the layout picker wa
 
 ## Target hardware
 
-Primary/validated target is the **Amlogic S905X4 / 4GB RAM and Amlogic S905X5M / 2GB RAM class (armeabi-v7a)**, tested on a Homatics Box R
-4K Plus and a Xiaomi Box S 3rd Gen, in a Samsung HW-Q800F -> LG C9 eARC chain. Other devices (Nvidia Shield, Prism+, Xiaomi) have been
+Primary/validated target is the **Amlogic S905X4 / 4GB RAM, Amlogic S905X5M / 2GB RAM class (armeabi-v7a) and AmLogic S905X5-J / 4GB RAM (armeabi-v8a)**, tested on a Homatics Box R
+4K Plus, Xiaomi Box S 3rd Gen, and Ugoos AM9 Pro in a Samsung HW-Q800F -> LG C9 eARC chain. Other devices (Nvidia Shield, Prism+, Xiaomi) have been
 community-tested.
 
 ---
