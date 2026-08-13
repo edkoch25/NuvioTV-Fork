@@ -440,6 +440,7 @@ internal fun HomeViewModel.loadCatalogPipeline(
                 HomeViewModel.TAG,
                 "Loading home catalog addonId=${addon.id} addonName=${addon.name} type=${catalog.apiType} catalogId=${catalog.id} catalogName=${catalog.name} supportsSkip=$supportsSkip skipStep=$skipStep"
             )
+            val catalogT0 = android.os.SystemClock.elapsedRealtime()
             catalogRepository.getCatalog(
                 addonBaseUrl = addon.baseUrl,
                 addonId = addon.id,
@@ -467,6 +468,7 @@ internal fun HomeViewModel.loadCatalogPipeline(
                         if (!hasCountedCompletion) {
                             pendingCatalogLoads = (pendingCatalogLoads - 1).coerceAtLeast(0)
                             hasCountedCompletion = true
+                            android.util.Log.i("CatalogTiming", "addon=${addon.name} catalogId=${catalog.id} ms=${android.os.SystemClock.elapsedRealtime() - catalogT0} items=${result.data.items.size} result=ok")
                         }
                         Log.d(
                             HomeViewModel.TAG,
@@ -503,6 +505,7 @@ internal fun HomeViewModel.loadCatalogPipeline(
                         if (!hasCountedCompletion) {
                             pendingCatalogLoads = (pendingCatalogLoads - 1).coerceAtLeast(0)
                             hasCountedCompletion = true
+                            android.util.Log.i("CatalogTiming", "addon=${addon.name} catalogId=${catalog.id} ms=${android.os.SystemClock.elapsedRealtime() - catalogT0} result=err code=${result.code}")
                         }
                         Log.w(
                             HomeViewModel.TAG,
