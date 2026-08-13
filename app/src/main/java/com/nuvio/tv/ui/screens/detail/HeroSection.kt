@@ -18,6 +18,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -298,31 +299,41 @@ fun HeroContentSection(
 
                     Spacer(modifier = Modifier.height(NuvioTheme.spacing.lg))
 
-                    // Director/Writer line above description
-                    if (!creditLine.isNullOrBlank()) {
-                        Text(
-                            text = creditLine,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = NuvioTheme.extendedColors.textSecondary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.fillMaxWidth(0.6f)
-                        )
-                        Spacer(modifier = Modifier.height(NuvioTheme.spacing.md))
+                    // Director/Writer line above description. Reserve its height (and the
+                    // two rows below) so late-arriving content - creditLine on TMDB enrichment,
+                    // MDBList ratings async, and the auto-play source badge - fills in-place
+                    // instead of pushing the synopsis down (the 'bounce'). Heights are tuned to
+                    // the content; adjust the min values if a row still nudges or leaves a gap.
+                    Box(modifier = Modifier.heightIn(min = 20.dp)) {
+                        if (!creditLine.isNullOrBlank()) {
+                            Text(
+                                text = creditLine,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = NuvioTheme.extendedColors.textSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.fillMaxWidth(0.6f)
+                            )
+                        }
                     }
+                    Spacer(modifier = Modifier.height(NuvioTheme.spacing.md))
 
-                    if (mdbListRatings?.isEmpty() == false) {
-                        MDBListRatingsRow(ratings = mdbListRatings)
-                        Spacer(modifier = Modifier.height(14.dp))
+                    Box(modifier = Modifier.heightIn(min = 24.dp)) {
+                        if (mdbListRatings?.isEmpty() == false) {
+                            MDBListRatingsRow(ratings = mdbListRatings)
+                        }
                     }
+                    Spacer(modifier = Modifier.height(14.dp))
 
-                    if (sourceSignal != null) {
-                        SourceBadgeRow(
-                            signal = sourceSignal,
-                            modifier = Modifier.fillMaxWidth(0.75f)
-                        )
-                        Spacer(modifier = Modifier.height(14.dp))
+                    Box(modifier = Modifier.heightIn(min = 24.dp)) {
+                        if (sourceSignal != null) {
+                            SourceBadgeRow(
+                                signal = sourceSignal,
+                                modifier = Modifier.fillMaxWidth(0.75f)
+                            )
+                        }
                     }
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     // Series/movie description (not the episode one). Clamp it so the meta row
                     // below stays on-screen (the hero is a fixed 540dp = full height on a 1080p
