@@ -22,6 +22,8 @@ import com.nuvio.tv.domain.model.supportsExtra
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
@@ -361,6 +363,10 @@ internal suspend fun HomeViewModel.loadAllCatalogsPipeline(
             loadCatalogPipeline(addon, catalog, generation)
         }
 
+        // nt2: kick the reserved-headroom background sweep so the remaining
+        // lazy catalogues fill in on their own, without waiting for scroll.
+        startReservedHeadroomSweep(generation)
+
         // Immediately schedule an update so placeholder rows appear in the UI
         // while catalogs are still loading.
         scheduleUpdateCatalogRows()
@@ -429,7 +435,7 @@ internal fun HomeViewModel.loadCatalogPipeline(
     addon: Addon,
     catalog: CatalogDescriptor,
     generation: Long
-) {
+): Job {
     val loadJob = viewModelScope.launch {
         var hasCountedCompletion = false
         catalogLoadSemaphore.withPermit {
@@ -525,6 +531,7 @@ internal fun HomeViewModel.loadCatalogPipeline(
         }
     }
     registerCatalogLoadJob(loadJob)
+    return loadJob
 }
 
 internal fun HomeViewModel.loadMoreCatalogItemsPipeline(catalogId: String, addonId: String, type: String) {
@@ -1100,4 +1107,56 @@ private fun HomeViewModel.reconcileFullyWatchedFromLocalItems(
         fullyWatchedSeriesIds.updateWithValidation(mergedHolderIds, cacheResolvedIds)
     }
     return mergedHolderIds
+}
+
+private const val CATALOG_SWEEP_CONCURRENCY = 2
+private const val CATALOG_SWEEP_YIELD_POLL_MS = 150L
+
+// nt2: reserved-headroom background sweep.
+// Once the eager catalogue batch is dispatched, this drains the remaining
+// pendingLazyCatalogs automatically, in display (insertion) order, so off-screen
+// rows fill in on their own without the user scrolling to them. It yields to
+// eager and on-demand (scrolled-to) loads: it only dispatches while no non-sweep
+// catalogue load is pending and while fewer than CATALOG_SWEEP_CONCURRENCY sweep
+// loads are already in flight, leaving at least three of the shared five
+// catalogLoadSemaphore permits free so a scrolled-to row never queues behind
+// background work. Aborts if the catalogue generation changes (refresh / layout
+// switch).
+internal fun HomeViewModel.startReservedHeadroomSweep(generation: Long) {
+    catalogSweepJob?.cancel()
+    catalogSweepJob = viewModelScope.launch {
+        while (isActive && generation == catalogLoadGeneration) {
+            val nonSweepPending = pendingCatalogLoads > catalogSweepInFlight.get()
+            val atSweepCap = catalogSweepInFlight.get() >= CATALOG_SWEEP_CONCURRENCY
+            if (nonSweepPending || atSweepCap) {
+                delay(CATALOG_SWEEP_YIELD_POLL_MS)
+                continue
+            }
+            val next = pullNextSweepCatalog() ?: break
+            catalogSweepInFlight.incrementAndGet()
+            pendingCatalogLoads = pendingCatalogLoads + 1
+            val job = loadCatalogPipeline(next.first, next.second, generation)
+            job.invokeOnCompletion { catalogSweepInFlight.decrementAndGet() }
+        }
+    }
+}
+
+// nt2: atomically claim the next pending lazy catalogue for the sweep, in display
+// (insertion) order, sharing the same catalogStateLock and lazyLoadRequestedKeys
+// dedup as the on-demand requestLazyCatalogLoad path so a catalogue is never
+// loaded twice. Returns null once the pending set is drained.
+private fun HomeViewModel.pullNextSweepCatalog(): Pair<Addon, CatalogDescriptor>? {
+    return synchronized(catalogStateLock) {
+        val iterator = pendingLazyCatalogs.entries.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            val key = entry.key
+            val value = entry.value
+            iterator.remove()
+            if (lazyLoadRequestedKeys.add(key)) {
+                return@synchronized value
+            }
+        }
+        null
+    }
 }

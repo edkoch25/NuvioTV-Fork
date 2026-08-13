@@ -95,7 +95,7 @@ class HomeViewModel @Inject constructor(
         private const val MAX_RECENT_PROGRESS_ITEMS = 300
         private const val MAX_NEXT_UP_LOOKUPS = 24
         private const val MAX_NEXT_UP_CONCURRENCY = 4
-        private const val MAX_CATALOG_LOAD_CONCURRENCY = 8
+        private const val MAX_CATALOG_LOAD_CONCURRENCY = 5
         internal const val EXTERNAL_META_PREFETCH_FOCUS_DEBOUNCE_MS = 220L
         internal const val EXTERNAL_META_PREFETCH_ADJACENT_DEBOUNCE_MS = 120L
         private const val MAX_ENRICHMENT_CACHE_SIZE = 64
@@ -348,9 +348,13 @@ class HomeViewModel @Inject constructor(
     internal var startupAuthNoticeJob: Job? = null
 
     // Lazy catalog loading
-    internal val eagerCatalogLoadCount: Int = 4
+    internal val eagerCatalogLoadCount: Int = 8
     internal val lazyLoadRequestedKeys: MutableSet<String> = ConcurrentHashMap.newKeySet()
     internal val pendingLazyCatalogs = linkedMapOf<String, Pair<Addon, CatalogDescriptor>>()
+    // nt2: reserved-headroom background sweep state
+    @Volatile
+    internal var catalogSweepJob: Job? = null
+    internal val catalogSweepInFlight = java.util.concurrent.atomic.AtomicInteger(0)
     /** All placeholder descriptors for homeRow construction. */
     internal data class PlaceholderDescriptor(
         val catalogKey: String,
