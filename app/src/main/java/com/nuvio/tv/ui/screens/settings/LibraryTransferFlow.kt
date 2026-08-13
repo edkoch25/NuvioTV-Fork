@@ -136,6 +136,10 @@ private fun LibraryTransferReviewDialog(
                     ),
                     style = MaterialTheme.typography.bodyMedium
                 )
+                Text(
+                    text = stringResource(R.string.library_transfer_linked_warning),
+                    style = MaterialTheme.typography.bodySmall
+                )
                 PanelActionRow(
                     label = stringResource(R.string.library_transfer_copy),
                     onClick = onCopy,

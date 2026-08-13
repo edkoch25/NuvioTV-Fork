@@ -1903,6 +1903,7 @@
     <string name="library_transfer_title">Transfer library</string>
     <string name="library_transfer_working">Working</string>
     <string name="library_transfer_plan">%1$d to copy, %2$d already there, %3$d unmatched</string>
+    <string name="library_transfer_linked_warning">Note: changes may also affect services linked to the destination (for example, an MDBList list synced with Trakt).</string>
     <string name="library_transfer_result">Copied %1$d, %2$d already there, %3$d unmatched</string>
     <string name="library_transfer_removed">Removed %1$d from the source</string>
     <string name="library_transfer_kept">Kept %1$d at the source (removing would clear watched history or a rating)</string>

@@ -23,6 +23,7 @@ import com.nuvio.tv.domain.model.ListMembershipChanges
 import com.nuvio.tv.domain.model.ListMembershipSnapshot
 import com.nuvio.tv.domain.model.TraktListPrivacy
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -871,7 +872,14 @@ class TraktLibraryService @Inject constructor(
         val allItems = mutableListOf<T>()
         var currentPage = 1
         while (true) {
-            val response = fetch(currentPage)
+            var response = fetch(currentPage)
+            var attempt = 0
+            while (!response.isSuccessful && response.code() == 429 && attempt < RATE_LIMIT_MAX_RETRIES) {
+                attempt++
+                val retryAfterMs = response.headers()["Retry-After"]?.toLongOrNull()?.times(1000)
+                delay(retryAfterMs ?: (RATE_LIMIT_BACKOFF_MS * attempt))
+                response = fetch(currentPage)
+            }
             if (!response.isSuccessful) {
                 throw IllegalStateException(appContext.getString(com.nuvio.tv.R.string.trakt_library_error_paginated_fetch_failed, response.code()))
             }
@@ -887,5 +895,7 @@ class TraktLibraryService @Inject constructor(
         const val WATCHLIST_KEY = "watchlist"
         const val PERSONAL_KEY_PREFIX = "personal:"
         private const val ME_PATH = "me"
+        private const val RATE_LIMIT_MAX_RETRIES = 3
+        private const val RATE_LIMIT_BACKOFF_MS = 2_000L
     }
 }

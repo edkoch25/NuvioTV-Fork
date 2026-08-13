@@ -6,6 +6,7 @@ import com.nuvio.tv.core.tracking.TrackingRefreshIntent
 import com.nuvio.tv.core.tracking.providerId
 import com.nuvio.tv.data.local.LibraryPreferences
 import com.nuvio.tv.domain.model.LibraryEntry
+import com.nuvio.tv.domain.model.LibraryListTab
 import com.nuvio.tv.domain.model.LibraryEntryInput
 import com.nuvio.tv.domain.model.LibrarySourceMode
 import com.nuvio.tv.domain.model.ListMembershipChanges
@@ -48,10 +49,13 @@ class LibraryTransferService @Inject constructor(
     private val profileManager: ProfileManager
 ) {
     /** The current contents of a library location. */
-    suspend fun read(mode: LibrarySourceMode): List<LibraryEntry> {
+    suspend fun read(
+        mode: LibrarySourceMode,
+        watchlistOnly: Boolean = false
+    ): List<LibraryEntry> {
         // MDBList: read the watchlist directly and skip poster hydration — the
         // transfer only needs ids, and hydrating a large library on every read
-        // is pure overhead here.
+        // is pure overhead here. (MDBList is already watchlist-only.)
         if (mode == LibrarySourceMode.MDBLIST) {
             val apiKey = mdbListDataSource.apiKeyOrNull() ?: return emptyList()
             return mdbListDataSource.fetchAll(apiKey)
@@ -62,14 +66,28 @@ class LibraryTransferService @Inject constructor(
         } else {
             val provider = trackingProviders.provider(providerId) ?: return emptyList()
             provider.refresh(TrackingRefreshIntent.USER_INITIATED)
-            provider.items.first()
+            val items = provider.items.first()
+            if (watchlistOnly) {
+                // Restrict to the watchlist / plan-to-watch tab so a transfer
+                // doesn't sweep in completed/watching/history and dump it on the
+                // destination's watchlist. Other lists/statuses are opt-in later.
+                val watchlistKey = provider.tabs.first()
+                    .firstOrNull { it.type == LibraryListTab.Type.WATCHLIST }?.key
+                if (watchlistKey != null) {
+                    items.filter { watchlistKey in it.listKeys }
+                } else {
+                    items
+                }
+            } else {
+                items
+            }
         }
     }
 
     /** Dry run: what a copy from [from] to [to] would do, without writing. */
     suspend fun preview(from: LibrarySourceMode, to: LibrarySourceMode): LibraryTransferPlan {
         if (from == to) return LibraryTransferPlan(emptyList(), 0, 0, 0, 0)
-        val source = read(from)
+        val source = read(from, watchlistOnly = true)
         val destinationKeys = read(to).map(::transferKey).toSet()
         return computeTransferPlan(source, destinationKeys)
     }
@@ -81,7 +99,7 @@ class LibraryTransferService @Inject constructor(
         mode: LibraryTransferMode
     ): LibraryTransferResult {
         if (from == to) return LibraryTransferResult(0, 0, 0, 0, 0, 0, 0)
-        val source = read(from)
+        val source = read(from, watchlistOnly = true)
         val destinationKeysBefore = read(to).map(::transferKey).toSet()
         val plan = computeTransferPlan(source, destinationKeysBefore)
         val written = writeAll(to, plan.toWrite)
@@ -190,6 +208,11 @@ class LibraryTransferService @Inject constructor(
         if (providerId != null) {
             val provider = trackingProviders.provider(providerId)
                 ?: return RemovalOutcome(0, items.size)
+            // Remove only the watchlist/plan-to-watch membership, preserving any
+            // other lists/statuses the item belongs to (transfers are currently
+            // watchlist-scoped, so a Move must not clear personal lists too).
+            val watchlistKey = provider.tabs.first()
+                .firstOrNull { it.type == LibraryListTab.Type.WATCHLIST }?.key
             var removed = 0
             var kept = 0
             var consecutiveFailures = 0
@@ -201,15 +224,19 @@ class LibraryTransferService @Inject constructor(
                     kept++
                     continue
                 }
-                if (current.values.none { selected -> selected }) {
-                    removed++ // already not in the source library
+                val desired = if (watchlistKey != null && current[watchlistKey] == true) {
+                    current.toMutableMap().apply { put(watchlistKey, false) }
+                } else {
+                    current
+                }
+                if (desired == current) {
+                    removed++ // not in the watchlist; nothing to remove
                     continue
                 }
-                val cleared = ListMembershipChanges(current.mapValues { false })
                 val error = runCatching {
                     provider.applyMembershipChanges(
                         item,
-                        cleared,
+                        ListMembershipChanges(desired),
                         destructiveRemovalConfirmed = false
                     )
                 }.exceptionOrNull()
