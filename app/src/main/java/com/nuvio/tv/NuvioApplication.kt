@@ -188,6 +188,22 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
                                 .dns(IPv4FirstDns())
                                 .followRedirects(true)
                                 .followSslRedirects(true)
+                                // Default 1-week cache for image responses that ship no usable
+                                // Cache-Control (e.g. btttr.cc rating posters, which otherwise
+                                // re-download from NETWORK on every scroll return). Ratings can
+                                // be up to a week stale in exchange for killing the reload thrash.
+                                .addNetworkInterceptor { chain ->
+                                    val response = chain.proceed(chain.request())
+                                    val cc = response.header("Cache-Control")?.lowercase()
+                                    if (cc == null || "no-store" in cc || "no-cache" in cc || "max-age=0" in cc) {
+                                        response.newBuilder()
+                                            .header("Cache-Control", "max-age=604800, public")
+                                            .removeHeader("Pragma")
+                                            .build()
+                                    } else {
+                                        response
+                                    }
+                                }
                                 .build()
                         },
                         cacheStrategy = { CacheControlCacheStrategy() },
