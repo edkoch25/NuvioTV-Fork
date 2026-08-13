@@ -318,12 +318,16 @@ fun HeroContentSection(
                     }
                     Spacer(modifier = Modifier.height(NuvioTheme.spacing.md))
 
-                    Box(modifier = Modifier.heightIn(min = 24.dp)) {
+                    // MDBList ratings: don't reserve space - a title with no ratings stays
+                    // null (indistinguishable from 'still loading'), so a reserved box would sit
+                    // empty forever. Instead animate the row in when ratings actually arrive, so
+                    // ratingless titles show nothing (no gap) and rated titles get a soft settle.
+                    Column(modifier = Modifier.animateContentSize()) {
                         if (mdbListRatings?.isEmpty() == false) {
                             MDBListRatingsRow(ratings = mdbListRatings)
+                            Spacer(modifier = Modifier.height(14.dp))
                         }
                     }
-                    Spacer(modifier = Modifier.height(14.dp))
 
                     Box(modifier = Modifier.heightIn(min = 24.dp)) {
                         if (sourceSignal != null) {
