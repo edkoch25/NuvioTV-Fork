@@ -260,24 +260,6 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
                     .build()
             }
             .crossfade(false)
-            // PosterTiming diagnostic [temporary]: logs each image load's source
-            // (MEMORY_CACHE/DISK/NETWORK), duration and URL. Repeated NETWORK loads
-            // for the same URL indicate cache-busting (e.g. rating-in-URL posters).
-            .eventListener(object : coil3.EventListener() {
-                private val startMs = java.util.concurrent.ConcurrentHashMap<coil3.request.ImageRequest, Long>()
-                override fun onStart(request: coil3.request.ImageRequest) {
-                    startMs[request] = android.os.SystemClock.elapsedRealtime()
-                }
-                override fun onSuccess(request: coil3.request.ImageRequest, result: coil3.request.SuccessResult) {
-                    val t0 = startMs.remove(request)
-                    val ms = if (t0 != null) android.os.SystemClock.elapsedRealtime() - t0 else -1L
-                    android.util.Log.i("PosterTiming", "src=${result.dataSource} ms=$ms url=${request.data}")
-                }
-                override fun onError(request: coil3.request.ImageRequest, result: coil3.request.ErrorResult) {
-                    startMs.remove(request)
-                    android.util.Log.w("PosterTiming", "src=error url=${request.data}")
-                }
-            })
             .precision(coil3.size.Precision.INEXACT)
             .allowHardware(true)
             // allowRgb565 removed: inert on the hardware decode path (API 26+), and
