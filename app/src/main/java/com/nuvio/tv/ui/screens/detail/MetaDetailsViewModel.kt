@@ -1002,7 +1002,14 @@ class MetaDetailsViewModel @Inject constructor(
         return "$base\n\nID: $lookupId"
     }
 
-    private fun applyMeta(meta: Meta) {
+    /**
+     * Render-raw-first (0.8.4-nt1): publishes meta to the UI state only — the
+     * part that makes the details screen appear. Split out of applyMeta so the
+     * raw addon meta can be painted immediately, before the ~900ms TMDB
+     * enrichment, then re-published (with backdrop/logo/etc.) on the enriched
+     * pass. Side effects run once, on the enriched applyMeta below.
+     */
+    private fun publishMetaToUi(meta: Meta) {
         // Update the effective content ID so watch-progress observers pick up
         // the canonical ID (e.g. IMDB "tt0396375") instead of the navigation ID
         // (which may be "tmdb:13836").  Don't downgrade from an IMDB ID to a
@@ -1057,6 +1064,10 @@ class MetaDetailsViewModel @Inject constructor(
             )
         }
 
+    }
+
+    private fun applyMeta(meta: Meta) {
+        publishMetaToUi(meta)
         // Calculate next to watch after meta is loaded
         reevaluateSeriesWatchedBadge()
         calculateNextToWatch()
@@ -1092,6 +1103,11 @@ class MetaDetailsViewModel @Inject constructor(
         launchEarlyStreamPrefetch(meta)
         // Fire all independent async jobs immediately — they run in parallel.
         loadMoreLikeThisAsync(meta)
+        // Render-raw-first (0.8.4-nt1): paint the already-warmed base meta NOW so
+        // the details screen appears immediately, instead of blanking until the
+        // enrichMeta await below (~900ms cold). The enriched applyMeta re-publishes
+        // with TMDB backdrop/logo/etc. and runs the side effects once.
+        publishMetaToUi(meta)
         val enrichT0 = android.os.SystemClock.elapsedRealtime()
         val enriched = enrichMeta(meta)
         android.util.Log.i(
