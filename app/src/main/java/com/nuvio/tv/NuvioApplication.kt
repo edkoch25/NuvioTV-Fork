@@ -154,6 +154,25 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
     override fun newImageLoader(context: android.content.Context): ImageLoader {
         return ImageLoader.Builder(this)
             .components {
+                // Size-aware TMDB downscaler: the Bingecat catalogue serves original-size
+                // TMDB image URLs (multi-MB, 600-1200ms to decode). Rewrite them to a bucket
+                // matching the resolved display target. Only touches image.tmdb.org
+                // /t/p/original/ at poster-sized targets (<=780px); screen-sized backdrops
+                // (>780px) and unsized requests keep original. Sizes off the resolved target,
+                // so it tracks the card size AND the UI-scale feature automatically.
+                add(coil3.map.Mapper<String, String> { data, options ->
+                    val w = (options.size.width as? coil3.size.Dimension.Pixels)?.px
+                    if (data.startsWith("https://image.tmdb.org/t/p/original/") && w != null && w in 1..780) {
+                        val bucket = when {
+                            w <= 342 -> "w342"
+                            w <= 500 -> "w500"
+                            else -> "w780"
+                        }
+                        data.replace("/t/p/original/", "/t/p/$bucket/")
+                    } else {
+                        null
+                    }
+                })
                 if (Build.VERSION.SDK_INT >= 28) {
                     add(AnimatedImageDecoder.Factory())
                 } else {
