@@ -27,6 +27,8 @@ import com.nuvio.tv.domain.model.LibrarySourceMode
 import com.nuvio.tv.domain.model.ListMembershipChanges
 import com.nuvio.tv.core.tracking.TrackingMembershipRemovalConfirmation
 import com.nuvio.tv.core.tracking.toggleTrackingMembershipSelection
+import com.nuvio.tv.core.tracking.TrackingProgressRefreshCoordinator
+import com.nuvio.tv.core.tracking.TrackingRefreshIntent
 import com.nuvio.tv.domain.model.Meta
 import com.nuvio.tv.domain.model.MetaTrailer
 import com.nuvio.tv.domain.model.NextToWatch
@@ -110,7 +112,8 @@ class MetaDetailsViewModel @Inject constructor(
     val posterOptions: com.nuvio.tv.ui.components.posteroptions.PosterOptionsController,
     private val prefetchSelectionSupplier: com.nuvio.tv.core.stream.PrefetchSelectionSupplier,
     savedStateHandle: SavedStateHandle,
-    private val healthStore: AddonHealthStore
+    private val healthStore: AddonHealthStore,
+    private val trackingProgressRefreshCoordinator: TrackingProgressRefreshCoordinator
 ) : ViewModel() {
     private val itemId: String = savedStateHandle["itemId"] ?: ""
     private val itemType: String = savedStateHandle["itemType"] ?: ""
@@ -558,6 +561,7 @@ class MetaDetailsViewModel @Inject constructor(
             MetaDetailsEvent.OnRemovalCancelled -> cancelPickerRemoval()
             MetaDetailsEvent.OnClearMessage -> clearMessage()
             MetaDetailsEvent.OnLifecyclePause -> handleLifecyclePause()
+            MetaDetailsEvent.OnLifecycleResume -> handleLifecycleResume()
         }
     }
 
@@ -3037,6 +3041,25 @@ class MetaDetailsViewModel @Inject constructor(
         if (state.isTrailerPlaying && !state.showTrailerControls) {
             trailerHasPlayed = true
             setTrailerPlaybackState(isPlaying = false, showControls = false, hideLogo = false)
+        }
+    }
+
+    /**
+     * Returning to this page from the player is an in-app navigation, so the
+     * app never went through MainActivity.onResume and the connected tracking
+     * providers were never asked to re-pull. Under a remote Watch Progress
+     * source getAllEpisodeProgress is provider-projected, so an episode just
+     * completed in the player does not surface until the next provider refresh
+     * - leaving nextToWatch (and the hero source-line prefetch keyed off it)
+     * stale on the episode just watched. Mirror MainActivity.onResume's refresh
+     * here so the completion is pulled and the existing
+     * observeWatchProgress -> calculateNextToWatch -> stream-prefetch cascade
+     * re-runs for the new target. A no-op under a local source (no
+     * authenticated providers to refresh).
+     */
+    private fun handleLifecycleResume() {
+        viewModelScope.launch {
+            trackingProgressRefreshCoordinator.refreshConnected(TrackingRefreshIntent.INVALIDATED)
         }
     }
 
