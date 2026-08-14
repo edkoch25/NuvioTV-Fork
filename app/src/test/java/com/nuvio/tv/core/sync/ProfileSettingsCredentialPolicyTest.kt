@@ -21,4 +21,23 @@ class ProfileSettingsCredentialPolicyTest {
         assertFalse(shouldExcludePreferenceFromProfileSettingsSync("mdblist_settings", "mdblist_enabled"))
         assertFalse(shouldExcludePreferenceFromProfileSettingsSync("animeskip_settings", "animeskip_enabled"))
     }
+
+    @Test
+    fun `audio passthrough and denied handling are device-local, excluded from profile settings blobs`() {
+        val deviceLocalAudioKeys = listOf(
+            "force_optical_passthrough",
+            "allow_ac3_passthrough",
+            "allow_eac3_passthrough",
+            "allow_truehd_passthrough",
+            "allow_dts_passthrough",
+            "allow_dts_hd_passthrough",
+            "denied_codec_handling",
+            "mat_passthrough_enabled",
+        )
+        deviceLocalAudioKeys.forEach { key ->
+            assertTrue(shouldExcludePreferenceFromProfileSettingsSync("player_settings", key))
+            // the exclusion is scoped to player_settings only
+            assertFalse(shouldExcludePreferenceFromProfileSettingsSync("theme_settings", key))
+        }
+    }
 }
