@@ -36,6 +36,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -495,11 +496,14 @@ fun ModernHomeContent(
     val latestHeroRow by rememberUpdatedState(activeRow)
     val latestHeroIndex by rememberUpdatedState(clampedActiveItemIndex)
     LaunchedEffect(activeHeroItemKey, verticalRowListState) {
-        if (verticalRowListState.isScrollInProgress) return@LaunchedEffect
         val targetHeroKey = activeHeroItemKey ?: return@LaunchedEffect
         val settleDelayMs = heroFocusSettleDelayMs.longValue
         delay(settleDelayMs)
-        if (verticalRowListState.isScrollInProgress) return@LaunchedEffect
+        // nt2: the vertical scroll-in to a new row can outlast the debounce, so
+        // wait for it to actually finish instead of bailing here (this effect is
+        // keyed on activeHeroItemKey and would not re-run on settle), otherwise
+        // the first card of a scrolled-to row never updates.
+        snapshotFlow { verticalRowListState.isScrollInProgress }.first { !it }
         if (System.currentTimeMillis() - lastHeroNavigationAtMs.longValue < settleDelayMs) return@LaunchedEffect
         val row = latestHeroRow ?: return@LaunchedEffect
         val latestKey = row.items.getOrNull(latestHeroIndex)?.key ?: row.items.firstOrNull()?.key
@@ -515,11 +519,14 @@ fun ModernHomeContent(
     // (mirrors the hero-backdrop gate above) so it no longer runs mid-scroll and
     // janks. The instant-detail prefetch still happens, just once the scroll stops.
     LaunchedEffect(activeHeroItemKey, verticalRowListState) {
-        if (verticalRowListState.isScrollInProgress) return@LaunchedEffect
         val targetHeroKey = activeHeroItemKey ?: return@LaunchedEffect
         val settleDelayMs = heroFocusSettleDelayMs.longValue
         delay(settleDelayMs)
-        if (verticalRowListState.isScrollInProgress) return@LaunchedEffect
+        // nt2: the vertical scroll-in to a new row can outlast the debounce, so
+        // wait for it to actually finish instead of bailing here (this effect is
+        // keyed on activeHeroItemKey and would not re-run on settle), otherwise
+        // the first card of a scrolled-to row never updates.
+        snapshotFlow { verticalRowListState.isScrollInProgress }.first { !it }
         if (System.currentTimeMillis() - lastHeroNavigationAtMs.longValue < settleDelayMs) return@LaunchedEffect
         val row = latestHeroRow ?: return@LaunchedEffect
         val latestKey = row.items.getOrNull(latestHeroIndex)?.key ?: row.items.firstOrNull()?.key
