@@ -156,7 +156,37 @@ object StreamPrefetchCache {
                 return
             }
             val existing = inFlightJob
-            if (inFlightKey == key && existing != null && existing.isActive) return
+            if (inFlightKey == key && existing != null && existing.isActive) {
+                // A prefetch for this key is already in flight (e.g. binge_lookahead
+                // warming the next episode during playback). That job runs ITS OWN
+                // ranker/uiKey (binge passes none), so THIS caller's uiSignal is
+                // never published -- a details_hero caller returning to the detail
+                // page while the lookahead is still scraping would sit in SEARCHING.
+                // Chain this caller's ranker onto the in-flight result so its
+                // uiSignal is published once that scrape completes (no re-scrape).
+                if (rank != null) {
+                    scope.async {
+                        val result = try {
+                            existing.await()
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            emptyList()
+                        }
+                        if (result.isNotEmpty()) {
+                            try {
+                                rank(result)
+                                Log.i(TAG, "PREFETCH inflight-republish source=$source key=$key")
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                Log.w(TAG, "PREFETCH inflight-republish rank failed: ${e.message}")
+                            }
+                        }
+                    }
+                }
+                return
+            }
             existing?.cancel()
             inFlightKey = key
             inFlightJob = scope.async {
