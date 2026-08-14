@@ -1827,9 +1827,15 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                         // respect the timeout and stop (the caller shows the picker).
                         trySelectStream(data)?.let { recordSelection(it) }
                     } else {
-                        // No addon responded yet: keep waiting for the first usable
-                        // result, bounded so we never hang indefinitely.
-                        withTimeoutOrNull(timeoutMs) { searchSettled.await() }
+                        // No addon responded yet: keep waiting for the first
+                        // usable result up to the hard timeout, matching the
+                        // instant and unlimited branches below. searchSettled
+                        // completes when the scrape settles, so this resolves
+                        // at scrape-end (typically seconds); the cap is only a
+                        // hung-addon backstop, not a fixed wait. Without it a
+                        // slow in-flight next-episode prefetch that is about
+                        // to land was abandoned for the manual picker.
+                        withTimeoutOrNull(NEXT_EPISODE_HARD_TIMEOUT_MS) { searchSettled.await() }
                         if (!autoSelectTriggered) {
                             lastSuccessData?.let { trySelectStream(it)?.let { s -> recordSelection(s) } }
                         }
