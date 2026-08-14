@@ -132,7 +132,29 @@ object StreamPrefetchCache {
         if (type.isBlank() || videoId.isBlank()) return
         val key = keyOf(type, videoId, season, episode)
         synchronized(lock) {
-            if (freshLocked(key) != null) return
+            val cached = freshLocked(key)
+            if (cached != null) {
+                // A fresh entry already exists (Continue-Watching, or a previous
+                // open of this same detail page, pre-warmed this episode within
+                // the TTL). The scrape is done, but THIS caller's ranker has not
+                // run, so its uiSignal -- keyed on the caller's uiKey -- is never
+                // published, and a details_hero caller's hero source line stays
+                // stuck in SEARCHING. Re-invoke the supplied ranker on the cached
+                // groups (no re-scrape) so this caller's uiSignal is published.
+                if (rank != null && cached.isNotEmpty()) {
+                    scope.async {
+                        try {
+                            rank(cached)
+                            Log.i(TAG, "PREFETCH cache-republish source=$source key=$key")
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            Log.w(TAG, "PREFETCH cache-republish rank failed: ${e.message}")
+                        }
+                    }
+                }
+                return
+            }
             val existing = inFlightJob
             if (inFlightKey == key && existing != null && existing.isActive) return
             existing?.cancel()
