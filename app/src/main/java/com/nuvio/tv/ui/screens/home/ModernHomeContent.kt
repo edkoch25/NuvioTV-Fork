@@ -511,6 +511,23 @@ fun ModernHomeContent(
         }
     }
 
+    // nt2: fire on-focus enrichment/prefetch only after vertical scroll settles
+    // (mirrors the hero-backdrop gate above) so it no longer runs mid-scroll and
+    // janks. The instant-detail prefetch still happens, just once the scroll stops.
+    LaunchedEffect(activeHeroItemKey, verticalRowListState) {
+        if (verticalRowListState.isScrollInProgress) return@LaunchedEffect
+        val targetHeroKey = activeHeroItemKey ?: return@LaunchedEffect
+        val settleDelayMs = heroFocusSettleDelayMs.longValue
+        delay(settleDelayMs)
+        if (verticalRowListState.isScrollInProgress) return@LaunchedEffect
+        if (System.currentTimeMillis() - lastHeroNavigationAtMs.longValue < settleDelayMs) return@LaunchedEffect
+        val row = latestHeroRow ?: return@LaunchedEffect
+        val latestKey = row.items.getOrNull(latestHeroIndex)?.key ?: row.items.firstOrNull()?.key
+        if (latestKey != targetHeroKey) return@LaunchedEffect
+        val settledItem = row.items.getOrNull(latestHeroIndex) ?: row.items.firstOrNull() ?: return@LaunchedEffect
+        settledItem.metaPreview?.let { onItemFocus(it) }
+    }
+
     val latestActiveRow by rememberUpdatedState(activeRow)
     val latestCarouselRows by rememberUpdatedState(carouselRows)
     val latestVerticalRowListState by rememberUpdatedState(verticalRowListState)
@@ -1050,7 +1067,10 @@ fun ModernHomeContent(
             val stableOnRequestLazyCatalogLoad = remember(onRequestLazyCatalogLoad) {
                 { catalogKey: String -> onRequestLazyCatalogLoad(catalogKey) }
             }
-            val stableOnItemFocus = remember(onItemFocus) { { item: MetaPreview -> onItemFocus(item) } }
+            // nt2: enrichment is driven solely by the scroll-settle trigger; the
+            // immediate per-focus call raced the D-pad focus->scroll ordering and
+            // leaked mid-scroll, so the rows' onItemFocus is a no-op here.
+            val stableOnItemFocus = remember { { _: MetaPreview -> } }
             val stableOnPreloadAdjacentItem = remember(onPreloadAdjacentItem) { { item: MetaPreview -> onPreloadAdjacentItem(item) } }
 
             ModernHomeRowsList(
