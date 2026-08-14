@@ -231,6 +231,7 @@ class MetaDetailsViewModel @Inject constructor(
                 episode = episode,
                 source = source,
                 capMs = capMs,
+                republishOnDedup = source != "episode_focus",
                 rank = { groups ->
                     prefetchSelectionSupplier.rankAndPreResolve(
                         groups = groups,

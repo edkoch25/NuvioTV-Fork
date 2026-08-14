@@ -127,7 +127,16 @@ object StreamPrefetchCache {
          * The cache stays ignorant of settings storage: it invokes an opaque
          * supplier and stores an opaque result.
          */
-        rank: (suspend (List<AddonStreams>) -> PrefetchedSelection?)? = null
+        rank: (suspend (List<AddonStreams>) -> PrefetchedSelection?)? = null,
+        /**
+         * Opt-in: re-run [rank] to publish THIS caller's uiSignal when the
+         * prefetch is deduped (fresh cache hit or in-flight). Only callers that
+         * own a hero uiKey (details_hero) need it; background warmers such as
+         * binge_lookahead and cw call prefetch() per tick and must leave this
+         * false so their repeat calls stay dedup no-ops (no republish storm,
+         * and a no-uiKey warmer can never clobber the hero signal).
+         */
+        republishOnDedup: Boolean = false
     ) {
         if (type.isBlank() || videoId.isBlank()) return
         val key = keyOf(type, videoId, season, episode)
@@ -141,7 +150,7 @@ object StreamPrefetchCache {
                 // published, and a details_hero caller's hero source line stays
                 // stuck in SEARCHING. Re-invoke the supplied ranker on the cached
                 // groups (no re-scrape) so this caller's uiSignal is published.
-                if (rank != null && cached.isNotEmpty()) {
+                if (republishOnDedup && rank != null && cached.isNotEmpty()) {
                     scope.async {
                         try {
                             rank(cached)
@@ -164,7 +173,7 @@ object StreamPrefetchCache {
                 // page while the lookahead is still scraping would sit in SEARCHING.
                 // Chain this caller's ranker onto the in-flight result so its
                 // uiSignal is published once that scrape completes (no re-scrape).
-                if (rank != null) {
+                if (republishOnDedup && rank != null) {
                     scope.async {
                         val result = try {
                             existing.await()
