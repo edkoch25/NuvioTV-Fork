@@ -1945,8 +1945,12 @@ internal class ParallelRangeDataSource(
  * plus the total length from the 206's Content-Range -- everything open()
  * otherwise pays a network round trip to learn (289-1,023 ms probeOpen
  * across the 27 Jul capture). The tail is the Matroska Cues window the
- * extractor reads next (last 1 MiB; the reference file's tail leg read
- * 789 KB), which otherwise costs a bounded continuation GET.
+ * extractor reads next (last 4 MiB), which otherwise costs a bounded
+ * continuation GET. Sized from the 15 Aug 2026 AM9 capture: the Cues sat
+ * 1.91-3.35 MB from EOF across four sources, so the original 1 MiB window
+ * never covered them and every cold open paid a serialised Cues read of
+ * 2.0-4.2 s. The window is a single heap slot under a 300 s TTL, outside
+ * the native chunk budget, so the widening costs transient Java heap only.
  *
  * Ownership/threading: entries hold immutable heap arrays behind
  * @Volatile single slots; writers are OkHttp callback threads, readers
@@ -1963,7 +1967,7 @@ internal class ParallelRangeDataSource(
 internal object PrefetchWindowStore {
     private const val TAG = "ParallelRangeDS"
     private const val TTL_MS = 300_000L
-    const val TAIL_WINDOW_BYTES = 1_048_576L
+    const val TAIL_WINDOW_BYTES = 4_194_304L
 
     @Volatile private var head: ParallelRangeDataSource.BootstrapCacheEntry? = null
     @Volatile private var tail: ParallelRangeDataSource.BootstrapCacheEntry? = null
