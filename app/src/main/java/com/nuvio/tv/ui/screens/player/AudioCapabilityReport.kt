@@ -6,6 +6,7 @@
  */
 package com.nuvio.tv.ui.screens.player
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
@@ -143,25 +144,59 @@ object AudioCapabilityReport {
     }
 
     /**
-     * F2c: highest PCM channel count the connected HDMI/ARC/eARC output reports via
-     * [AudioDeviceInfo.getChannelCounts]. This is the one capability no failure can
-     * ever teach: a 2 ch-LPCM chain plays multichannel PCM "successfully" - silently
-     * collapsed to stereo - so nothing errors and F3 never learns. Only a read like
-     * this can tell the assessment that Transcode-to-AC-3 is the better denied-codec
-     * handling for the chain. Null when the platform does not expose counts (common
-     * on TVs); best-effort like the negotiated-encodings read above.
+     * F2c: highest PCM output channel count the connected HDMI/ARC/eARC chain
+     * negotiates, read PER-ENCODING from [AudioDeviceInfo.getAudioProfiles]
+     * (API 31+) and filtered to PCM formats only. This is the one capability
+     * no failure can ever teach: a 2 ch-LPCM chain plays multichannel PCM
+     * "successfully" - silently collapsed to stereo - so nothing errors and
+     * F3 never learns. Only a read like this can tell the assessment that
+     * Transcode-to-AC-3 is the better denied-codec handling for the chain.
+     *
+     * Previously this used [AudioDeviceInfo.getChannelCounts], which returns
+     * the port's channel-count UNION across EVERY encoding. On a chain that
+     * takes 2-ch LPCM but 5.1 compressed (plain ARC, or a stereo TV passing
+     * surround through) that union reports 6 and wrongly steers the default to
+     * DECODE_PCM - the exact failure this read exists to prevent. On eARC the
+     * PCM profile itself reaches 7.1, so union == PCM and the answer is
+     * unchanged; the divergence only bites where PCM < compressed. Verified
+     * against the AM9 Pro's dumpsys profiles (PCM reaches 0x18FC/8ch; AC3
+     * caps at 0xFC/6ch) - the per-encoding sets genuinely differ.
+     *
+     * getAudioProfiles()/getChannelMasks() are API 31+; below S this returns
+     * null and the assessment's denied-codec row degrades to VERIFY rather
+     * than guessing. Best-effort like the negotiated-encodings read above.
      */
     fun readMaxPcmChannelCount(context: Context): Int? {
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
         return maxPcmChannelCount(audioManager)
     }
 
+    @SuppressLint("NewApi", "InlinedApi")
     private fun maxPcmChannelCount(audioManager: AudioManager?): Int? {
         if (audioManager == null) return null
+        // getAudioProfiles() and the AudioProfile channel-mask getters are S+.
+        // Below that there is no PCM-specific read (getChannelCounts unions
+        // across encodings), so report unknown and let the row fall to VERIFY.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
+        val pcmEncodings = setOf(
+            AudioFormat.ENCODING_PCM_8BIT,
+            AudioFormat.ENCODING_PCM_16BIT,
+            AudioFormat.ENCODING_PCM_24BIT_PACKED,
+            AudioFormat.ENCODING_PCM_32BIT,
+            AudioFormat.ENCODING_PCM_FLOAT
+        )
         return runCatching {
             audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
                 .filter { it.type in HDMI_OUTPUT_TYPES }
-                .flatMap { it.channelCounts.asList() }
+                .flatMap { it.audioProfiles }
+                .filter { it.format in pcmEncodings }
+                // Both positional and index masks resolve to a channel count via
+                // popcount; take the largest across every PCM profile's masks.
+                .flatMap { profile ->
+                    (profile.channelMasks.asList() + profile.channelIndexMasks.asList())
+                        .map { mask -> Integer.bitCount(mask) }
+                }
+                .filter { it > 0 }
                 .maxOrNull()
         }.getOrNull()
     }
