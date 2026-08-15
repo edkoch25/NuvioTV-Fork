@@ -448,6 +448,22 @@ fun StreamScreen(
                             }
                         }
                     },
+                    onStreamFocused = { stream ->
+                        // A-1(a): warm the connection when a row settles under
+                        // focus, so the head/tail window has landed by press.
+                        // DIRECT rows only: a debrid/torrent row has no http(s)
+                        // URL until its press-time resolve, and we must never
+                        // resolve on focus (TorBox account-cost rule). The
+                        // scheme gate in prewarmPlaybackConnection enforces this
+                        // for free; the explicit guard here states the intent.
+                        if (!stream.isDirectDebrid() && !stream.needsLocalDebridResolve()) {
+                            val directUrl = stream.getStreamUrl()
+                            if (!directUrl.isNullOrBlank()) {
+                                com.nuvio.tv.ui.screens.player.PlayerPlaybackNetworking
+                                    .prewarmPlaybackConnection(directUrl, stream.behaviorHints?.proxyHeaders?.request)
+                            }
+                        }
+                    },
                     focusedStreamIndex = focusedStreamIndex,
                     shouldRestoreFocusedStream = restoreFocusedStream,
                     onRestoreFocusedStreamHandled = { restoreFocusedStream = false },
@@ -688,6 +704,8 @@ private fun LeftContentSection(
     }
 }
 
+private const val FOCUS_WARM_SETTLE_MS = 500L
+
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 private fun RightStreamSection(
@@ -703,6 +721,8 @@ private fun RightStreamSection(
     hasBadgeRules: Boolean = false,
     onAddonFilterSelected: (String?) -> Unit,
     onStreamSelected: (Stream) -> Unit,
+    // A-1(a): fired when a row has held focus past the settle debounce.
+    onStreamFocused: (Stream) -> Unit = {},
     focusedStreamIndex: Int,
     shouldRestoreFocusedStream: Boolean,
     onRestoreFocusedStreamHandled: () -> Unit,
@@ -807,6 +827,7 @@ private fun RightStreamSection(
                         StreamsList(
                             streams = streams,
                             onStreamSelected = onStreamSelected,
+                            onStreamFocused = onStreamFocused,
                             focusedStreamIndex = focusedStreamIndex,
                             shouldRestoreFocusedStream = shouldRestoreFocusedStream,
                             onRestoreFocusedStreamHandled = onRestoreFocusedStreamHandled,
@@ -1019,6 +1040,7 @@ private fun EmptyState() {
 private fun StreamsList(
     streams: List<Stream>,
     onStreamSelected: (Stream) -> Unit,
+    onStreamFocused: (Stream) -> Unit = {},
     focusedStreamIndex: Int = 0,
     shouldRestoreFocusedStream: Boolean = false,
     onRestoreFocusedStreamHandled: () -> Unit = {},
@@ -1123,6 +1145,7 @@ private fun StreamsList(
                     badgePlacement = badgePlacement,
                     reserveBadgeSpace = hasBadgeRules && stream.badges.isEmpty(),
                     onClick = { onStreamSelected(stream) },
+                    onFocusSettled = { onStreamFocused(stream) },
                     focusRequester = when {
                         shouldRestoreFocusedStream && index == focusedStreamIndex.coerceIn(0, (streams.lastIndex).coerceAtLeast(0)) -> restoreFocusRequester
                         index == 0 -> firstCardFocusRequester
@@ -1150,6 +1173,7 @@ private fun StreamCard(
     badgePlacement: StreamBadgePlacement,
     reserveBadgeSpace: Boolean = false,
     onClick: () -> Unit,
+    onFocusSettled: () -> Unit = {},
     focusRequester: FocusRequester? = null,
     onUpKey: (() -> Unit)? = null
 ) {
@@ -1161,6 +1185,18 @@ private fun StreamCard(
     val hasBadges = stream.badges.isNotEmpty() || (showFileSizeBadges && stream.behaviorHints?.videoSize != null) || reserveBadgeSpace
 
     var isFocused by remember { mutableStateOf(false) }
+
+    // A-1(a): when this row holds focus past the settle debounce, warm its
+    // connection. The effect is keyed on isFocused, so moving focus away
+    // cancels the pending delay before it fires -- arrowing through the list
+    // warms nothing; settling on a row for 500 ms warms it. The warm itself
+    // (and its direct-only scoping) is decided by the screen-level handler.
+    LaunchedEffect(isFocused) {
+        if (isFocused) {
+            kotlinx.coroutines.delay(FOCUS_WARM_SETTLE_MS)
+            onFocusSettled()
+        }
+    }
 
     // Track whether badges transitioned from empty to non-empty while this
     // card was composed. If they did, we animate. If the card enters
