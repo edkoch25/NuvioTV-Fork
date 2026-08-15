@@ -579,6 +579,10 @@ class PlayerRuntimeController(
     // stream's start-hold; incremented at every per-stream AFR reset.
     @Volatile internal var afrTrackGeneration: Int = 0
     internal var afrModeAppliedPreStart: Boolean = false
+    // C-2: the raw fps of a provisional seed applied by the cache preflight from
+    // prewarm head bytes, or 0f. The track-format path validates the real
+    // reported rate against this and corrects on mismatch. Reset per stream.
+    internal var afrSeededRateRaw: Float = 0f
     // nt6 fix B: hard cap on total automatic recoveries per stream URL, across
     // all fallback ladders, so a persistently failing pipeline (e.g. wedged
     // hardware decoder) surfaces an error in bounded time instead of silently

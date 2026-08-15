@@ -682,6 +682,26 @@ object FrameRateUtils {
         }
     }
 
+    // C-2: an explicit proximity gate for the pre-seed. snapToStandardRate is
+    // NOT usable for this test -- an input already equal to a ladder value
+    // returns unchanged, so "snap changed the value" cannot distinguish an
+    // on-ladder rate from an off-ladder one. Only a rate this close to a known
+    // standard is trusted enough to switch the panel before prepare; anything
+    // else (a torn/misparsed head, an audio DefaultDuration mistaken for video)
+    // is left to the post-prepare track-format path.
+    private val STANDARD_RATES = floatArrayOf(
+        NTSC_FILM_FPS, CINEMA_24_FPS, 25f, 30000f / 1001f, 30f, 50f, 60000f / 1001f, 60f
+    )
+    private const val STANDARD_RATE_TOLERANCE_FPS = 0.05f
+
+    internal fun isNearStandardRate(fps: Float): Boolean {
+        if (!fps.isFinite() || fps < MIN_AFR_SWITCH_FPS) return false
+        for (r in STANDARD_RATES) {
+            if (abs(fps - r) <= STANDARD_RATE_TOLERANCE_FPS) return true
+        }
+        return false
+    }
+
     fun snapToStandardRate(formatFrameRate: Float): Float {
         if (formatFrameRate <= 0f) return formatFrameRate
         return when {

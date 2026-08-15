@@ -797,6 +797,7 @@ internal fun PlayerRuntimeController.switchToSourceStream(
                 trackAfrAttemptedForCurrentStream = false
                 afrTrackSwitchInFlight = false
                 afrModeAppliedPreStart = false
+                afrSeededRateRaw = 0f
                 runAfrCachePreflightIfEnabled(
                     url = playbackUrl,
                     headers = playbackHeaders,

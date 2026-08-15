@@ -57,7 +57,45 @@ internal fun PlayerRuntimeController.maybeRunTrackFormatAfr(rawFps: Float, forma
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
     if (currentInternalPlayerEngine != InternalPlayerEngine.EXOPLAYER) return
     if (trackAfrAttemptedForCurrentStream) return
-    if (afrModeAppliedPreStart) return
+    if (afrModeAppliedPreStart) {
+        // C-2 validate-and-correct: if the applied mode came from a provisional
+        // head seed, check ExoPlayer's real reported rate against it. Match ->
+        // promote the seed to the persistent cache so the next play is a real
+        // hit even unwarmed. Mismatch -> clear the pre-start flags and fall
+        // through into the switch body below to correct the panel (the clean
+        // pre-prepare switch to the wrong rate is discarded; the correction is
+        // today's miss-path switch). rawFps <= 0 / < 20 is unvalidatable: keep
+        // the seed rather than tear down a plausibly-correct mode.
+        val seeded = afrSeededRateRaw
+        if (seeded <= 0f) return
+        if (rawFps < 20f) {
+            Log.w(PlayerRuntimeController.TAG, "AFR seed: cannot validate (track rawFps=$rawFps); keeping seeded mode")
+            return
+        }
+        val snappedSeed = FrameRateUtils.snapToStandardRate(seeded)
+        val snappedTrack = FrameRateUtils.snapToStandardRate(rawFps)
+        if (snappedSeed == snappedTrack) {
+            Log.i(PlayerRuntimeController.TAG, "AFR seed validated: seeded=$seeded track=$rawFps (promoting to cache)")
+            FrameRateUtils.cacheFrameRate(
+                currentStreamUrl,
+                currentHeaders,
+                FrameRateUtils.FrameRateDetection(
+                    raw = rawFps,
+                    snapped = snappedTrack,
+                    videoWidth = format.width.takeIf { it > 0 },
+                    videoHeight = format.height.takeIf { it > 0 }
+                ),
+                currentFilename
+            )
+            return
+        }
+        Log.w(
+            PlayerRuntimeController.TAG,
+            "AFR seed MISMATCH: seeded=$seeded ($snappedSeed) track=$rawFps ($snappedTrack); correcting via track-format switch"
+        )
+        afrModeAppliedPreStart = false
+        afrSeededRateRaw = 0f
+    }
     if (rawFps <= 0f) return
     // Mirror of the FrameRateUtils floor, applied before the cache write below so a
     // bogus rate from a broken source is never persisted for the next play.

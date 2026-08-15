@@ -372,6 +372,7 @@ internal fun PlayerRuntimeController.initializePlayer(
             trackAfrAttemptedForCurrentStream = false
             afrTrackSwitchInFlight = false
             afrModeAppliedPreStart = false
+            afrSeededRateRaw = 0f
             // Seek review F3: never carry a preview position into a new player /
             // stream - a leaked value would commit the *new* episode to the old
             // preview position on the next gesture.

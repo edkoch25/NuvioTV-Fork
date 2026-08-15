@@ -36,6 +36,35 @@ internal const val AFR_PREFLIGHT_MIN_STAGE_MS = 2_000L
  * non-faststart MP4s is structurally impossible on this path. The full probing
  * preflight below remains in use for the MPV engine only.
  */
+/**
+ * C-2: derive a video frame rate from the prewarm's already-held head bytes
+ * (MKV only). Returns a provisional FrameRateDetection and records the seeded
+ * raw rate on the controller so the track-format path can validate it against
+ * ExoPlayer's reported rate after prepare (see maybeRunTrackFormatAfr). Gated
+ * on ladder proximity: a rate that is not close to a standard rate is not
+ * trusted to switch the panel, so it is left to the post-prepare path. The
+ * entry is provisional only -- it is NOT written to the persistent cache here;
+ * the track-format path promotes it after validation.
+ */
+private fun PlayerRuntimeController.seedFrameRateFromPrewarmedHead(url: String): FrameRateUtils.FrameRateDetection? {
+    val head = com.nuvio.tv.ui.screens.player.PrefetchWindowStore.peekHead(android.net.Uri.parse(url))
+        ?: return null
+    val hint = com.nuvio.tv.core.player.MatroskaAfrProbe.parseVideoFrameRateFromHead(head) ?: return null
+    if (!FrameRateUtils.isNearStandardRate(hint.rawFps)) {
+        Log.d(PlayerRuntimeController.TAG, "AFR seed rejected: fps=${hint.rawFps} not near a standard rate")
+        return null
+    }
+    val snapped = FrameRateUtils.snapToStandardRate(hint.rawFps)
+    afrSeededRateRaw = hint.rawFps
+    Log.i(PlayerRuntimeController.TAG, "AFR seed: fps=${hint.rawFps} snapped=$snapped ${hint.width}x${hint.height} (provisional, from prewarm head)")
+    return FrameRateUtils.FrameRateDetection(
+        raw = hint.rawFps,
+        snapped = snapped,
+        videoWidth = hint.width,
+        videoHeight = hint.height
+    )
+}
+
 internal suspend fun PlayerRuntimeController.runAfrCachePreflightIfEnabled(
     url: String,
     headers: Map<String, String>,
@@ -72,10 +101,12 @@ internal suspend fun PlayerRuntimeController.runAfrCachePreflightIfEnabled(
     // (the sole cache writer, filename-keyed since upstream 0.7.19) are
     // visible here. Falls back to the URL-based key when no filename is known
     // — same rule the writer uses, so the two sides can never disagree.
-    val cached = FrameRateUtils.getCachedFrameRate(url, headers, currentFilename) ?: run {
-        Log.d(PlayerRuntimeController.TAG, "AFR cache preflight: miss; deferring to track-format AFR after prepare")
-        return
-    }
+    val cached = FrameRateUtils.getCachedFrameRate(url, headers, currentFilename)
+        ?: seedFrameRateFromPrewarmedHead(url)
+        ?: run {
+            Log.d(PlayerRuntimeController.TAG, "AFR cache preflight: miss; deferring to track-format AFR after prepare")
+            return
+        }
 
     Log.d(PlayerRuntimeController.TAG, "AFR cache preflight: cache hit! Using cached FPS=${cached.snapped}")
     _uiState.update {

@@ -2065,4 +2065,22 @@ internal object PrefetchWindowStore {
             true
         }
     }
+
+    /**
+     * C-2: non-consuming peek of the warmed head bytes for [uri], for the AFR
+     * preflight to parse a video frame rate from the first 256 KiB the prewarm
+     * already holds. TTL-checked and non-clearing -- the subsequent open() still
+     * consumes the head via consumeHead(). Returns null on miss/expiry so the
+     * preflight falls through to today's post-prepare track-format AFR.
+     */
+    fun peekHead(uri: Uri): ByteArray? {
+        return synchronized(headEntries) {
+            val entry = headEntries[uri] ?: return null
+            if (SystemClock.uptimeMillis() - entry.createdAtUptimeMs > TTL_MS) {
+                headEntries.remove(uri)
+                return null
+            }
+            entry.bootstrapData
+        }
+    }
 }
