@@ -354,6 +354,7 @@ internal fun PlayerRuntimeController.maybePrefetchNextEpisodeForBinge(
         season = nextVideo.season,
         episode = nextVideo.episode,
         source = "binge_lookahead",
+        background = true,
         rank = { groups ->
             // Mirror what the press SETTLES on, which is not its first
             // attempt. PlayerRuntimeControllerStreams tries

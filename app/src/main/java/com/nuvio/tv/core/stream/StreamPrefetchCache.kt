@@ -73,6 +73,13 @@ object StreamPrefetchCache {
     private var inFlightKey: String? = null
     private var inFlightJob: Deferred<List<AddonStreams>>? = null
 
+    /**
+     * True when the in-flight job was started by a background warmer.
+     * Consulted only while [inFlightJob] is active, so a stale value after the
+     * job clears itself is harmless. Guarded by [lock] like its siblings.
+     */
+    private var inFlightBackground: Boolean = false
+
     fun keyOf(type: String, videoId: String, season: Int?, episode: Int?): String {
         return type + "|" + videoId + "|" + (season ?: -1) + "|" + (episode ?: -1)
     }
@@ -112,6 +119,20 @@ object StreamPrefetchCache {
         episode: Int?,
         /** Which producer started this prefetch, for log attribution. */
         source: String,
+        /**
+         * S4a-3b lane fix: a background warmer (cw, cw_focus, binge_lookahead)
+         * must never cancel a ui-owned scrape. The details page's hero/episode
+         * prefetches drive the visible source line; the pre-fix behaviour let a
+         * Continue Watching reshuffle (e.g. a progress sync landing while the
+         * details page is open on the back stack) cancel that scrape before its
+         * ranker ran, so the uiSignal never published and the line sat on
+         * SEARCHING with nothing behind it. A background caller finding a
+         * ui-owned job in flight for a DIFFERENT key now yields (no-op) instead
+         * of cancelling; background-vs-background keeps today's
+         * cancel-and-replace so scanning the CW row stays single-flight.
+         * Ui-owned callers (default) cancel anything, exactly as before.
+         */
+        background: Boolean = false,
         /**
          * P2 completion cap. When non-null, the scrape collection stops waiting
          * after this many ms and ranks/pre-resolves on whatever arrived, rather
@@ -196,8 +217,20 @@ object StreamPrefetchCache {
                 }
                 return
             }
+            if (background && existing != null && existing.isActive && !inFlightBackground) {
+                // Never cancel a ui-owned scrape from a background warmer: the
+                // ui caller's ranker/uiSignal would be lost and its source line
+                // stuck. The warm is best-effort; skipping it is the safe side.
+                Log.i(
+                    TAG,
+                    "PREFETCH yield source=$source key=$key: " +
+                        "ui-owned prefetch in flight key=$inFlightKey"
+                )
+                return
+            }
             existing?.cancel()
             inFlightKey = key
+            inFlightBackground = background
             inFlightJob = scope.async {
                 val result = collectFinal(repository, type, videoId, season, episode, capMs)
                 val rankT0 = SystemClock.elapsedRealtime()
