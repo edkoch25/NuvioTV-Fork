@@ -1969,11 +1969,39 @@ internal object PrefetchWindowStore {
     private const val TTL_MS = 300_000L
     const val TAIL_WINDOW_BYTES = 4_194_304L
 
-    @Volatile private var head: ParallelRangeDataSource.BootstrapCacheEntry? = null
-    @Volatile private var tail: ParallelRangeDataSource.BootstrapCacheEntry? = null
+    // B-1c (15 Aug 2026 AM9 A-1(a) capture): the details-page prefetch warms
+    // every stream in the list (~13 titles observed), but the store held one
+    // @Volatile head slot and one tail slot, so the pressed title's window was
+    // routinely overwritten by a later put before the press consulted it --
+    // 2 of 3 direct presses missed for exactly this reason. Keying by
+    // requestUri lets warmed titles coexist so a press finds its own window
+    // regardless of warm order.
+    //
+    // Cap 8, access-ordered LRU: the winner is always among the most recently
+    // warmed few by press time. 256 KB head + 4 MiB tail per key => ~34 MiB
+    // transient Java-heap ceiling at full occupancy, outside the native chunk
+    // budget. Both maps are guarded by their own monitor: writers are OkHttp
+    // dispatcher threads and readers the player thread, and LinkedHashMap is
+    // not thread-safe (the previous single-ref design was lock-free only
+    // because a reference assignment is atomic).
+    private const val STORE_CAP = 8
+
+    private val headEntries = object : LinkedHashMap<Uri, ParallelRangeDataSource.BootstrapCacheEntry>(STORE_CAP, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Uri, ParallelRangeDataSource.BootstrapCacheEntry>?): Boolean {
+            return size > STORE_CAP
+        }
+    }
+
+    private val tailEntries = object : LinkedHashMap<Uri, ParallelRangeDataSource.BootstrapCacheEntry>(STORE_CAP, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Uri, ParallelRangeDataSource.BootstrapCacheEntry>?): Boolean {
+            return size > STORE_CAP
+        }
+    }
 
     fun putHead(entry: ParallelRangeDataSource.BootstrapCacheEntry) {
-        head = entry
+        synchronized(headEntries) {
+            headEntries[entry.requestUri] = entry
+        }
         Log.i(
             TAG,
             "PREFETCH_WINDOW put head bytes=${entry.bootstrapSize} " +
@@ -1982,32 +2010,41 @@ internal object PrefetchWindowStore {
     }
 
     fun putTail(entry: ParallelRangeDataSource.BootstrapCacheEntry) {
-        tail = entry
+        synchronized(tailEntries) {
+            tailEntries[entry.requestUri] = entry
+        }
         Log.i(TAG, "PREFETCH_WINDOW put tail start=${entry.startPosition} bytes=${entry.bootstrapSize}")
     }
 
     fun consumeHead(dataSpec: DataSpec): ParallelRangeDataSource.BootstrapCacheEntry? {
-        val cached = head ?: return null
-        if (SystemClock.uptimeMillis() - cached.createdAtUptimeMs > TTL_MS) {
-            head = null
-            return null
-        }
-        if (dataSpec.position != 0L || cached.startPosition != 0L) return null
+        if (dataSpec.position != 0L) return null
         if (dataSpec.length != C.LENGTH_UNSET.toLong()) return null
-        if (dataSpec.uri != cached.requestUri) return null
-        head = null
+        val cached = synchronized(headEntries) {
+            val entry = headEntries[dataSpec.uri] ?: return null
+            if (SystemClock.uptimeMillis() - entry.createdAtUptimeMs > TTL_MS) {
+                headEntries.remove(dataSpec.uri)
+                return null
+            }
+            if (entry.startPosition != 0L) return null
+            // One-shot: remove on hit, mirroring the previous head = null.
+            headEntries.remove(dataSpec.uri)
+            entry
+        }
         Log.i(TAG, "PREFETCH_WINDOW head hit bytes=${cached.bootstrapSize} total=${cached.totalFileLength}")
         return cached
     }
 
     fun peekTail(uri: Uri, position: Long): ParallelRangeDataSource.BootstrapCacheEntry? {
-        val cached = tail ?: return null
-        if (SystemClock.uptimeMillis() - cached.createdAtUptimeMs > TTL_MS) {
-            tail = null
-            return null
+        val cached = synchronized(tailEntries) {
+            val entry = tailEntries[uri] ?: return null
+            if (SystemClock.uptimeMillis() - entry.createdAtUptimeMs > TTL_MS) {
+                tailEntries.remove(uri)
+                return null
+            }
+            if (position < entry.startPosition || position >= entry.startPosition + entry.bootstrapSize) return null
+            // Non-clearing: leave the entry so re-seeks into the Cues stay free.
+            entry
         }
-        if (uri != cached.requestUri) return null
-        if (position < cached.startPosition || position >= cached.startPosition + cached.bootstrapSize) return null
         Log.i(TAG, "PREFETCH_WINDOW tail hit pos=$position start=${cached.startPosition}")
         return cached
     }
