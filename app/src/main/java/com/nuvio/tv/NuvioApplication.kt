@@ -83,6 +83,9 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
     override fun onCreate() {
         super.onCreate()
         PluginRuntimeHooks.onApplicationCreate(this)
+        // C-1: hydrate the AFR fps cache from disk (background load) so cold
+        // rewatches take the preflight hit path (switch before prepare).
+        com.nuvio.tv.core.player.FrameRateUtils.initFrameRateCachePersistence(this)
         // Load locale synchronously so it's available before Activity.attachBaseContext.
         // SharedPreferences reads are fast (cached in memory after first access).
         val tag = getSharedPreferences("app_locale", Context.MODE_PRIVATE)
