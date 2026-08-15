@@ -971,11 +971,7 @@ internal class ParallelRangeDataSource(
         // whole aligned chunk -- paying the amplified fetch while merely hiding
         // it from the reader.
         if (pendingContinuationOpen && currentChunk == null && continuationSource == null) {
-            if (materialisePendingContinuation()) {
-                // Late tail window served: re-enter so the guarded bootstrap
-                // block at the top of read() copies from it (bounds-checked).
-                return read(buffer, offset, length)
-            }
+            materialisePendingContinuation()
         }
 
         if (bootstrapPrefetchDeferred && shouldAllowBackgroundPrefetch()) {
@@ -1120,37 +1116,14 @@ internal class ParallelRangeDataSource(
      * in scheduleChunks() takes the file from there; on any failure the flag is
      * already cleared and the proven chunk path serves the read instead.
      */
-    /**
-     * @return true when a late-arriving prefetch tail window served this
-     * position (the caller must re-enter read() so the guarded bootstrap
-     * block copies from it); false when a continuation source was opened
-     * (or nothing was needed), i.e. the pre-B-1b behaviour.
-     */
-    private fun materialisePendingContinuation(): Boolean {
+    private fun materialisePendingContinuation() {
         pendingContinuationOpen = false
-        if (bytesRemaining <= 0L) return false
-        val activeSession = session ?: return false
-        // B-1b (15 Aug 2026 AM9 capture): the tail warm frequently lands AFTER
-        // open()'s one-shot peekTail consult but BEFORE this lazy materialise
-        // (0.6-1.4 s later) -- 2 of 4 measured runs would have hit here. Set
-        // the bootstrap window exactly as the nt8 head-hit path does and let
-        // the caller's guarded bootstrap block serve it, avoiding a duplicate
-        // near-EOF network fetch. A miss falls through to today's continuation
-        // open unchanged.
-        val lateTail = PrefetchWindowStore.peekTail(activeSession.requestUri, position)
-        if (lateTail != null) {
-            bootstrapChunk = DownloadedChunk(
-                PooledBuffer(null, ByteBuffer.wrap(lateTail.bootstrapData)),
-                lateTail.bootstrapSize
-            )
-            bootstrapStartPosition = lateTail.startPosition
-            Log.d(TAG, "Continuation avoided: late tail window hit at materialise, serving pos=$position from heap")
-            return true
-        }
+        if (bytesRemaining <= 0L) return
+        val activeSession = session ?: return
         val boundary = ((position / chunkSize) + 1L) * chunkSize
         val end = minOf(boundary, position + bytesRemaining)
         val length = end - position
-        if (length <= 0L) return false
+        if (length <= 0L) return
         val source = upstreamFactory.createDataSource()
         transferListeners.forEach { source.addTransferListener(it) }
         try {
@@ -1164,14 +1137,13 @@ internal class ParallelRangeDataSource(
         } catch (e: Exception) {
             try { source.close() } catch (_: Exception) {}
             Log.w(TAG, "Continuation open failed at $position; using chunk path: ${e.message}")
-            return false
+            return
         }
         continuationSource = source
         continuationEndPositionExclusive = end
         // Keep the eviction cursor with the reader while the continuation runs.
         activeSession.noteRead(position / chunkSize)
         Log.d(TAG, "Continuation open at $position, $length bytes to boundary $end")
-        return false
     }
 
     /** Free an in-flight attempt's buffer under its lock, so a reader
@@ -1763,11 +1735,7 @@ internal class ParallelRangeDataSource(
         // whole aligned chunk -- paying the amplified fetch while merely hiding
         // it from the reader.
         if (pendingContinuationOpen && currentChunk == null && continuationSource == null) {
-            if (materialisePendingContinuation()) {
-                // Late tail window served: re-enter so the guarded bootstrap
-                // block at the top of read() copies from it (bounds-checked).
-                return read(buffer, length)
-            }
+            materialisePendingContinuation()
         }
 
         if (bootstrapPrefetchDeferred && shouldAllowBackgroundPrefetch()) {
