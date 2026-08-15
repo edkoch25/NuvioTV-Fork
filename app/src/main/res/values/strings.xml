@@ -3225,7 +3225,7 @@
     <string name="assessment_profile_suggested_variable">Suggested \u2014 your link wobbled during the sweep</string>
     <string name="assessment_stability_line">Link stability during the sweep: CoV %1$s across %2$d qualifying passes (lower is steadier). [inferred] threshold; profiles are your call.</string>
     <string name="assessment_error_prefix">Sweep error: %1$s \u2014 the calculated rows below are still valid</string>
-    <string name="assessment_footer">Review-only: nothing has been changed. Measured rows were tested on this device; calculated rows are derived from queryable facts; the apply step arrives in a later build.</string>
+    <string name="assessment_footer">Measured rows were tested on this device; calculated rows are derived from queryable facts. Apply writes only measured and calculated rows plus any profile you select \u2014 verify rows are never changed automatically. Revert undoes the most recent apply.</string>
 
 
     <!-- Device Settings Assessment: buffer-trade, band notes, engine and AC-3 rows -->

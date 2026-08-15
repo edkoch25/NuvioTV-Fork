@@ -225,7 +225,6 @@ object DeviceAssessmentEngine {
         }
 
         // ── Tier 2: calculated from device facts ────────────────────────────
-        val parallelRecommendedOn = rec != null && sweep.errorText == null
         val overheadForTargetMb = when {
             rec != null -> MemoryBudget.parallelOverheadMb(rec.connections, rec.chunkMb)
             sweep != null && sweep.verdictKind == StreamSweepEngine.VerdictKind.LEAVE_PARALLEL_OFF -> 0
@@ -860,16 +859,17 @@ object DeviceAssessmentEngine {
 
     private fun parseHeaders(headersJson: String?): Map<String, String> {
         if (headersJson.isNullOrBlank()) return emptyMap()
-        return runCatching {
-            val json = JSONObject(headersJson)
-            val map = mutableMapOf<String, String>()
-            val keys = json.keys()
-            while (keys.hasNext()) {
-                val key = keys.next()
-                map[key] = json.getString(key)
-            }
-            map
-        }.getOrDefault(emptyMap())
+        val json = runCatching { JSONObject(headersJson) }.getOrNull() ?: return emptyMap()
+        val map = mutableMapOf<String, String>()
+        val keys = json.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            // Per-key tolerance: a single uncoercible value skips that header
+            // instead of discarding every header (the old whole-map runCatching).
+            val value = runCatching { json.getString(key) }.getOrNull() ?: continue
+            map[key] = value
+        }
+        return map
     }
 
     private fun chunkLabel(context: Context, chunkKb: Int): String =
@@ -902,21 +902,30 @@ object DeviceAssessmentEngine {
     }
 
     private fun ratesAtCurrentResolution(display: DisplayCapabilities.Snapshot): String {
+        // Fall back to the first mode (not "all resolutions") when the current
+        // mode id is absent, matching DisplayCapabilities.deriveSupport so the
+        // header and the AFR verdict describe the same resolution.
         val current = display.supportedModes.firstOrNull { it.modeId == display.currentModeId }
+            ?: display.supportedModes.firstOrNull()
         return display.supportedModes
             .filter {
                 current == null ||
                     (it.physicalWidth == current.physicalWidth &&
                         it.physicalHeight == current.physicalHeight)
             }
-            .map { it.refreshRate.toDouble() }
+            // Dedupe at millihertz like deriveSupport: raw-float distinct() lets
+            // 59.94f and 59.940002f survive as two rates and print twice.
+            .map { Math.round(it.refreshRate * 1000f) }
             .distinct()
             .sorted()
-            .joinToString("/") { rate ->
+            .joinToString("/") { milliHz ->
+                val rate = milliHz / 1000.0
                 if (rate == rate.toInt().toDouble()) {
                     rate.toInt().toString()
                 } else {
-                    "%.3f".format(rate).trimEnd('0').trimEnd('.')
+                    // Locale.ROOT: keep a '.' decimal so trimEnd('.') works and
+                    // comma-decimal locales don't emit "50," in the rate list.
+                    "%.3f".format(java.util.Locale.ROOT, rate).trimEnd('0').trimEnd('.')
                 }
             }
     }

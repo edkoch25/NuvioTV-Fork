@@ -360,7 +360,10 @@ internal fun LazyListScope.deviceAssessmentItems(
                     },
                     subtitle = profile.subtitle + "\n" + values,
                     checked = state.selectedProfile == profile.kind,
-                    onToggle = { state.selectedProfile = profile.kind }
+                    onToggle = {
+                        state.selectedProfile =
+                            if (state.selectedProfile == profile.kind) null else profile.kind
+                    }
                 )
             }
             run {
