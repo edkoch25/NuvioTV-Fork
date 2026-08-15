@@ -2048,4 +2048,21 @@ internal object PrefetchWindowStore {
         Log.i(TAG, "PREFETCH_WINDOW tail hit pos=$position start=${cached.startPosition}")
         return cached
     }
+
+    /**
+     * B-2: position-agnostic presence + TTL check used by the warm path to
+     * decide whether the concurrent suffix-range tail already stored a window
+     * for this URI, so the head-triggered fallback tail can skip a duplicate
+     * 4 MiB fetch. Does not remove the entry.
+     */
+    fun hasFreshTail(uri: Uri): Boolean {
+        return synchronized(tailEntries) {
+            val entry = tailEntries[uri] ?: return false
+            if (SystemClock.uptimeMillis() - entry.createdAtUptimeMs > TTL_MS) {
+                tailEntries.remove(uri)
+                return false
+            }
+            true
+        }
+    }
 }

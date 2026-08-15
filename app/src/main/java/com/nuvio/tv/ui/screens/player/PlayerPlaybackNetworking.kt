@@ -157,6 +157,13 @@ internal object PlayerPlaybackNetworking {
         }
         lastWarmUrl = target
         lastWarmAtMs = nowMs
+        // B-2: fire the tail CONCURRENTLY with the head using an open-ended
+        // suffix range, so it no longer waits for the head body to drain
+        // (which the 15 Aug capture priced at 88-500 ms too late for the
+        // reopen consult). Self-sufficient: its own Content-Range yields both
+        // window start and total. A non-206 / opaque response is a no-op and
+        // the head-triggered fallback tail below still runs.
+        enqueueConcurrentSuffixTail(target, headers)
         val request = try {
             val builder = okhttp3.Request.Builder().url(target)
             headers?.forEach { (name, value) -> builder.header(name, value) }
@@ -239,6 +246,19 @@ internal object PlayerPlaybackNetworking {
         return totalPart.toLongOrNull() ?: -1L
     }
 
+    /**
+     * B-2: the window start from a suffix-range 206, i.e. the leading number
+     * of "bytes 71196784383-71200978686/71200978687". -1 when absent/opaque.
+     */
+    private fun parsePrewarmContentRangeStart(value: String?): Long {
+        val v = value?.trim() ?: return -1L
+        val rangePart = v.substringAfter("bytes", "").substringBefore('/').trim()
+        if (rangePart.isEmpty() || rangePart == "*") return -1L
+        val startPart = rangePart.substringBefore('-').trim()
+        if (startPart.isEmpty()) return -1L
+        return startPart.toLongOrNull() ?: -1L
+    }
+
     /** nt8: the pre-nt8 warm behaviour -- drain and discard, socket to pool. */
     private val discardingWarmCallback = object : okhttp3.Callback {
         override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
@@ -256,7 +276,72 @@ internal object PlayerPlaybackNetworking {
      * be exact for position arithmetic) and skips files small enough that
      * the head window already covers them.
      */
+    /**
+     * B-2: request the last TAIL_WINDOW_BYTES via an open-ended suffix range
+     * (Range: bytes=-N), concurrently with the head warm and without needing
+     * the file total in advance. The 206's Content-Range gives the window
+     * start and the total, so the stored entry is complete. A non-206 or an
+     * opaque Content-Range leaves the store untouched, and the head-triggered
+     * enqueueTailPrewarm then serves as the fallback.
+     */
+    private fun enqueueConcurrentSuffixTail(target: String, headers: Map<String, String>?) {
+        val tailWindow = PrefetchWindowStore.TAIL_WINDOW_BYTES
+        val suffixRequest = try {
+            val builder = okhttp3.Request.Builder().url(target)
+            headers?.forEach { (name, value) -> builder.header(name, value) }
+            builder.header("Range", "bytes=-$tailWindow").build()
+        } catch (_: Exception) {
+            return
+        }
+        try {
+            prewarmHttpClient.newCall(suffixRequest).enqueue(object : okhttp3.Callback {
+                override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
+                    // No-op: the head-triggered fallback tail still runs.
+                }
+
+                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                    response.use { resp ->
+                        if (resp.code != 206) return@use
+                        val contentRange = resp.header("Content-Range")
+                        val start = parsePrewarmContentRangeStart(contentRange)
+                        val total = parsePrewarmContentRangeTotal(contentRange)
+                        if (start < 0L || total <= 0L) return@use
+                        val bytes = try {
+                            resp.body?.bytes()
+                        } catch (_: Exception) {
+                            null
+                        } ?: return@use
+                        // Accept only an exact-size suffix so the stored window
+                        // matches what peekTail/materialise expect. A short or
+                        // over-long body means a non-conforming server; drop it
+                        // and let the head-triggered fallback handle the tail.
+                        if (bytes.size.toLong() != tailWindow) return@use
+                        if (start + bytes.size.toLong() != total) return@use
+                        PrefetchWindowStore.putTail(
+                            ParallelRangeDataSource.BootstrapCacheEntry(
+                                requestUri = android.net.Uri.parse(target),
+                                startPosition = start,
+                                resolvedUri = android.net.Uri.parse(resp.request.url.toString()),
+                                openLength = tailWindow,
+                                totalFileLength = total,
+                                bootstrapData = bytes,
+                                bootstrapSize = bytes.size,
+                                createdAtUptimeMs = android.os.SystemClock.uptimeMillis()
+                            )
+                        )
+                    }
+                }
+            })
+        } catch (_: Exception) {
+        }
+    }
+
     private fun enqueueTailPrewarm(target: String, headers: Map<String, String>?, total: Long) {
+        // B-2: skip when the concurrent suffix-range tail already stored a
+        // window for this URI, so a suffix-honouring source warms the tail
+        // once, not twice. When the concurrent tail was range-rejected this is
+        // false and the head-triggered path runs exactly as before.
+        if (PrefetchWindowStore.hasFreshTail(android.net.Uri.parse(target))) return
         val tailWindow = PrefetchWindowStore.TAIL_WINDOW_BYTES
         val tailStart = total - tailWindow
         if (tailStart <= 262144L) return
