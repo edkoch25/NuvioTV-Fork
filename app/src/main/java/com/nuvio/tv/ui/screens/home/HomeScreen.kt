@@ -532,6 +532,10 @@ private fun ClassicHomeRoute(
         },
         onRequestLazyCatalogLoad = remember(viewModel) {
             { catalogKey: String -> viewModel.requestLazyCatalogLoad(catalogKey) }
+        },
+        // S4a-3b: focus-dwell stream prefetch for CW cards.
+        onContinueWatchingItemFocused = remember(viewModel) {
+            { index: Int -> viewModel.onContinueWatchingItemFocused(index) }
         }
     )
 }
@@ -581,6 +585,10 @@ private fun GridHomeRoute(
             { vi, vo, key ->
                 viewModel.saveGridFocusState(vi, vo, focusedItemKey = key)
             }
+        },
+        // S4a-3b: focus-dwell stream prefetch for CW cards.
+        onContinueWatchingItemFocused = remember(viewModel) {
+            { index: Int -> viewModel.onContinueWatchingItemFocused(index) }
         }
     )
 }
@@ -659,6 +667,16 @@ private fun ModernHomeRoute(
         onSaveFocusState = saveModernFocusState,
         onRequestLazyCatalogLoad = remember(viewModel) {
             { catalogKey: String -> viewModel.requestLazyCatalogLoad(catalogKey) }
+        },
+        // S4a-3b: focus-dwell stream prefetch for CW cards. Gated on the CW
+        // row KEY, not the isCw flag -- ModernHomeRows sets that flag for the
+        // Upcoming row too, whose cards are unaired and must not be scraped.
+        onRowItemFocusedCallback = remember(viewModel) {
+            { rowKey: String, index: Int, _: Boolean ->
+                if (rowKey == MODERN_CONTINUE_WATCHING_ROW_KEY) {
+                    viewModel.onContinueWatchingItemFocused(index)
+                }
+            }
         }
     )
 }

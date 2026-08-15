@@ -96,6 +96,8 @@ fun GridHomeContent(
     onContinueWatchingStartFromBeginning: (ContinueWatchingItem) -> Unit = {},
     onContinueWatchingPlayManually: (ContinueWatchingItem) -> Unit = {},
     showContinueWatchingManualPlayOption: Boolean = false,
+    /** S4a-3b: CW card focus, indexed into uiState.continueWatchingItems. */
+    onContinueWatchingItemFocused: (Int) -> Unit = {},
     onNavigateToCatalogSeeAll: (String, String, String) -> Unit,
     onNavigateToFolderDetail: (String, String) -> Unit = { _, _ -> },
     onRemoveContinueWatching: (String, Int?, Int?, Boolean) -> Unit,
@@ -417,7 +419,10 @@ fun GridHomeContent(
                         focusedItemIndex = if (shouldRequestInitialFocus && !hasHero) 0 else -1,
                         lastFocusedIndex = lastFocusedCwIndex,
                         focusRequesters = cwFocusRequesters,
-                        onItemFocused = { lastFocusedCwIndex.intValue = it },
+                        onItemFocused = {
+                            lastFocusedCwIndex.intValue = it
+                            onContinueWatchingItemFocused(it)
+                        },
                         onItemClick = onContinueWatchingClick,
                         onStartFromBeginning = onContinueWatchingStartFromBeginning,
                         showManualPlayOption = showContinueWatchingManualPlayOption,

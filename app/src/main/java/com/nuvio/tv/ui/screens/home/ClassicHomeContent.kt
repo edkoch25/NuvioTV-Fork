@@ -86,6 +86,8 @@ fun ClassicHomeContent(
     onContinueWatchingStartFromBeginning: (ContinueWatchingItem) -> Unit = {},
     onContinueWatchingPlayManually: (ContinueWatchingItem) -> Unit = {},
     showContinueWatchingManualPlayOption: Boolean = false,
+    /** S4a-3b: CW card focus, indexed into uiState.continueWatchingItems. */
+    onContinueWatchingItemFocused: (Int) -> Unit = {},
     onNavigateToCatalogSeeAll: (String, String, String) -> Unit,
     onNavigateToFolderDetail: (String, String) -> Unit = { _, _ -> },
     onRemoveContinueWatching: (String, Int?, Int?, Boolean) -> Unit,
@@ -527,6 +529,7 @@ fun ClassicHomeContent(
                     onItemFocused = { itemIndex ->
                         currentFocusSnapshot.rowIndex = -1
                         currentFocusSnapshot.itemIndex = itemIndex
+                        onContinueWatchingItemFocused(itemIndex)
                         if (uiState.classicFocusGradientEnabled) {
                             focusedArtwork = uiState.continueWatchingItems.getOrNull(itemIndex)
                                 ?.toClassicFocusArtwork(uiState.focusedPosterBackdropExpandEnabled)

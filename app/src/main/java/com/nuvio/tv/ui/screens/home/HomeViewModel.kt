@@ -44,6 +44,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -189,6 +190,60 @@ class HomeViewModel @Inject constructor(
                     season = target.season,
                     episode = target.episode,
                     source = "cw",
+                    background = true,
+                    capMs = capMs,
+                    rank = { groups ->
+                        prefetchSelectionSupplier.rankAndPreResolve(
+                            groups = groups,
+                            contentId = target.contentId,
+                            season = target.season,
+                            episode = target.episode
+                        )
+                    }
+                )
+            }
+    }
+
+    // S4a-3b: any Continue Watching card, on focus-dwell. The settle-time
+    // observer above covers only the FRONT item; every other card played
+    // from cold (full scrape, rank and resolve all after the press). Focus
+    // is not intent, so this is debounced harder than the settle path --
+    // 600 ms, matching the details page's episode-focus debounce -- and
+    // collectLatest cancels a pending delay when focus moves on, so
+    // scanning the row prefetches nothing until a card actually settles.
+    // It runs as a background warm: it may never cancel a ui-owned
+    // (details hero) scrape, and StreamPrefetchCache stays single-flight,
+    // so successive settled cards replace each other rather than fanning
+    // out. Pre-resolve remains dwell-gated by construction (it only runs
+    // after this debounce AND the scrape complete), per the standing
+    // account-cost rule. Unaired Next Up cards are skipped for the same
+    // reason the binge lookahead gates on hasAired: nothing to scrape yet.
+    private val CW_FOCUS_PREFETCH_DEBOUNCE_MS = 600L
+
+    private val cwFocusPrefetchRequests =
+        MutableSharedFlow<CwPrefetchTarget>(extraBufferCapacity = 16)
+
+    fun onContinueWatchingItemFocused(index: Int) {
+        val item = _uiState.value.continueWatchingItems.getOrNull(index) ?: return
+        if (item is ContinueWatchingItem.NextUp && !item.info.hasAired) return
+        val target = cwPrefetchTargetOf(item) ?: return
+        cwFocusPrefetchRequests.tryEmit(target)
+    }
+
+    private val cwFocusPrefetchObserver: Job = viewModelScope.launch {
+        cwFocusPrefetchRequests
+            .distinctUntilChanged()
+            .collectLatest { target ->
+                delay(CW_FOCUS_PREFETCH_DEBOUNCE_MS)
+                // P2: same completion cap as the settle and details paths.
+                val capMs = playerSettingsDataStore.playerSettings.first().eagerReadyCapMs()
+                com.nuvio.tv.core.stream.StreamPrefetchCache.prefetch(
+                    repository = streamRepository,
+                    type = target.type,
+                    videoId = target.videoId,
+                    season = target.season,
+                    episode = target.episode,
+                    source = "cw_focus",
                     background = true,
                     capMs = capMs,
                     rank = { groups ->
