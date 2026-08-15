@@ -3413,6 +3413,13 @@ private fun PlayerRuntimeController.recordFirstFrameDiagnostics(
     }
     val finalDiagnostics = currentDiagnostics.copy(
         firstFrameMs = startupMs,
+        // N6 V2 follow-on: persist the post-redirect serving host the NET_CONN
+        // listener captured for this session, so Diagnostics can show it after
+        // playback (the live holder is process-scoped and cleared at each new
+        // stream). At first frame, bytes have demonstrably flowed through the
+        // listener-carrying client, so the value is populated whenever the
+        // source actually redirected.
+        resolvedServingHost = PlaybackConnectionEvents.resolvedHost(),
         dv7DoviCalls = conversionCalls.toInt(),
         dv7DoviSuccess = conversionSucceeded.toInt(),
         dv7DoviSignalRewrites = signalingRewrites.toInt(),

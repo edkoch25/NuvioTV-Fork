@@ -3012,6 +3012,7 @@
     <string name="diag_section_source_hardware">Source &amp; Hardware</string>
     <string name="diag_section_source_hardware_sub">Take a photo of this card if reporting an issue.</string>
     <string name="diag_label_host">Host</string>
+    <string name="diag_label_serving_host">Serving Host</string>
     <string name="diag_label_file">File</string>
     <string name="diag_label_when">When</string>
     <string name="diag_label_device">Device</string>
@@ -3075,6 +3076,7 @@
     <string name="stream_test_section_header">Stream Throughput Diagnostics</string>
     <string name="stream_test_card_title">Run Last Played Stream Speed Test</string>
     <string name="stream_test_server_label">Server: %1$s</string>
+    <string name="stream_test_serving_host_label">Serving host: %1$s</string>
     <string name="stream_test_file_label">File: %1$s</string>
     <string name="stream_test_no_stream">No playback recorded. Play a video to run diagnostic tests on its host.</string>
     <string name="stream_test_btn_start">Start Test</string>

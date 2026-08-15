@@ -15,6 +15,12 @@ import org.json.JSONObject
 data class LastPlaybackDiagnostics(
     val timestampMs: Long = 0L,
     val host: String = "",
+    // N6 V2 follow-on: the host that actually served the bytes -- the
+    // post-redirect host captured live by the NET_CONN listener -- persisted
+    // at first frame. Null when playback never rendered a frame or no call
+    // completed; may equal [host] on cosmetic (same-host) redirects, which
+    // renderers suppress at display time rather than here.
+    val resolvedServingHost: String? = null,
     val streamUrl: String? = null,
     val filename: String? = null,
     val headersJson: String? = null,
@@ -85,6 +91,7 @@ data class LastPlaybackDiagnostics(
     fun toJson(): String = JSONObject().apply {
         put("timestampMs", timestampMs)
         put("host", host)
+        put("resolvedServingHost", resolvedServingHost ?: JSONObject.NULL)
         put("streamUrl", streamUrl ?: JSONObject.NULL)
         put("filename", filename ?: JSONObject.NULL)
         put("headersJson", headersJson ?: JSONObject.NULL)
@@ -134,6 +141,7 @@ data class LastPlaybackDiagnostics(
             LastPlaybackDiagnostics(
                 timestampMs = o.optLong("timestampMs", 0L),
                 host = o.optString("host", ""),
+                resolvedServingHost = o.optString("resolvedServingHost", "").let { if (it.isBlank() || it == "null") null else it },
                 streamUrl = o.optString("streamUrl", "").let { if (it.isBlank() || it == "null") null else it },
                 filename = o.optString("filename", "").let { if (it.isBlank() || it == "null") null else it },
                 headersJson = o.optString("headersJson", "").let { if (it.isBlank() || it == "null") null else it },

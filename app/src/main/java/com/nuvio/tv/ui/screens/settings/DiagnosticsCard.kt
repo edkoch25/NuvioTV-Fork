@@ -89,6 +89,13 @@ internal fun LazyListScope.diagnosticsCardItems(
                 stringResource(R.string.diag_section_source_hardware_sub)
             )
             DiagnosticRow(stringResource(R.string.diag_label_host), diagnostics.host)
+            // N6 V2 follow-on: the host that actually served the bytes after the
+            // redirect. Omitted when nothing was captured (direct/Emby/NAS
+            // sources never redirect) or when a cosmetic redirect resolved back
+            // to the same host -- matching the HUD's suppression convention.
+            diagnostics.resolvedServingHost
+                ?.takeIf { !it.equals(diagnostics.host, ignoreCase = true) }
+                ?.let { DiagnosticRow(stringResource(R.string.diag_label_serving_host), it) }
             diagnostics.filename?.let { DiagnosticRow(stringResource(R.string.diag_label_file), it) }
             DiagnosticRow(stringResource(R.string.diag_label_when), formatTimestamp(diagnostics.timestampMs))
             DiagnosticRow(stringResource(R.string.diag_label_device), deviceName(unknownLabel))

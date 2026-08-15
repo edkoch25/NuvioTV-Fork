@@ -213,6 +213,14 @@ fun AdvancedSettingsContent(
     }
     var streamErrorMessage by remember { mutableStateOf<String?>(null) }
     var streamVerdict by remember { mutableStateOf<String?>(null) }
+    // N6 V2 follow-on: the host that actually served this TEST's bytes. The
+    // tester shares PlayerPlaybackNetworking.playbackHttpClient, so the
+    // NET_CONN listener captures the test's own post-redirect host at zero
+    // extra network cost; updated after each measured pass (a measured pass
+    // proves bytes flowed during this test, so the holder is not a stale
+    // playback value). Falls back at display time to the value persisted at
+    // the last playback's first frame.
+    var liveServingHost by remember { mutableStateOf<String?>(null) }
 
     val lastStreamUrl = dvDiagnostics.streamUrl
     val lastHeadersJson = dvDiagnostics.headersJson
@@ -266,6 +274,7 @@ fun AdvancedSettingsContent(
             streamPassNotes = emptyMap()
             streamErrorMessage = null
             streamVerdict = null
+            liveServingHost = null
 
             val outcome = com.nuvio.tv.core.network.StreamSweepEngine.run(
                 context = context,
@@ -279,6 +288,10 @@ fun AdvancedSettingsContent(
                 onPassResult = { label, mbps, note ->
                     streamPassResults = streamPassResults.map { if (it.first == label) label to mbps else it }
                     if (note != null) streamPassNotes = streamPassNotes + (label to note)
+                    if (mbps != null && mbps > 0.0) {
+                        liveServingHost =
+                            com.nuvio.tv.ui.screens.player.PlaybackConnectionEvents.resolvedHost()
+                    }
                 }
             )
 
@@ -648,6 +661,24 @@ fun AdvancedSettingsContent(
                                 style = lineStyle,
                                 color = lineColor
                             )
+                            // N6 V2 follow-on: the host that actually served the
+                            // bytes. Prefers the live value captured during this
+                            // test run, falling back to the host persisted at the
+                            // last playback's first frame. Suppressed when nothing
+                            // was captured or the redirect resolved to the same
+                            // host as the Server line above.
+                            run {
+                                val redirectorHost = lastStreamUrl?.let { android.net.Uri.parse(it).host }
+                                (liveServingHost ?: dvDiagnostics.resolvedServingHost)
+                                    ?.takeIf { !it.equals(redirectorHost, ignoreCase = true) }
+                                    ?.let { servingHost ->
+                                        Text(
+                                            text = stringResource(R.string.stream_test_serving_host_label, servingHost),
+                                            style = lineStyle,
+                                            color = lineColor
+                                        )
+                                    }
+                            }
                             dvDiagnostics.filename?.let { name ->
                                 // Long remux filenames marquee-scroll while the card is
                                 // focused instead of ellipsising, at Compose's default 30.dp/s
