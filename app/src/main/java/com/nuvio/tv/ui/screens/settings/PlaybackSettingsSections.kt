@@ -54,6 +54,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import com.nuvio.tv.core.player.thumbnail.SeekThumbnailPreferences
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
@@ -386,6 +390,23 @@ internal fun PlaybackSettingsSections(
                     subtitle = stringResource(R.string.playback_show_clock_sub),
                     isChecked = playerSettings.osdClockEnabled,
                     onCheckedChange = onSetOsdClockEnabled,
+                    onFocused = { focusedSection = PlaybackSection.GENERAL },
+                    enabled = !generalUi.isExternalPlayer
+                )
+            }
+
+            item(key = "general_seek_thumbnails") {
+                val seekThumbsEnabled by SeekThumbnailPreferences.enabledFlow(context)
+                    .collectAsState(initial = false)
+                val seekThumbsScope = rememberCoroutineScope()
+                ToggleSettingsItem(
+                    icon = Icons.Default.Image,
+                    title = "Seek preview thumbnails",
+                    subtitle = "Show a preview image above the scrubber while seeking. Experimental; off by default.",
+                    isChecked = seekThumbsEnabled,
+                    onCheckedChange = { enabled ->
+                        seekThumbsScope.launch { SeekThumbnailPreferences.setEnabled(context, enabled) }
+                    },
                     onFocused = { focusedSection = PlaybackSection.GENERAL },
                     enabled = !generalUi.isExternalPlayer
                 )
