@@ -127,7 +127,6 @@ import coil3.request.ImageRequest
 import androidx.compose.ui.res.stringResource
 import com.nuvio.tv.R
 import com.nuvio.tv.data.local.InternalPlayerEngine
-import com.nuvio.tv.core.player.thumbnail.ThumbnailFrameExtractor
 import com.nuvio.tv.data.local.LibassRenderType
 import com.nuvio.tv.data.local.SubtitleStyleSettings
 import com.nuvio.tv.data.local.StreamAutoPlayMode
@@ -385,15 +384,6 @@ fun PlayerScreen(
     }
 
     // Frame rate matching lifecycle.
-    // T-series Build 2 (seek-thumbnail): one-shot EFE runtime self-test. Debug builds only,
-    // fires once per stream, result under logcat tag "ThumbSelfTest". Remove once the gate closes.
-    LaunchedEffect(uiState.currentStreamUrl) {
-        val selfTestUrl = uiState.currentStreamUrl
-        if (!selfTestUrl.isNullOrBlank()) {
-            val selfTestPos = viewModel.exoPlayer?.currentPosition ?: 0L
-            ThumbnailFrameExtractor.selfTest(context, selfTestUrl, selfTestPos)
-        }
-    }
     val activity = LocalContext.current as? android.app.Activity
     LaunchedEffect(activity) {
         viewModel.attachHostActivity(activity)
