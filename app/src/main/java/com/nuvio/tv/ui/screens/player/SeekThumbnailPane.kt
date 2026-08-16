@@ -53,7 +53,7 @@ fun SeekThumbnailOverlayHost(uiState: PlayerUiState, modifier: Modifier = Modifi
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
         Box(
             modifier = Modifier
-                .padding(bottom = 220.dp)
+                .padding(bottom = 120.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(Color.Black.copy(alpha = 0.85f))
                 .padding(3.dp)
@@ -62,8 +62,8 @@ fun SeekThumbnailOverlayHost(uiState: PlayerUiState, modifier: Modifier = Modifi
                 bitmap = bitmap.asImageBitmap(),
                 contentDescription = null,
                 modifier = Modifier
-                    .width(320.dp)
-                    .height(180.dp)
+                    .width(224.dp)
+                    .height(126.dp)
                     .clip(RoundedCornerShape(6.dp))
             )
         }

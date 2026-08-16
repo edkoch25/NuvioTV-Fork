@@ -22,35 +22,32 @@ import android.graphics.Bitmap
 import android.os.SystemClock
 import android.util.Log
 import androidx.compose.runtime.mutableIntStateOf
+import android.media.MediaMetadataRetriever
 import androidx.media3.common.C
-import androidx.media3.common.Effect
-import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.SeekParameters
-import androidx.media3.transformer.ExperimentalFrameExtractor
-import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import java.util.concurrent.ExecutionException
-import kotlin.coroutines.resume
 
 /**
  * T-series Build 4: P3 main-file seek-thumbnail engine.
  *
- * On-device findings driving this revision (nt9 log, AM9 Pro):
- * - EFE's seek-after-render path throws intermittent GL "Unbalanced enter/exit" on this SoC;
- *   a FRESH extractor per frame is the proven-stable configuration (every nt9 recovery that
- *   succeeded did so on the fresh instance). So: one extractor per frame, by design.
- * - The debrid host 429'd under repeated connections. rev5 binding rule: a 429 stops the
- *   session immediately for this playback - the worker shares the URL with playback and must
- *   never endanger it. Inter-frame pacing keeps connection churn low.
+ * On-device findings driving this revision (nt9 + nt10 logs, AM9 Pro):
+ * - media3's GL frame pipeline (which EFE always routes frames through, effects or not,
+ *   fresh instance or reused) intermittently throws framework/vendor-level "Unbalanced
+ *   enter/exit" on this Amlogic SoC, especially under concurrent playback GPU load. No EFE
+ *   configuration avoids it - the GL pipeline itself is the incompatibility. Extraction now
+ *   uses the platform's GL-free path: MediaMetadataRetriever.getScaledFrameAtTime with
+ *   OPTION_CLOSEST_SYNC (seek doctrine preserved), one retriever per frame on Dispatchers.IO,
+ *   returning an owned pre-scaled bitmap (no GL, no CPU rescale, no borrowed-bitmap hazard).
+ * - MMR failures are opaque (no HTTP status), so the explicit 429 session-stop is replaced by
+ *   its protections: inter-frame pacing keeps connection churn low and the consecutive-failure
+ *   streak aborts the session; playback is never the casualty.
+ * - Bucket 0 extracts at 5 s, not 0 s - the 0 s frame of most titles is a black fade-in.
  * - Density derived from the measured scrub ramp (PlayerScrubRates: 10 s steps then 20 s
  *   steps at ~6 repeats/s => ~60-120 s of content per real second while ramping): coarse
  *   pass at 5 min matches sweep readability; 60 s final density serves the rest/landing
@@ -137,7 +134,6 @@ object SeekThumbnails {
         private val appContext = context.applicationContext
         private val cache = ThumbnailCache(appContext, "$titleKey|s${SPACING_MS / 1000}", durationMs)
         private var workerJob: Job? = null
-        private var rateLimited = false
         private val diskLoadsInFlight = HashSet<Long>()
         private var lastDiskLoadRequestAt = 0L
 
@@ -157,18 +153,16 @@ object SeekThumbnails {
                 }
                 var generated = 0
                 var failures = 0
-                Log.i(TAG, "session start: buckets=0..$lastBucket coarse-first, fresh-extractor-per-frame")
+                Log.i(TAG, "session start: buckets=0..$lastBucket coarse-first, mmr-extraction")
                 try {
                     for (bucket in order) {
                         if (cache.hasDisk(bucket)) continue
                         awaitGate()
                         delay(INTER_FRAME_DELAY_MS)
-                        val positionMs = (bucket * SPACING_MS).coerceAtMost(durationMs - 1)
+                        val positionMs = (bucket * SPACING_MS)
+                            .coerceAtLeast(if (bucket == 0L) 5_000L else 0L)
+                            .coerceAtMost(durationMs - 1)
                         val bmp = extractWithRecovery(positionMs, bucket)
-                        if (rateLimited) {
-                            Log.w(TAG, "429 from host - stopping session to protect playback")
-                            break
-                        }
                         if (bmp == null) {
                             failures++
                             Log.w(TAG, "bucket=$bucket failed after retry (streak=$failures)")
@@ -248,82 +242,54 @@ object SeekThumbnails {
             }
         }
 
-        /** One extraction with a single retry; both attempts use a FRESH extractor. 429 => no retry. */
+        /** One extraction with a single retry; both attempts use a fresh retriever. */
         private suspend fun extractWithRecovery(positionMs: Long, bucket: Long): Bitmap? {
             val first = runCatching { extractOnce(positionMs) }
             first.getOrNull()?.let { return it }
-            val t1 = first.exceptionOrNull()
-            if (isRateLimited(t1)) { rateLimited = true; return null }
-            Log.w(TAG, "bucket=$bucket attempt1: ${describe(t1)}")
+            Log.w(TAG, "bucket=$bucket attempt1: ${describe(first.exceptionOrNull())}")
             val second = runCatching { extractOnce(positionMs) }
             second.getOrNull()?.let { return it }
-            val t2 = second.exceptionOrNull()
-            if (isRateLimited(t2)) { rateLimited = true; return null }
-            Log.w(TAG, "bucket=$bucket attempt2: ${describe(t2)}")
+            Log.w(TAG, "bucket=$bucket attempt2: ${describe(second.exceptionOrNull())}")
             return null
         }
 
-        /** Fresh extractor per call - the stable configuration on this SoC. Always released. */
-        private suspend fun extractOnce(positionMs: Long): Bitmap? {
-            val extractor = ExperimentalFrameExtractor(
-                appContext,
-                ExperimentalFrameExtractor.Configuration.Builder()
-                    // rev5 S2 binding doctrine: nearest keyframe, never decode-to-exact.
-                    .setSeekParameters(SeekParameters.CLOSEST_SYNC)
-                    .build()
-            )
-            try {
-                extractor.setMediaItem(MediaItem.fromUri(url), emptyList<Effect>())
-                val future = extractor.getFrame(positionMs)
-                val full = suspendCancellableCoroutine<Bitmap?> { cont ->
-                    future.addListener({
-                        try {
-                            cont.resume(future.get().bitmap)
-                        } catch (t: Throwable) {
-                            if (cont.isActive) cont.resumeWith(Result.failure(t))
-                        }
-                    }, MoreExecutors.directExecutor())
-                    cont.invokeOnCancellation { future.cancel(true) }
-                } ?: return null
-                // Scale off the playback thread; owned copy (EFE's bitmap is borrowed, never recycled).
-                return withContext(Dispatchers.Default) { ownedDownscale(full) }
-            } finally {
-                runCatching { extractor.release() }
-            }
-        }
-
         /**
-         * Returns an OWNED copy of [src] at <=TARGET_HEIGHT. [src] is EFE's borrowed frame bitmap:
-         * never recycled, never handed to the cache directly.
+         * GL-free extraction on the IO dispatcher: MediaMetadataRetriever decodes via the
+         * platform codec straight to an OWNED, pre-scaled bitmap. OPTION_CLOSEST_SYNC =
+         * nearest keyframe (rev5 S2 doctrine). One retriever per frame, always released.
          */
-        private fun ownedDownscale(src: Bitmap): Bitmap {
-            if (src.height <= TARGET_HEIGHT) {
-                return src.copy(src.config ?: Bitmap.Config.ARGB_8888, false)
+        private suspend fun extractOnce(positionMs: Long): Bitmap? =
+            withContext(Dispatchers.IO) {
+                val retriever = MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(url, emptyMap())
+                    val srcW = retriever.extractMetadata(
+                        MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH
+                    )?.toIntOrNull() ?: 0
+                    val srcH = retriever.extractMetadata(
+                        MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT
+                    )?.toIntOrNull() ?: 0
+                    val dstH = TARGET_HEIGHT
+                    val dstW = if (srcW > 0 && srcH > 0) {
+                        (srcW.toFloat() * dstH / srcH).toInt().coerceAtLeast(1)
+                    } else {
+                        (dstH * 16) / 9
+                    }
+                    retriever.getScaledFrameAtTime(
+                        positionMs * 1_000L,
+                        MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                        dstW,
+                        dstH
+                    )
+                } finally {
+                    runCatching { retriever.release() }
+                }
             }
-            val w = (src.width.toFloat() * TARGET_HEIGHT / src.height).toInt().coerceAtLeast(1)
-            return Bitmap.createScaledBitmap(src, w, TARGET_HEIGHT, true)
-        }
-
-        private fun isRateLimited(t: Throwable?): Boolean {
-            var cur: Throwable? = if (t is ExecutionException && t.cause != null) t.cause else t
-            while (cur != null) {
-                if ((cur as? PlaybackException)?.errorCode ==
-                    PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS &&
-                    cur.message?.contains("429") == true
-                ) return true
-                if (cur.message?.contains("Response code: 429") == true) return true
-                cur = cur.cause
-            }
-            return false
-        }
 
         private fun describe(t: Throwable?): String {
-            if (t == null) return "null"
-            val root = if (t is ExecutionException && t.cause != null) t.cause!! else t
-            val code = (root as? PlaybackException)?.errorCodeName ?: ""
-            val cause = root.cause?.let { " <- ${it.javaClass.simpleName}: ${it.message}" } ?: ""
-            val codeStr = if (code.isNotEmpty()) "($code)" else ""
-            return "${root.javaClass.simpleName}$codeStr: ${root.message}$cause"
+            if (t == null) return "null (frame unavailable)"
+            val cause = t.cause?.let { " <- ${it.javaClass.simpleName}: ${it.message}" } ?: ""
+            return "${t.javaClass.simpleName}: ${t.message}$cause"
         }
     }
 }
