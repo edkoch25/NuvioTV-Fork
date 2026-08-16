@@ -1763,6 +1763,7 @@ class PlayerSettingsDataStore @Inject constructor(
         }
     }
 
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     suspend fun setNuvioPerformanceModeEnabled(enabled: Boolean) {
         val actualEnabled = enabled && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O
         store().edit { prefs ->
@@ -1773,7 +1774,19 @@ class PlayerSettingsDataStore @Inject constructor(
                 prefs[maxBufferMsKey] = 280_000
                 prefs[bufferForPlaybackMsKey] = 1_500
                 prefs[bufferForPlaybackAfterRebufferMsKey] = 1_500
-                prefs[targetBufferSizeMbKey] = safeLimitMb
+                // Leave room for this preset's own parallel overhead (the 4-conn
+                // x 16 MB chunk config set below) so target + overhead fits the
+                // safe native budget - the same invariant the assessment and the
+                // memory-usage indicator enforce everywhere else. Was safeLimitMb
+                // outright, which overcommitted by the full overhead (~96 MB) and
+                // crossed the warning limit on the <= 2 GB tiers. Strictly more
+                // conservative on every tier by construction; the OOM-prevention
+                // benefit on constrained devices is [inferred] (unverified on
+                // <= 2 GB hardware).
+                val presetParallelOverheadMb = MemoryBudget.parallelOverheadMb(4, 16)
+                prefs[targetBufferSizeMbKey] =
+                    (((safeLimitMb - presetParallelOverheadMb) / MemoryBudget.BUFFER_STEP_MB) * MemoryBudget.BUFFER_STEP_MB)
+                        .coerceAtLeast(MemoryBudget.MIN_BUFFER_MB)
                 prefs[backBufferDurationMsKey] = 12_000
                 prefs[allowLargeTargetBufferKey] = true
                 prefs[useParallelConnectionsKey] = true
