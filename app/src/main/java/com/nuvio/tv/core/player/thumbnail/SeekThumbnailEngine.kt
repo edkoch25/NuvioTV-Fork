@@ -42,28 +42,35 @@ import java.util.concurrent.ExecutionException
 import kotlin.coroutines.resume
 
 /**
- * T-series Build 3: P3 main-file seek-thumbnail engine.
+ * T-series Build 4: P3 main-file seek-thumbnail engine.
  *
- * One session per playback; sequential eager pass at 30 s spacing under a playback-first gate;
- * CLOSEST_SYNC seek doctrine (rev5 S2). Zero network / zero video decode at scrub time.
- *
- * fix3: EFE + a Presentation GL effect produced intermittent "Unbalanced enter/exit" GL runtime
- * errors on the AM9 Pro (Amlogic). We extract native-res with NO user effect (the effect-free
- * path the self-test proved stable) and CPU-downscale afterwards.
- *
- * Bitmap ownership (proven from EFE source): getFrame() returns a fresh software ARGB_8888
- * Bitmap, but EFE retains it in lastExtractedFrame and may re-hand the SAME instance for a later
- * seek. So EFE's bitmap is borrowed/read-only: we never recycle it and always return an OWNED
- * copy (createScaledBitmap for >360h, else copy). Scaling runs on Dispatchers.Default so an
- * ~8 MB frame scale never janks the playback thread. fix2 recover-retry + real-error logging
- * remain as a dormant safety net.
+ * On-device findings driving this revision (nt9 log, AM9 Pro):
+ * - EFE's seek-after-render path throws intermittent GL "Unbalanced enter/exit" on this SoC;
+ *   a FRESH extractor per frame is the proven-stable configuration (every nt9 recovery that
+ *   succeeded did so on the fresh instance). So: one extractor per frame, by design.
+ * - The debrid host 429'd under repeated connections. rev5 binding rule: a 429 stops the
+ *   session immediately for this playback - the worker shares the URL with playback and must
+ *   never endanger it. Inter-frame pacing keeps connection churn low.
+ * - Density derived from the measured scrub ramp (PlayerScrubRates: 10 s steps then 20 s
+ *   steps at ~6 repeats/s => ~60-120 s of content per real second while ramping): coarse
+ *   pass at 5 min matches sweep readability; 60 s final density serves the rest/landing
+ *   moment (thumb <=30 s off, proportionate to CLOSEST_SYNC landing). Halves frame count,
+ *   connection churn (429 exposure) and disk vs 30 s spacing.
+ * - Coarse-first ordering (stride 5 -> 1 over 60 s buckets = 5 min -> 60 s)
+ *   gives full-timeline coverage within the first ~2 minutes; nearest-thumb serving makes
+ *   far seeks show an approximate frame instead of a blank; disk loads are rest-debounced so
+ *   the accelerating held-seek ramp cannot flood IO.
+ * - Bitmap ownership: EFE's frame bitmap is borrowed/read-only - always copy, never recycle.
  */
 object SeekThumbnails {
     private const val TAG = "ThumbWorker"
-    const val SPACING_MS = 30_000L
+    const val SPACING_MS = 60_000L
     private const val TARGET_HEIGHT = 360
     private const val GATE_BUFFER_AHEAD_MS = 20_000L
     private const val MAX_CONSECUTIVE_FAILURES = 3
+    private const val INTER_FRAME_DELAY_MS = 1_200L
+    private const val NEAREST_RADIUS_BUCKETS = 5
+    private const val DISK_LOAD_DEBOUNCE_MS = 300L
 
     /** Bumped whenever a bitmap lands in the memory cache; the pane keys recomposition on it. */
     val tick = mutableIntStateOf(0)
@@ -128,24 +135,40 @@ object SeekThumbnails {
         private val playerProvider: () -> ExoPlayer?
     ) {
         private val appContext = context.applicationContext
-        private val cache = ThumbnailCache(appContext, titleKey, durationMs)
-        private var extractor: ExperimentalFrameExtractor? = null
+        private val cache = ThumbnailCache(appContext, "$titleKey|s${SPACING_MS / 1000}", durationMs)
         private var workerJob: Job? = null
-        private var released = false
+        private var rateLimited = false
         private val diskLoadsInFlight = HashSet<Long>()
+        private var lastDiskLoadRequestAt = 0L
 
         fun start() {
             workerJob = scope.launch {
                 val lastBucket = (durationMs - 1) / SPACING_MS
+                // Coarse-first ordering: full-timeline coverage early, then refine.
+                val order = buildList {
+                    val seen = HashSet<Long>()
+                    for (stride in listOf(5L, 1L)) {
+                        var b = 0L
+                        while (b <= lastBucket) {
+                            if (seen.add(b)) add(b)
+                            b += stride
+                        }
+                    }
+                }
                 var generated = 0
                 var failures = 0
-                Log.i(TAG, "session start: buckets=0..$lastBucket spacing=${SPACING_MS}ms (native+cpu-downscale)")
+                Log.i(TAG, "session start: buckets=0..$lastBucket coarse-first, fresh-extractor-per-frame")
                 try {
-                    for (bucket in 0..lastBucket) {
+                    for (bucket in order) {
                         if (cache.hasDisk(bucket)) continue
                         awaitGate()
+                        delay(INTER_FRAME_DELAY_MS)
                         val positionMs = (bucket * SPACING_MS).coerceAtMost(durationMs - 1)
                         val bmp = extractWithRecovery(positionMs, bucket)
+                        if (rateLimited) {
+                            Log.w(TAG, "429 from host - stopping session to protect playback")
+                            break
+                        }
                         if (bmp == null) {
                             failures++
                             Log.w(TAG, "bucket=$bucket failed after retry (streak=$failures)")
@@ -162,11 +185,14 @@ object SeekThumbnails {
                             cache.putMem(bucket, bmp)
                             tick.intValue++
                             generated++
+                            if (generated == ((lastBucket / 5L) + 1L).toInt()) {
+                                Log.i(TAG, "coarse pass complete (~5min spacing) generated=$generated")
+                            }
                         }
                     }
                     Log.i(TAG, "session pass complete: generated=$generated")
                 } finally {
-                    releaseExtractor()
+                    // Fresh-per-frame: nothing session-level to release.
                 }
             }
         }
@@ -174,24 +200,37 @@ object SeekThumbnails {
         fun stop() {
             workerJob?.cancel()
             workerJob = null
-            releaseExtractor()
         }
 
         fun thumbFor(positionMs: Long): Bitmap? {
             val lastBucket = (durationMs - 1) / SPACING_MS
             val bucket = (positionMs / SPACING_MS).coerceIn(0, lastBucket)
             cache.getMem(bucket)?.let { return it }
-            if (cache.hasDisk(bucket) && diskLoadsInFlight.add(bucket)) {
-                scope.launch {
-                    val bmp = withContext(Dispatchers.IO) { cache.readDisk(bucket) }
-                    diskLoadsInFlight.remove(bucket)
-                    if (bmp != null) {
-                        cache.putMem(bucket, bmp)
-                        tick.intValue++
-                    }
+            // Nearest-thumb serving: an approximate frame beats a blank during ramped seeks.
+            var nearest: Bitmap? = null
+            for (d in 1..NEAREST_RADIUS_BUCKETS) {
+                cache.getMem(bucket - d)?.let { nearest = it }
+                if (nearest == null) cache.getMem(bucket + d)?.let { nearest = it }
+                if (nearest != null) break
+            }
+            requestDiskLoad(bucket)
+            return nearest
+        }
+
+        /** Rest-debounced async disk load: at most one dispatch per DISK_LOAD_DEBOUNCE_MS. */
+        private fun requestDiskLoad(bucket: Long) {
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastDiskLoadRequestAt < DISK_LOAD_DEBOUNCE_MS) return
+            if (!cache.hasDisk(bucket) || !diskLoadsInFlight.add(bucket)) return
+            lastDiskLoadRequestAt = now
+            scope.launch {
+                val bmp = withContext(Dispatchers.IO) { cache.readDisk(bucket) }
+                diskLoadsInFlight.remove(bucket)
+                if (bmp != null) {
+                    cache.putMem(bucket, bmp)
+                    tick.intValue++
                 }
             }
-            return null
         }
 
         /** Playback-first gate: playing AND >=20 s buffer ahead, or buffered to the end. */
@@ -209,49 +248,48 @@ object SeekThumbnails {
             }
         }
 
-        /** One extraction; recreate the extractor once on failure and retry (EFE poisons itself on error). */
+        /** One extraction with a single retry; both attempts use a FRESH extractor. 429 => no retry. */
         private suspend fun extractWithRecovery(positionMs: Long, bucket: Long): Bitmap? {
             val first = runCatching { extractOnce(positionMs) }
             first.getOrNull()?.let { return it }
-            Log.w(TAG, "bucket=$bucket attempt1: ${describe(first.exceptionOrNull())}")
-            recreateExtractor()
+            val t1 = first.exceptionOrNull()
+            if (isRateLimited(t1)) { rateLimited = true; return null }
+            Log.w(TAG, "bucket=$bucket attempt1: ${describe(t1)}")
             val second = runCatching { extractOnce(positionMs) }
             second.getOrNull()?.let { return it }
-            Log.w(TAG, "bucket=$bucket attempt2: ${describe(second.exceptionOrNull())}")
+            val t2 = second.exceptionOrNull()
+            if (isRateLimited(t2)) { rateLimited = true; return null }
+            Log.w(TAG, "bucket=$bucket attempt2: ${describe(t2)}")
             return null
         }
 
-        private fun ensureExtractor(): ExperimentalFrameExtractor {
-            extractor?.let { return it }
-            val e = ExperimentalFrameExtractor(
+        /** Fresh extractor per call - the stable configuration on this SoC. Always released. */
+        private suspend fun extractOnce(positionMs: Long): Bitmap? {
+            val extractor = ExperimentalFrameExtractor(
                 appContext,
                 ExperimentalFrameExtractor.Configuration.Builder()
                     // rev5 S2 binding doctrine: nearest keyframe, never decode-to-exact.
                     .setSeekParameters(SeekParameters.CLOSEST_SYNC)
                     .build()
             )
-            // No GL effect: native-res extraction (the effect-free path the self-test proved stable),
-            // CPU downscale afterwards. Avoids the Presentation-shader "Unbalanced enter/exit" race.
-            e.setMediaItem(MediaItem.fromUri(url), emptyList<Effect>())
-            extractor = e
-            return e
-        }
-
-        private suspend fun extractOnce(positionMs: Long): Bitmap? {
-            val e = ensureExtractor()
-            val future = e.getFrame(positionMs)
-            val full = suspendCancellableCoroutine<Bitmap?> { cont ->
-                future.addListener({
-                    try {
-                        cont.resume(future.get().bitmap)
-                    } catch (t: Throwable) {
-                        if (cont.isActive) cont.resumeWith(Result.failure(t))
-                    }
-                }, MoreExecutors.directExecutor())
-                cont.invokeOnCancellation { future.cancel(true) }
-            } ?: return null
-            // Scale off the playback thread; returns an owned copy (EFE's bitmap is never recycled).
-            return withContext(Dispatchers.Default) { ownedDownscale(full) }
+            try {
+                extractor.setMediaItem(MediaItem.fromUri(url), emptyList<Effect>())
+                val future = extractor.getFrame(positionMs)
+                val full = suspendCancellableCoroutine<Bitmap?> { cont ->
+                    future.addListener({
+                        try {
+                            cont.resume(future.get().bitmap)
+                        } catch (t: Throwable) {
+                            if (cont.isActive) cont.resumeWith(Result.failure(t))
+                        }
+                    }, MoreExecutors.directExecutor())
+                    cont.invokeOnCancellation { future.cancel(true) }
+                } ?: return null
+                // Scale off the playback thread; owned copy (EFE's bitmap is borrowed, never recycled).
+                return withContext(Dispatchers.Default) { ownedDownscale(full) }
+            } finally {
+                runCatching { extractor.release() }
+            }
         }
 
         /**
@@ -266,17 +304,17 @@ object SeekThumbnails {
             return Bitmap.createScaledBitmap(src, w, TARGET_HEIGHT, true)
         }
 
-        /** Release the current extractor without ending the session (mid-pass recovery). */
-        private fun recreateExtractor() {
-            runCatching { extractor?.release() }
-            extractor = null
-        }
-
-        private fun releaseExtractor() {
-            if (released) return
-            released = true
-            runCatching { extractor?.release() }
-            extractor = null
+        private fun isRateLimited(t: Throwable?): Boolean {
+            var cur: Throwable? = if (t is ExecutionException && t.cause != null) t.cause else t
+            while (cur != null) {
+                if ((cur as? PlaybackException)?.errorCode ==
+                    PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS &&
+                    cur.message?.contains("429") == true
+                ) return true
+                if (cur.message?.contains("Response code: 429") == true) return true
+                cur = cur.cause
+            }
+            return false
         }
 
         private fun describe(t: Throwable?): String {
