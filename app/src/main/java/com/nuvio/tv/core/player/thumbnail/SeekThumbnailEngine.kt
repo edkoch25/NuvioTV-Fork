@@ -240,7 +240,7 @@ object SeekThumbnails {
         private suspend fun extractOnce(positionMs: Long): Bitmap? {
             val e = ensureExtractor()
             val future = e.getFrame(positionMs)
-            val full = suspendCancellableCoroutine { cont ->
+            val full = suspendCancellableCoroutine<Bitmap?> { cont ->
                 future.addListener({
                     try {
                         cont.resume(future.get().bitmap)
