@@ -949,7 +949,7 @@ fun PlayerScreen(
             }
         }
         // T-series Build 3: seek-thumbnail pane (renders only during held-key preview seek).
-        SeekThumbnailOverlayHost(uiState = uiState)
+        SeekThumbnailOverlayHost(uiState = uiState, viewModel = viewModel)
 
         PlaybackStatsOverlay(
             visible = uiState.showPlaybackStatsOverlay && uiState.error == null,

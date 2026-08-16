@@ -26,9 +26,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
+import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -37,24 +38,48 @@ import androidx.compose.ui.unit.dp
 import com.nuvio.tv.core.player.thumbnail.SeekThumbnails
 
 /**
- * T-series Build 3: seek-thumbnail pane. Renders only while a held-key preview seek is in
- * flight (uiState.pendingPreviewSeekPosition non-null). Pure local lookup - memory hit
- * shows immediately, async disk hits arrive via SeekThumbnails.tick, a true miss renders
- * nothing (frontier gap = blank + the timestamp the controls already show). v1 places the
- * pane bottom-centre above the controls, not tracking the scrubber x-position.
- * Surface uses black-alpha per the player-overlay UI rule.
+ * T-series Build 6: seek-thumbnail pane. Renders only while a held-key preview seek is in
+ * flight (pendingPreviewSeekPosition non-null). Pure local lookup - memory hit shows
+ * immediately, async disk hits arrive via SeekThumbnails.tick, a true miss renders nothing
+ * (frontier gap = blank + the timestamp the controls already show).
+ *
+ * Placement: bar-anchored (bottom), and horizontally tracks the playhead via BiasAlignment
+ * (fraction = previewPos/duration), clamping at the screen insets so it never overflows -
+ * the same span as the ProgressBar (spacing.xxl = 32.dp inset). Thumb is sized by the source
+ * bitmap's aspect (fixed height, width = height * aspect) so non-16:9 frames don't distort.
+ * Surface is black-alpha per the player-overlay UI rule.
  */
 @Composable
-fun SeekThumbnailOverlayHost(uiState: PlayerUiState, modifier: Modifier = Modifier) {
-    val previewPositionMs = uiState.pendingPreviewSeekPosition ?: return
+fun SeekThumbnailOverlayHost(
+    uiState: PlayerUiState,
+    viewModel: PlayerViewModel,
+    modifier: Modifier = Modifier
+) {
+    // Composable reads first (consistent call order), then early returns.
+    val timeline by viewModel.playbackTimeline.collectAsState()
     val tick by SeekThumbnails.tick
+    val previewPositionMs = uiState.pendingPreviewSeekPosition ?: return
+    val durationMs = timeline.duration
+    if (durationMs <= 0L) return
     val bitmap = remember(previewPositionMs, tick) { SeekThumbnails.thumbFor(previewPositionMs) }
         ?: return
-    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+
+    val fraction = (previewPositionMs.toFloat() / durationMs).coerceIn(0f, 1f)
+    val aspect = bitmap.width.toFloat() / bitmap.height.coerceAtLeast(1)
+    val thumbHeight = 108.dp
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 32.dp, bottom = 92.dp),
+        contentAlignment = BiasAlignment(
+            horizontalBias = fraction * 2f - 1f,
+            verticalBias = 1f
+        )
+    ) {
         Box(
             modifier = Modifier
-                .padding(bottom = 120.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(6.dp))
                 .background(Color.Black.copy(alpha = 0.85f))
                 .padding(3.dp)
         ) {
@@ -62,9 +87,9 @@ fun SeekThumbnailOverlayHost(uiState: PlayerUiState, modifier: Modifier = Modifi
                 bitmap = bitmap.asImageBitmap(),
                 contentDescription = null,
                 modifier = Modifier
-                    .width(224.dp)
-                    .height(126.dp)
-                    .clip(RoundedCornerShape(6.dp))
+                    .height(thumbHeight)
+                    .width(thumbHeight * aspect)
+                    .clip(RoundedCornerShape(4.dp))
             )
         }
     }

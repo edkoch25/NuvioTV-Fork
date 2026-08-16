@@ -262,7 +262,9 @@ object SeekThumbnails {
             withContext(Dispatchers.IO) {
                 val retriever = MediaMetadataRetriever()
                 try {
+                    val tOpen0 = SystemClock.elapsedRealtime()
                     retriever.setDataSource(url, emptyMap())
+                    val tOpen1 = SystemClock.elapsedRealtime()
                     val srcW = retriever.extractMetadata(
                         MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH
                     )?.toIntOrNull() ?: 0
@@ -275,12 +277,15 @@ object SeekThumbnails {
                     } else {
                         (dstH * 16) / 9
                     }
-                    retriever.getScaledFrameAtTime(
+                    val frame = retriever.getScaledFrameAtTime(
                         positionMs * 1_000L,
                         MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
                         dstW,
                         dstH
                     )
+                    Log.i(TAG, "mmr pos=${positionMs}ms open=${tOpen1 - tOpen0}ms " +
+                        "decode=${SystemClock.elapsedRealtime() - tOpen1}ms")
+                    frame
                 } finally {
                     runCatching { retriever.release() }
                 }
