@@ -1,11 +1,13 @@
 package com.nuvio.tv.core.assessment
 
+import androidx.media3.common.util.UnstableApi
 import com.nuvio.tv.data.local.DeniedCodecHandling
 import com.nuvio.tv.data.local.Dv7HandlingMode
 import com.nuvio.tv.data.local.FrameRateMatchingMode
 import com.nuvio.tv.data.local.PlayerSettings
 import com.nuvio.tv.data.local.PlayerSettingsDataStore
 import com.nuvio.tv.data.local.VodCacheSizeMode
+import com.nuvio.tv.ui.screens.settings.MemoryBudget
 import kotlinx.coroutines.flow.first
 import org.json.JSONObject
 
@@ -34,10 +36,12 @@ object DeviceAssessmentApplier {
 
     data class ApplyOutcome(val writtenCount: Int)
 
+    @androidx.annotation.OptIn(UnstableApi::class)
     suspend fun apply(
         dataStore: PlayerSettingsDataStore,
         plan: AssessmentApplyPlan,
-        profile: IntentProfileOption?
+        profile: IntentProfileOption?,
+        safeLimitMb: Int
     ): ApplyOutcome {
         val before = dataStore.playerSettings.first()
         dataStore.setAssessmentRevertSnapshot(snapshotJson(before))
@@ -86,6 +90,35 @@ object DeviceAssessmentApplier {
         plan.stripHdr10PlusSei?.let { step { dataStore.setStripHdr10PlusSei(it) } }
         plan.forceOpticalPassthrough?.let { step { dataStore.setForceOpticalPassthrough(it) } }
         plan.deniedCodecHandling?.let { step { dataStore.setDeniedCodecHandling(it) } }
+
+        // Pre-commit safe-limit re-check (design: "recommend to safe"). Read
+        // the settled state back and confirm the native footprint - target
+        // buffer plus parallel overhead - fits the safe budget; clamp the
+        // target down to the largest fitting step if not. Reading BACK rather
+        // than trusting the plan is deliberate: enabling performance mode
+        // presets target = safeLimitMb and 4c/16 parallel, and the plan only
+        // rewrites a field when its recommendation differs from the PRE-apply
+        // value, so a recommendation equal to the pre-preset value can leave
+        // the preset's over-budget target in place. The MIN_BUFFER_MB floor is
+        // preserved: on a device where overhead alone already exceeds safe (the
+        // engine's deliberate constrained-device fallback) the clamp settles on
+        // MIN_BUFFER_MB and does not fight it. No-op on the normal path, where
+        // the engine already sized the target to safe minus overhead.
+        val after = dataStore.playerSettings.first()
+        val afterOverheadMb = if (after.useParallelConnections) {
+            MemoryBudget.parallelOverheadMb(
+                after.parallelConnectionCount,
+                (after.parallelChunkSizeKb + 1023) / 1024
+            )
+        } else {
+            0
+        }
+        val maxSafeTargetMb =
+            (((safeLimitMb - afterOverheadMb) / MemoryBudget.BUFFER_STEP_MB) * MemoryBudget.BUFFER_STEP_MB)
+                .coerceAtLeast(MemoryBudget.MIN_BUFFER_MB)
+        if (after.bufferSettings.targetBufferSizeMb > maxSafeTargetMb) {
+            step { dataStore.setBufferTargetSizeMb(maxSafeTargetMb) }
+        }
 
         return ApplyOutcome(writtenCount = written)
     }

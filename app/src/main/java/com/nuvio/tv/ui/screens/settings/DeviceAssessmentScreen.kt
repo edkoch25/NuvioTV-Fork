@@ -147,7 +147,8 @@ internal fun runApplyAssessment(
         val outcome = DeviceAssessmentApplier.apply(
             dataStore = assessmentDataStore(context),
             plan = res.applyPlan,
-            profile = profile
+            profile = profile,
+            safeLimitMb = res.header.safeLimitMb
         )
         state.appliedCount = outcome.writtenCount
         state.applyArmed = false
