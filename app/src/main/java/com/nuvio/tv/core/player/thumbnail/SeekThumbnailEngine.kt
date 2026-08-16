@@ -26,7 +26,6 @@ import androidx.media3.common.C
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
-import androidx.media3.effect.Presentation
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.transformer.ExperimentalFrameExtractor
@@ -45,21 +44,24 @@ import kotlin.coroutines.resume
 /**
  * T-series Build 3: P3 main-file seek-thumbnail engine.
  *
- * One session per playback, a GL downscale effect (Presentation height 360) so frames land
- * thumb-sized, and a sequential eager pass across the timeline at 30 s spacing under a
- * playback-first gate. CLOSEST_SYNC seek doctrine (rev5 S2). Zero network and zero video
- * decode at scrub time: lookups are memory-first; disk JPEG loads are async and post a
- * recompose tick.
+ * One session per playback; sequential eager pass at 30 s spacing under a playback-first gate;
+ * CLOSEST_SYNC seek doctrine (rev5 S2). Zero network / zero video decode at scrub time.
  *
- * fix2: EFE's internal ExoPlayer, once it enters an error state, fails every subsequent
- * getFrame() instantly (processNext checks player.getPlayerError()). So a single failure
- * would otherwise poison the whole pass. Recovery: on a failed bucket, log the real
- * PlaybackException, recreate the extractor once (fresh player = cleared error) and retry;
- * only a post-retry failure counts toward the abort streak. Playback is never the casualty.
+ * fix3: EFE + a Presentation GL effect produced intermittent "Unbalanced enter/exit" GL runtime
+ * errors on the AM9 Pro (Amlogic). We extract native-res with NO user effect (the effect-free
+ * path the self-test proved stable) and CPU-downscale afterwards.
+ *
+ * Bitmap ownership (proven from EFE source): getFrame() returns a fresh software ARGB_8888
+ * Bitmap, but EFE retains it in lastExtractedFrame and may re-hand the SAME instance for a later
+ * seek. So EFE's bitmap is borrowed/read-only: we never recycle it and always return an OWNED
+ * copy (createScaledBitmap for >360h, else copy). Scaling runs on Dispatchers.Default so an
+ * ~8 MB frame scale never janks the playback thread. fix2 recover-retry + real-error logging
+ * remain as a dormant safety net.
  */
 object SeekThumbnails {
     private const val TAG = "ThumbWorker"
     const val SPACING_MS = 30_000L
+    private const val TARGET_HEIGHT = 360
     private const val GATE_BUFFER_AHEAD_MS = 20_000L
     private const val MAX_CONSECUTIVE_FAILURES = 3
 
@@ -137,7 +139,7 @@ object SeekThumbnails {
                 val lastBucket = (durationMs - 1) / SPACING_MS
                 var generated = 0
                 var failures = 0
-                Log.i(TAG, "session start: buckets=0..$lastBucket spacing=${SPACING_MS}ms")
+                Log.i(TAG, "session start: buckets=0..$lastBucket spacing=${SPACING_MS}ms (native+cpu-downscale)")
                 try {
                     for (bucket in 0..lastBucket) {
                         if (cache.hasDisk(bucket)) continue
@@ -228,8 +230,9 @@ object SeekThumbnails {
                     .setSeekParameters(SeekParameters.CLOSEST_SYNC)
                     .build()
             )
-            val effects = listOf<Effect>(Presentation.createForHeight(360))
-            e.setMediaItem(MediaItem.fromUri(url), effects)
+            // No GL effect: native-res extraction (the effect-free path the self-test proved stable),
+            // CPU downscale afterwards. Avoids the Presentation-shader "Unbalanced enter/exit" race.
+            e.setMediaItem(MediaItem.fromUri(url), emptyList<Effect>())
             extractor = e
             return e
         }
@@ -237,7 +240,7 @@ object SeekThumbnails {
         private suspend fun extractOnce(positionMs: Long): Bitmap? {
             val e = ensureExtractor()
             val future = e.getFrame(positionMs)
-            return suspendCancellableCoroutine { cont ->
+            val full = suspendCancellableCoroutine { cont ->
                 future.addListener({
                     try {
                         cont.resume(future.get().bitmap)
@@ -246,7 +249,21 @@ object SeekThumbnails {
                     }
                 }, MoreExecutors.directExecutor())
                 cont.invokeOnCancellation { future.cancel(true) }
+            } ?: return null
+            // Scale off the playback thread; returns an owned copy (EFE's bitmap is never recycled).
+            return withContext(Dispatchers.Default) { ownedDownscale(full) }
+        }
+
+        /**
+         * Returns an OWNED copy of [src] at <=TARGET_HEIGHT. [src] is EFE's borrowed frame bitmap:
+         * never recycled, never handed to the cache directly.
+         */
+        private fun ownedDownscale(src: Bitmap): Bitmap {
+            if (src.height <= TARGET_HEIGHT) {
+                return src.copy(src.config ?: Bitmap.Config.ARGB_8888, false)
             }
+            val w = (src.width.toFloat() * TARGET_HEIGHT / src.height).toInt().coerceAtLeast(1)
+            return Bitmap.createScaledBitmap(src, w, TARGET_HEIGHT, true)
         }
 
         /** Release the current extractor without ending the session (mid-pass recovery). */
