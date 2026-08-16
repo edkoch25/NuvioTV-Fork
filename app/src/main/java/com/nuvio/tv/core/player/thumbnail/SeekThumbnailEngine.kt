@@ -25,6 +25,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.media3.common.C
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.effect.Presentation
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
@@ -38,18 +39,23 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ExecutionException
 import kotlin.coroutines.resume
 
 /**
  * T-series Build 3: P3 main-file seek-thumbnail engine.
  *
- * One session per playback. One vendored ExperimentalFrameExtractor instance per session,
- * a GL downscale effect (Presentation height 360) so frames land thumb-sized, and a
- * sequential eager pass across the timeline at 30 s spacing under a playback-first gate
- * (playing AND >=20 s buffer ahead, or buffered to end). Zero network and zero video
+ * One session per playback, a GL downscale effect (Presentation height 360) so frames land
+ * thumb-sized, and a sequential eager pass across the timeline at 30 s spacing under a
+ * playback-first gate. CLOSEST_SYNC seek doctrine (rev5 S2). Zero network and zero video
  * decode at scrub time: lookups are memory-first; disk JPEG loads are async and post a
- * recompose tick. Any getFrame failure streak aborts the session - playback is never
- * the casualty.
+ * recompose tick.
+ *
+ * fix2: EFE's internal ExoPlayer, once it enters an error state, fails every subsequent
+ * getFrame() instantly (processNext checks player.getPlayerError()). So a single failure
+ * would otherwise poison the whole pass. Recovery: on a failed bucket, log the real
+ * PlaybackException, recreate the extractor once (fresh player = cleared error) and retry;
+ * only a post-retry failure counts toward the abort streak. Playback is never the casualty.
  */
 object SeekThumbnails {
     private const val TAG = "ThumbWorker"
@@ -68,10 +74,6 @@ object SeekThumbnails {
         session = null
     }
 
-    /**
-     * Waits (<=30 s) for the player to expose a video format + duration, applies the
-     * P3 cheap-case eligibility rule (<=1080p SDR), then starts the worker session.
-     */
     suspend fun startWhenEligible(
         context: Context,
         url: String,
@@ -114,10 +116,6 @@ object SeekThumbnails {
         s.start()
     }
 
-    /**
-     * Scrub-time lookup. Memory hit returns immediately; a disk hit loads asynchronously
-     * and bumps [tick]; a true miss returns null (frontier gap: blank pane + timestamp).
-     */
     fun thumbFor(positionMs: Long): Bitmap? = session?.thumbFor(positionMs)
 
     private class Session(
@@ -145,10 +143,10 @@ object SeekThumbnails {
                         if (cache.hasDisk(bucket)) continue
                         awaitGate()
                         val positionMs = (bucket * SPACING_MS).coerceAtMost(durationMs - 1)
-                        val bmp = runCatching { extractFrame(positionMs) }.getOrNull()
+                        val bmp = extractWithRecovery(positionMs, bucket)
                         if (bmp == null) {
                             failures++
-                            Log.w(TAG, "frame failed at bucket=$bucket (streak=$failures)")
+                            Log.w(TAG, "bucket=$bucket failed after retry (streak=$failures)")
                             if (failures >= MAX_CONSECUTIVE_FAILURES) {
                                 Log.w(TAG, "aborting session after $failures consecutive failures")
                                 break
@@ -158,6 +156,7 @@ object SeekThumbnails {
                         failures = 0
                         val written = withContext(Dispatchers.IO) { cache.writeDisk(bucket, bmp) }
                         if (written) {
+                            if (generated == 0) Log.i(TAG, "first thumb ${bmp.width}x${bmp.height}")
                             cache.putMem(bucket, bmp)
                             tick.intValue++
                             generated++
@@ -208,13 +207,24 @@ object SeekThumbnails {
             }
         }
 
+        /** One extraction; recreate the extractor once on failure and retry (EFE poisons itself on error). */
+        private suspend fun extractWithRecovery(positionMs: Long, bucket: Long): Bitmap? {
+            val first = runCatching { extractOnce(positionMs) }
+            first.getOrNull()?.let { return it }
+            Log.w(TAG, "bucket=$bucket attempt1: ${describe(first.exceptionOrNull())}")
+            recreateExtractor()
+            val second = runCatching { extractOnce(positionMs) }
+            second.getOrNull()?.let { return it }
+            Log.w(TAG, "bucket=$bucket attempt2: ${describe(second.exceptionOrNull())}")
+            return null
+        }
+
         private fun ensureExtractor(): ExperimentalFrameExtractor {
             extractor?.let { return it }
             val e = ExperimentalFrameExtractor(
                 appContext,
                 ExperimentalFrameExtractor.Configuration.Builder()
                     // rev5 S2 binding doctrine: nearest keyframe, never decode-to-exact.
-                    // EFE's default is SeekParameters.DEFAULT (exact) - proven from source.
                     .setSeekParameters(SeekParameters.CLOSEST_SYNC)
                     .build()
             )
@@ -224,7 +234,7 @@ object SeekThumbnails {
             return e
         }
 
-        private suspend fun extractFrame(positionMs: Long): Bitmap? {
+        private suspend fun extractOnce(positionMs: Long): Bitmap? {
             val e = ensureExtractor()
             val future = e.getFrame(positionMs)
             return suspendCancellableCoroutine { cont ->
@@ -239,11 +249,26 @@ object SeekThumbnails {
             }
         }
 
+        /** Release the current extractor without ending the session (mid-pass recovery). */
+        private fun recreateExtractor() {
+            runCatching { extractor?.release() }
+            extractor = null
+        }
+
         private fun releaseExtractor() {
             if (released) return
             released = true
             runCatching { extractor?.release() }
             extractor = null
+        }
+
+        private fun describe(t: Throwable?): String {
+            if (t == null) return "null"
+            val root = if (t is ExecutionException && t.cause != null) t.cause!! else t
+            val code = (root as? PlaybackException)?.errorCodeName ?: ""
+            val cause = root.cause?.let { " <- ${it.javaClass.simpleName}: ${it.message}" } ?: ""
+            val codeStr = if (code.isNotEmpty()) "($code)" else ""
+            return "${root.javaClass.simpleName}$codeStr: ${root.message}$cause"
         }
     }
 }
