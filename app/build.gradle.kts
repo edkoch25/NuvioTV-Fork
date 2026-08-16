@@ -425,6 +425,14 @@ dependencies {
     implementation("androidx.media3:media3-database:1.8.0")
     implementation("androidx.annotation:annotation-experimental:1.3.1")
 
+    // T-series seek-thumbnail engine (Build 1): media3-effect + concurrent-futures for the
+    // vendored androidx.media3.transformer.ExperimentalFrameExtractor. Effect's media3
+    // transitives (media3-common api, media3-datasource impl) are globally excluded above and
+    // satisfied by the vendored lib-common / lib-datasource AARs. javac over the vendored EFE
+    // source is the Build 1 compile gate; the runtime gate is Build 2's on-device getFrame().
+    implementation("androidx.media3:media3-effect:1.8.0")
+    implementation("androidx.concurrent:concurrent-futures:1.2.0")
+
     // Nuvio Engine local AARs (replaces lib-exoplayer, lib-common, lib-datasource, lib-datasource-okhttp, lib-exoplayer-hls, lib-extractor)
     implementation(files(
         "libs/lib-common-release.aar",
