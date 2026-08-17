@@ -796,7 +796,8 @@ internal fun NavigationSettingsItem(
     subtitle: String,
     onClick: () -> Unit,
     onFocused: () -> Unit = {},
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    showChevron: Boolean = true
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val contentAlpha = if (enabled) 1f else 0.4f
@@ -858,12 +859,14 @@ internal fun NavigationSettingsItem(
                 )
             }
 
-            Icon(
-                imageVector = Icons.Default.ChevronRight,
-                contentDescription = null,
-                tint = NuvioTheme.colors.TextSecondary.copy(alpha = contentAlpha),
-                modifier = Modifier.size(20.dp)
-            )
+            if (showChevron) {
+                Icon(
+                    imageVector = Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = NuvioTheme.colors.TextSecondary.copy(alpha = contentAlpha),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
     }
 }

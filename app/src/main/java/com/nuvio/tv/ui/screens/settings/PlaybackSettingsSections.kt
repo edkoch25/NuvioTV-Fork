@@ -431,7 +431,8 @@ internal fun PlaybackSettingsSections(
                         }
                     },
                     onFocused = { focusedSection = PlaybackSection.GENERAL },
-                    enabled = true
+                    enabled = true,
+                    showChevron = false
                 )
             }
 
