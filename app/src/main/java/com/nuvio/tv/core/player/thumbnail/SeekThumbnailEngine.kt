@@ -66,7 +66,14 @@ object SeekThumbnails {
     private const val TAG = "ThumbWorker"
     const val SPACING_MS = 60_000L
     private const val TARGET_HEIGHT = 360
-    private const val GATE_BUFFER_AHEAD_MS = 20_000L
+    private const val GATE_BUFFER_AHEAD_MS = 14_000L
+    // Build 12a gate redesign (numbers from the nt17 measurement run). The plateau
+    // escape lets a stable-but-below-threshold buffer (throttled host, byte-capped
+    // budget) generate instead of starving; see awaitGate.
+    private const val PLATEAU_WINDOW_MS = 10_000L
+    private const val PLATEAU_JITTER_MS = 2_000L
+    private const val PLATEAU_DRAIN_MARGIN_MS = 3_000L
+    private const val FRAME_TIMEOUT_MS = 20_000L
     private const val MAX_CONSECUTIVE_FAILURES = 3
     private const val INTER_FRAME_DELAY_MS = 1_200L
     private const val NEAREST_RADIUS_BUCKETS = 5
@@ -146,6 +153,13 @@ object SeekThumbnails {
         private val sessionStartRt = SystemClock.elapsedRealtime()
         private fun t(): Long = SystemClock.elapsedRealtime() - sessionStartRt
 
+        // Build 12a: EWMA of observed per-frame buffer drain. Plateau-mode extraction
+        // requires ahead >= drainEstimateMs + PLATEAU_DRAIN_MARGIN_MS, so the gate
+        // self-calibrates to the host (worst nt17 host drained ~9.5 s/frame). Seeded
+        // conservatively at 5 s; clamped 1..15 s so seek artefacts cannot poison it.
+        // Written and read on the worker's Main dispatcher only.
+        private var drainEstimateMs: Long = 5_000L
+
         // T-series Build 7 probe: ONE MediaMetadataRetriever reused across the whole session.
         // The worker loop awaits each extractWithRecovery before the next bucket, so this
         // instance is touched strictly sequentially - never concurrently - even though
@@ -169,12 +183,20 @@ object SeekThumbnails {
                 }
                 var generated = 0
                 var failures = 0
+                var extractedAny = false
                 Log.i(TAG, "session start: buckets=0..$lastBucket coarse-first, mmr-extraction")
                 try {
+                    // Build 12a (Lever 2): pay the expensive setDataSource during initial
+                    // buffering instead of after the first gate pass. Same coroutine, so
+                    // sequential retriever access is preserved; on failure the lazy open
+                    // inside extractFrame retries via the drop-and-reopen guard.
+                    withContext(Dispatchers.IO) { runCatching { ensureRetrieverBlocking() } }
                     for (bucket in order) {
                         if (cache.hasDisk(bucket)) continue
                         awaitGate()
-                        delay(INTER_FRAME_DELAY_MS)
+                        // Build 12a: pacing spaces successive frames; nothing precedes
+                        // the first, so the first thumb no longer pays the 1.2 s tax.
+                        if (extractedAny) delay(INTER_FRAME_DELAY_MS)
                         val positionMs = (bucket * SPACING_MS)
                             .coerceAtLeast(if (bucket == 0L) 5_000L else 0L)
                             .coerceAtMost(durationMs - 1)
@@ -187,6 +209,16 @@ object SeekThumbnails {
                         } ?: -1L
                         Log.i(TAG, "buffer trend bucket=$bucket pre=${aheadPre}ms " +
                             "post=${aheadPost}ms delta=${aheadPost - aheadPre}ms")
+                        // Explicit Long ascription keeps the no-classpath parse gate
+                        // clean (aheadPre/aheadPost are error-typed without ExoPlayer
+                        // on the cp); identical semantics in the real build.
+                        val drainPre: Long = aheadPre
+                        val drainPost: Long = aheadPost
+                        if (drainPre >= 0L && drainPost >= 0L && drainPost < drainPre) {
+                            drainEstimateMs = ((drainEstimateMs * 7 + (drainPre - drainPost) * 3) / 10)
+                                .coerceIn(1_000L, 15_000L)
+                        }
+                        extractedAny = true
                         if (bmp == null) {
                             failures++
                             Log.w(TAG, "bucket=$bucket failed after retry (streak=$failures)")
@@ -256,12 +288,21 @@ object SeekThumbnails {
             }
         }
 
-        /** Playback-first gate: playing AND >=20 s buffer ahead, or buffered to the end. */
+        /**
+         * Playback-first gate, Build 12a redesign (thresholds from the nt17 run):
+         * pass when playing AND (ahead >= 14 s, OR the buffer has PLATEAUED - stable
+         * within +/-2 s across >=10 s of polling with ahead >= drainEstimateMs + 3 s
+         * margin, OR buffered to the end). A flat buffer means playback is keeping
+         * pace at its ceiling (throttled host / byte-capped budget), so cautious
+         * extraction is safe when the headroom covers the session's observed drain;
+         * the 10 s plateau window doubles as pacing in that mode. Build 11 wait/pass
+         * instrumentation retained.
+         */
         private suspend fun awaitGate() {
-            // Build 11 instrumentation: 1 Hz wait time-series fires ONLY while gated,
-            // so a starved gate is directly visible in the log; behaviour unchanged.
             var waited = false
             val tGate0 = SystemClock.elapsedRealtime()
+            var plateauAnchorAhead = -1L
+            var plateauSinceRt = 0L
             while (true) {
                 val p = playerProvider()
                 if (p != null && p.isPlaying) {
@@ -269,16 +310,27 @@ object SeekThumbnails {
                     val dur = p.duration
                     val bufferedToEnd = dur != C.TIME_UNSET && dur > 0 &&
                         p.bufferedPosition >= dur - 1_000L
-                    if (ahead >= GATE_BUFFER_AHEAD_MS || bufferedToEnd) {
+                    val nowRt = SystemClock.elapsedRealtime()
+                    if (plateauAnchorAhead < 0L ||
+                        kotlin.math.abs(ahead - plateauAnchorAhead) > PLATEAU_JITTER_MS
+                    ) {
+                        plateauAnchorAhead = ahead
+                        plateauSinceRt = nowRt
+                    }
+                    val plateaued = ahead >= drainEstimateMs + PLATEAU_DRAIN_MARGIN_MS &&
+                        nowRt - plateauSinceRt >= PLATEAU_WINDOW_MS
+                    if (ahead >= GATE_BUFFER_AHEAD_MS || bufferedToEnd || plateaued) {
                         if (waited) {
                             Log.i(TAG, "gate pass t+${t()}ms waited=" +
-                                "${SystemClock.elapsedRealtime() - tGate0}ms ahead=${ahead}ms")
+                                "${SystemClock.elapsedRealtime() - tGate0}ms ahead=${ahead}ms" +
+                                (if (plateaued && ahead < GATE_BUFFER_AHEAD_MS) " (plateau)" else ""))
                         }
                         return
                     }
                     Log.i(TAG, "gate wait t+${t()}ms ahead=${ahead}ms " +
                         "pos=${p.currentPosition}ms buffered=${p.bufferedPosition}ms")
                 } else {
+                    plateauAnchorAhead = -1L
                     Log.i(TAG, "gate wait t+${t()}ms notPlaying")
                 }
                 waited = true
@@ -352,16 +404,37 @@ object SeekThumbnails {
                 val dstH = TARGET_HEIGHT
                 val dstW = (dstH * srcAspect).toInt().coerceAtLeast(1)
                 val tDec0 = SystemClock.elapsedRealtime()
-                val frame = r.getScaledFrameAtTime(
-                    positionMs * 1_000L,
-                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
-                    dstW,
-                    dstH
-                )
-                val decodeMs = SystemClock.elapsedRealtime() - tDec0
-                Log.i(TAG, "mmr pos=${positionMs}ms decode=${decodeMs}ms " +
-                    "sig=${frame?.let { signature(it) } ?: "----"}")
-                frame
+                // Build 12a: getScaledFrameAtTime is a blocking native call that
+                // coroutine cancellation cannot interrupt; a stalled range-read could
+                // previously wedge the worker forever (no timeout existed). Watchdog:
+                // releasing the retriever from another coroutine aborts the stuck call
+                // with an exception, which extractWithRecovery's drop-and-reopen guard
+                // heals. The cross-thread release deliberately breaks the sequential-
+                // access rule, ONLY as this abort path.
+                val done = java.util.concurrent.atomic.AtomicBoolean(false)
+                val watchdog = launch {
+                    delay(FRAME_TIMEOUT_MS)
+                    if (!done.get()) {
+                        Log.w(TAG, "frame timeout ${FRAME_TIMEOUT_MS}ms pos=${positionMs}ms " +
+                            "- releasing retriever to abort")
+                        runCatching { r.release() }
+                    }
+                }
+                try {
+                    val frame = r.getScaledFrameAtTime(
+                        positionMs * 1_000L,
+                        MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                        dstW,
+                        dstH
+                    )
+                    val decodeMs = SystemClock.elapsedRealtime() - tDec0
+                    Log.i(TAG, "mmr pos=${positionMs}ms decode=${decodeMs}ms " +
+                        "sig=${frame?.let { signature(it) } ?: "----"}")
+                    frame
+                } finally {
+                    done.set(true)
+                    watchdog.cancel()
+                }
             }
 
         /** Cheap 3x3-grid (9-point) pixel signature; distinct frames => distinct hex. */
