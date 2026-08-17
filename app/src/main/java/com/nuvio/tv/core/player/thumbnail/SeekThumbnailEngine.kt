@@ -89,7 +89,8 @@ object SeekThumbnails {
         titleKey: String,
         playerProvider: () -> ExoPlayer?
     ) {
-        val deadline = SystemClock.elapsedRealtime() + 30_000L
+        val tPoll0 = SystemClock.elapsedRealtime()
+        val deadline = tPoll0 + 30_000L
         var width = 0
         var height = 0
         var colorTransfer: Int? = null
@@ -113,6 +114,7 @@ object SeekThumbnails {
             Log.i(TAG, "skip: player format/duration not available in time")
             return
         }
+        Log.i(TAG, "eligible: format ready after ${SystemClock.elapsedRealtime() - tPoll0}ms")
         val isSdr = colorTransfer == null ||
             (colorTransfer != C.COLOR_TRANSFER_ST2084 && colorTransfer != C.COLOR_TRANSFER_HLG)
         if (height > 1080 || width > 1920 || !isSdr) {
@@ -139,6 +141,10 @@ object SeekThumbnails {
         private var workerJob: Job? = null
         private val diskLoadsInFlight = HashSet<Long>()
         private var lastDiskLoadRequestAt = 0L
+
+        // Build 11 instrumentation (log-only): elapsed anchor for t+ values.
+        private val sessionStartRt = SystemClock.elapsedRealtime()
+        private fun t(): Long = SystemClock.elapsedRealtime() - sessionStartRt
 
         // T-series Build 7 probe: ONE MediaMetadataRetriever reused across the whole session.
         // The worker loop awaits each extractWithRecovery before the next bucket, so this
@@ -172,7 +178,15 @@ object SeekThumbnails {
                         val positionMs = (bucket * SPACING_MS)
                             .coerceAtLeast(if (bucket == 0L) 5_000L else 0L)
                             .coerceAtMost(durationMs - 1)
+                        val aheadPre = playerProvider()?.let {
+                            it.bufferedPosition - it.currentPosition
+                        } ?: -1L
                         val bmp = extractWithRecovery(positionMs, bucket)
+                        val aheadPost = playerProvider()?.let {
+                            it.bufferedPosition - it.currentPosition
+                        } ?: -1L
+                        Log.i(TAG, "buffer trend bucket=$bucket pre=${aheadPre}ms " +
+                            "post=${aheadPost}ms delta=${aheadPost - aheadPre}ms")
                         if (bmp == null) {
                             failures++
                             Log.w(TAG, "bucket=$bucket failed after retry (streak=$failures)")
@@ -185,16 +199,19 @@ object SeekThumbnails {
                         failures = 0
                         val written = withContext(Dispatchers.IO) { cache.writeDisk(bucket, bmp) }
                         if (written) {
-                            if (generated == 0) Log.i(TAG, "first thumb ${bmp.width}x${bmp.height}")
+                            if (generated == 0) {
+                                Log.i(TAG, "first thumb ${bmp.width}x${bmp.height} t+${t()}ms")
+                            }
                             cache.putMem(bucket, bmp)
                             tick.intValue++
                             generated++
                             if (generated == ((lastBucket / 5L) + 1L).toInt()) {
-                                Log.i(TAG, "coarse pass complete (~5min spacing) generated=$generated")
+                                Log.i(TAG, "coarse pass complete (~5min spacing) " +
+                                    "generated=$generated t+${t()}ms")
                             }
                         }
                     }
-                    Log.i(TAG, "session pass complete: generated=$generated")
+                    Log.i(TAG, "session pass complete: generated=$generated t+${t()}ms")
                 } finally {
                     // Release the session-shared retriever off-main; NonCancellable so it
                     // still runs when the session was cancelled (title switch / stop()).
@@ -241,6 +258,10 @@ object SeekThumbnails {
 
         /** Playback-first gate: playing AND >=20 s buffer ahead, or buffered to the end. */
         private suspend fun awaitGate() {
+            // Build 11 instrumentation: 1 Hz wait time-series fires ONLY while gated,
+            // so a starved gate is directly visible in the log; behaviour unchanged.
+            var waited = false
+            val tGate0 = SystemClock.elapsedRealtime()
             while (true) {
                 val p = playerProvider()
                 if (p != null && p.isPlaying) {
@@ -248,8 +269,19 @@ object SeekThumbnails {
                     val dur = p.duration
                     val bufferedToEnd = dur != C.TIME_UNSET && dur > 0 &&
                         p.bufferedPosition >= dur - 1_000L
-                    if (ahead >= GATE_BUFFER_AHEAD_MS || bufferedToEnd) return
+                    if (ahead >= GATE_BUFFER_AHEAD_MS || bufferedToEnd) {
+                        if (waited) {
+                            Log.i(TAG, "gate pass t+${t()}ms waited=" +
+                                "${SystemClock.elapsedRealtime() - tGate0}ms ahead=${ahead}ms")
+                        }
+                        return
+                    }
+                    Log.i(TAG, "gate wait t+${t()}ms ahead=${ahead}ms " +
+                        "pos=${p.currentPosition}ms buffered=${p.bufferedPosition}ms")
+                } else {
+                    Log.i(TAG, "gate wait t+${t()}ms notPlaying")
                 }
+                waited = true
                 delay(1_000L)
             }
         }
