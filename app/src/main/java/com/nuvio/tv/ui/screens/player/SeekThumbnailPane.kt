@@ -71,7 +71,7 @@ fun SeekThumbnailOverlayHost(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .padding(start = 32.dp, end = 32.dp, bottom = 92.dp),
+            .padding(start = 32.dp, end = 32.dp, bottom = 140.dp),
         contentAlignment = BiasAlignment(
             horizontalBias = fraction * 2f - 1f,
             verticalBias = 1f
@@ -81,7 +81,6 @@ fun SeekThumbnailOverlayHost(
             modifier = Modifier
                 .clip(RoundedCornerShape(6.dp))
                 .background(Color.Black.copy(alpha = 0.85f))
-                .padding(3.dp)
         ) {
             Image(
                 bitmap = bitmap.asImageBitmap(),
@@ -89,7 +88,7 @@ fun SeekThumbnailOverlayHost(
                 modifier = Modifier
                     .height(thumbHeight)
                     .width(thumbHeight * aspect)
-                    .clip(RoundedCornerShape(4.dp))
+                    .clip(RoundedCornerShape(6.dp))
             )
         }
     }
