@@ -26,6 +26,8 @@ import android.util.Log
 import android.util.LruCache
 import java.io.File
 import java.security.MessageDigest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Disk + memory cache for seek thumbnails (rev5 S5 rules, v1):
@@ -43,6 +45,16 @@ class ThumbnailCache(context: Context, titleKey: String, durationMs: Long) {
         private const val TAG = "ThumbCache"
         private const val ROOT_DIR = "seek_thumbs"
         private const val MIN_FREE_BYTES = 50L * 1024 * 1024
+
+        /** Deletes the entire seek-thumbnail cache root (all titles). Runs on IO. */
+        suspend fun clearAll(context: Context): Boolean = withContext(Dispatchers.IO) {
+            val root = File(context.applicationContext.cacheDir, ROOT_DIR)
+            val ok = runCatching {
+                if (root.exists()) root.deleteRecursively() else true
+            }.getOrDefault(false)
+            Log.i(TAG, "clearAll: deleted=$ok root=${root.absolutePath}")
+            ok
+        }
 
         fun isLowTier(context: Context): Boolean {
             val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager

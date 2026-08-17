@@ -56,8 +56,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.rememberCoroutineScope
+import android.widget.Toast
 import kotlinx.coroutines.launch
 import com.nuvio.tv.core.player.thumbnail.SeekThumbnailPreferences
+import com.nuvio.tv.core.player.thumbnail.ThumbnailCache
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
@@ -409,6 +411,27 @@ internal fun PlaybackSettingsSections(
                     },
                     onFocused = { focusedSection = PlaybackSection.GENERAL },
                     enabled = !generalUi.isExternalPlayer
+                )
+            }
+
+            item(key = "general_seek_thumbnails_clear") {
+                val clearThumbsScope = rememberCoroutineScope()
+                NavigationSettingsItem(
+                    icon = Icons.Default.Image,
+                    title = "Clear seek thumbnail cache",
+                    subtitle = "Delete all saved preview images. They rebuild on next playback.",
+                    onClick = {
+                        clearThumbsScope.launch {
+                            ThumbnailCache.clearAll(context)
+                            Toast.makeText(
+                                context,
+                                "Seek thumbnail cache cleared",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    },
+                    onFocused = { focusedSection = PlaybackSection.GENERAL },
+                    enabled = true
                 )
             }
 
