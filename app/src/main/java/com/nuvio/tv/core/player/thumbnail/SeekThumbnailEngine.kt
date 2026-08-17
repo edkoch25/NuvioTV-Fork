@@ -25,9 +25,11 @@ import androidx.compose.runtime.mutableIntStateOf
 import android.media.MediaMetadataRetriever
 import androidx.media3.common.C
 import androidx.media3.exoplayer.ExoPlayer
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -42,8 +44,9 @@ import kotlinx.coroutines.withContext
  *   enter/exit" on this Amlogic SoC, especially under concurrent playback GPU load. No EFE
  *   configuration avoids it - the GL pipeline itself is the incompatibility. Extraction now
  *   uses the platform's GL-free path: MediaMetadataRetriever.getScaledFrameAtTime with
- *   OPTION_CLOSEST_SYNC (seek doctrine preserved), one retriever per frame on Dispatchers.IO,
- *   returning an owned pre-scaled bitmap (no GL, no CPU rescale, no borrowed-bitmap hazard).
+ *   OPTION_CLOSEST_SYNC (seek doctrine preserved). Build 7: ONE retriever reused per session
+ *   (setDataSource paid once), on Dispatchers.IO, returning an owned pre-scaled bitmap
+ *   (no GL, no CPU rescale, no borrowed-bitmap hazard).
  * - MMR failures are opaque (no HTTP status), so the explicit 429 session-stop is replaced by
  *   its protections: inter-frame pacing keeps connection churn low and the consecutive-failure
  *   streak aborts the session; playback is never the casualty.
@@ -137,6 +140,13 @@ object SeekThumbnails {
         private val diskLoadsInFlight = HashSet<Long>()
         private var lastDiskLoadRequestAt = 0L
 
+        // T-series Build 7 probe: ONE MediaMetadataRetriever reused across the whole session.
+        // The worker loop awaits each extractWithRecovery before the next bucket, so this
+        // instance is touched strictly sequentially - never concurrently - even though
+        // successive frames may run on different IO-pool threads. @Volatile guards visibility.
+        @Volatile private var retriever: MediaMetadataRetriever? = null
+        @Volatile private var srcAspect: Float = 16f / 9f
+
         fun start() {
             workerJob = scope.launch {
                 val lastBucket = (durationMs - 1) / SPACING_MS
@@ -186,7 +196,9 @@ object SeekThumbnails {
                     }
                     Log.i(TAG, "session pass complete: generated=$generated")
                 } finally {
-                    // Fresh-per-frame: nothing session-level to release.
+                    // Release the session-shared retriever off-main; NonCancellable so it
+                    // still runs when the session was cancelled (title switch / stop()).
+                    withContext(NonCancellable + Dispatchers.IO) { releaseRetriever() }
                 }
             }
         }
@@ -242,54 +254,98 @@ object SeekThumbnails {
             }
         }
 
-        /** One extraction with a single retry; both attempts use a fresh retriever. */
+        /**
+         * Up to two attempts. CancellationException is RETHROWN, never retried or counted
+         * toward the failure streak: the previous runCatching swallowed job cancellation,
+         * producing dead retry-after-cancel work and false streak entries (nt12 log - every
+         * "failure" there was JobCancellationException from a title switch). On a real
+         * exception the shared retriever is dropped so the next attempt/bucket reopens a
+         * clean instance (reuse-poison guard, the MMR analogue of the EFE self-poison).
+         */
         private suspend fun extractWithRecovery(positionMs: Long, bucket: Long): Bitmap? {
-            val first = runCatching { extractOnce(positionMs) }
-            first.getOrNull()?.let { return it }
-            Log.w(TAG, "bucket=$bucket attempt1: ${describe(first.exceptionOrNull())}")
-            val second = runCatching { extractOnce(positionMs) }
-            second.getOrNull()?.let { return it }
-            Log.w(TAG, "bucket=$bucket attempt2: ${describe(second.exceptionOrNull())}")
+            for (attempt in 1..2) {
+                try {
+                    val frame = extractFrame(positionMs)
+                    if (frame != null) return frame
+                    Log.w(TAG, "bucket=$bucket attempt$attempt: null (frame unavailable)")
+                } catch (ce: CancellationException) {
+                    throw ce
+                } catch (t: Throwable) {
+                    Log.w(TAG, "bucket=$bucket attempt$attempt: ${describe(t)}")
+                    releaseRetriever()
+                }
+            }
             return null
         }
 
         /**
-         * GL-free extraction on the IO dispatcher: MediaMetadataRetriever decodes via the
-         * platform codec straight to an OWNED, pre-scaled bitmap. OPTION_CLOSEST_SYNC =
-         * nearest keyframe (rev5 S2 doctrine). One retriever per frame, always released.
+         * Opens the session-shared retriever exactly once (the expensive setDataSource -
+         * HTTP connect + container parse, ~11-14 s over debrid in the nt12 log). Subsequent
+         * frames reuse it, so the per-frame open cost that dominated the coarse pass is paid
+         * a single time. Caller runs on Dispatchers.IO. Sequential access only (see field).
          */
-        private suspend fun extractOnce(positionMs: Long): Bitmap? =
+        private fun ensureRetrieverBlocking(): MediaMetadataRetriever {
+            retriever?.let { return it }
+            val r = MediaMetadataRetriever()
+            val tOpen0 = SystemClock.elapsedRealtime()
+            r.setDataSource(url, emptyMap())
+            val tOpen1 = SystemClock.elapsedRealtime()
+            val srcW = r.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH
+            )?.toIntOrNull() ?: 0
+            val srcH = r.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT
+            )?.toIntOrNull() ?: 0
+            srcAspect = if (srcW > 0 && srcH > 0) srcW.toFloat() / srcH.toFloat() else 16f / 9f
+            Log.i(TAG, "mmr open=${tOpen1 - tOpen0}ms (setDataSource, session-shared)")
+            retriever = r
+            return r
+        }
+
+        private fun releaseRetriever() {
+            retriever?.let { r -> runCatching { r.release() } }
+            retriever = null
+        }
+
+        /**
+         * GL-free extraction on the shared retriever: getScaledFrameAtTime decodes via the
+         * platform codec straight to an OWNED, pre-scaled bitmap. OPTION_CLOSEST_SYNC =
+         * nearest keyframe (rev5 S2 doctrine). Logs per-frame decode time and a 9-point pixel
+         * signature so the probe can confirm repeated seeks on ONE instance return DISTINCT,
+         * correct frames - the reuse behaviour that was previously [unverified].
+         */
+        private suspend fun extractFrame(positionMs: Long): Bitmap? =
             withContext(Dispatchers.IO) {
-                val retriever = MediaMetadataRetriever()
-                try {
-                    val tOpen0 = SystemClock.elapsedRealtime()
-                    retriever.setDataSource(url, emptyMap())
-                    val tOpen1 = SystemClock.elapsedRealtime()
-                    val srcW = retriever.extractMetadata(
-                        MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH
-                    )?.toIntOrNull() ?: 0
-                    val srcH = retriever.extractMetadata(
-                        MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT
-                    )?.toIntOrNull() ?: 0
-                    val dstH = TARGET_HEIGHT
-                    val dstW = if (srcW > 0 && srcH > 0) {
-                        (srcW.toFloat() * dstH / srcH).toInt().coerceAtLeast(1)
-                    } else {
-                        (dstH * 16) / 9
-                    }
-                    val frame = retriever.getScaledFrameAtTime(
-                        positionMs * 1_000L,
-                        MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
-                        dstW,
-                        dstH
-                    )
-                    Log.i(TAG, "mmr pos=${positionMs}ms open=${tOpen1 - tOpen0}ms " +
-                        "decode=${SystemClock.elapsedRealtime() - tOpen1}ms")
-                    frame
-                } finally {
-                    runCatching { retriever.release() }
+                val r = ensureRetrieverBlocking()
+                val dstH = TARGET_HEIGHT
+                val dstW = (dstH * srcAspect).toInt().coerceAtLeast(1)
+                val tDec0 = SystemClock.elapsedRealtime()
+                val frame = r.getScaledFrameAtTime(
+                    positionMs * 1_000L,
+                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                    dstW,
+                    dstH
+                )
+                val decodeMs = SystemClock.elapsedRealtime() - tDec0
+                Log.i(TAG, "mmr pos=${positionMs}ms decode=${decodeMs}ms " +
+                    "sig=${frame?.let { signature(it) } ?: "----"}")
+                frame
+            }
+
+        /** Cheap 3x3-grid (9-point) pixel signature; distinct frames => distinct hex. */
+        private fun signature(bmp: Bitmap): String {
+            var acc = 0L
+            val w = bmp.width
+            val h = bmp.height
+            for (gy in 0 until 3) {
+                for (gx in 0 until 3) {
+                    val x = (w * (gx * 2 + 1) / 6).coerceIn(0, w - 1)
+                    val y = (h * (gy * 2 + 1) / 6).coerceIn(0, h - 1)
+                    acc = acc * 31 + bmp.getPixel(x, y).toLong()
                 }
             }
+            return java.lang.Long.toHexString(acc)
+        }
 
         private fun describe(t: Throwable?): String {
             if (t == null) return "null (frame unavailable)"
