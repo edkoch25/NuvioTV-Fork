@@ -136,6 +136,14 @@ object SeekThumbnails {
 
     fun thumbFor(positionMs: Long): Bitmap? = session?.thumbFor(positionMs)
 
+    /**
+     * Build 12b (Lever 1): the player calls this on every held-seek step with the
+     * position under the scrubber. The worker services that bucket NEXT (if uncached),
+     * then resumes coarse-first order - so an early seek paints the exact frame in one
+     * decode instead of whenever the sequential pass reaches it.
+     */
+    fun notePriority(positionMs: Long) { session?.notePriority(positionMs) }
+
     private class Session(
         context: Context,
         private val url: String,
@@ -159,6 +167,15 @@ object SeekThumbnails {
         // conservatively at 5 s; clamped 1..15 s so seek artefacts cannot poison it.
         // Written and read on the worker's Main dispatcher only.
         private var drainEstimateMs: Long = 5_000L
+
+        // Build 12b (Lever 1) demand priority: the bucket under the scrubber, set from
+        // notePriority() (player thread) and read by the worker loop (Main). @Volatile
+        // for cross-thread visibility; consumed (cleared) when the worker selects it.
+        @Volatile private var priorityBucket: Long? = null
+        fun notePriority(positionMs: Long) {
+            val lastBucket = (durationMs - 1) / SPACING_MS
+            priorityBucket = (positionMs / SPACING_MS).coerceIn(0L, lastBucket)
+        }
 
         // T-series Build 7 probe: ONE MediaMetadataRetriever reused across the whole session.
         // The worker loop awaits each extractWithRecovery before the next bucket, so this
@@ -191,8 +208,20 @@ object SeekThumbnails {
                     // sequential retriever access is preserved; on failure the lazy open
                     // inside extractFrame retries via the drop-and-reopen guard.
                     withContext(Dispatchers.IO) { runCatching { ensureRetrieverBlocking() } }
-                    for (bucket in order) {
-                        if (cache.hasDisk(bucket)) continue
+                    val remaining = ArrayDeque(order)
+                    val attempted = HashSet<Long>()
+                    while (remaining.isNotEmpty()) {
+                        // Demand priority: if the user is previewing an uncached bucket,
+                        // serve it next; otherwise take the next coarse-first bucket.
+                        val pri = priorityBucket
+                        val bucket: Long = if (pri != null && pri !in attempted && !cache.hasDisk(pri)) {
+                            pri
+                        } else {
+                            remaining.removeFirst()
+                        }
+                        if (bucket == priorityBucket) priorityBucket = null
+                        if (bucket in attempted || cache.hasDisk(bucket)) continue
+                        attempted.add(bucket)
                         awaitGate()
                         // Build 12a: pacing spaces successive frames; nothing precedes
                         // the first, so the first thumb no longer pays the 1.2 s tax.
@@ -261,15 +290,19 @@ object SeekThumbnails {
             val lastBucket = (durationMs - 1) / SPACING_MS
             val bucket = (positionMs / SPACING_MS).coerceIn(0, lastBucket)
             cache.getMem(bucket)?.let { return it }
-            // Nearest-thumb serving: an approximate frame beats a blank during ramped seeks.
-            var nearest: Bitmap? = null
-            for (d in 1..NEAREST_RADIUS_BUCKETS) {
-                cache.getMem(bucket - d)?.let { nearest = it }
-                if (nearest == null) cache.getMem(bucket + d)?.let { nearest = it }
-                if (nearest != null) break
-            }
+            // Exact bucket not resident: promote it from disk for next time.
             requestDiskLoad(bucket)
-            return nearest
+            // Build 12b ownership-interval serving: the nearest EXISTING frame owns the
+            // gap until a closer one is generated. Expands outward and stops at the first
+            // hit (cost ~ distance to nearest; only an empty cache scans to the end and
+            // returns blank) - replaces the fixed +/-5 window that blanked on wider gaps.
+            var d = 1L
+            while (d <= lastBucket) {
+                cache.getMem(bucket - d)?.let { return it }
+                cache.getMem(bucket + d)?.let { return it }
+                d++
+            }
+            return null
         }
 
         /** Rest-debounced async disk load: at most one dispatch per DISK_LOAD_DEBOUNCE_MS. */

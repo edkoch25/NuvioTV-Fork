@@ -24,6 +24,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import com.nuvio.tv.core.player.PlaceholderStreamPolicy
+import com.nuvio.tv.core.player.thumbnail.SeekThumbnails
 import kotlinx.coroutines.launch
 
 internal const val AUDIO_AMPLIFICATION_MIN_DB = 0
@@ -1425,6 +1426,8 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
                 .coerceAtMost(maxDuration)
             pendingPreviewSeekPosition = target
             _uiState.update { it.copy(pendingPreviewSeekPosition = target) }
+            // Build 12b (Lever 1): tell the thumbnail worker to prioritise this bucket.
+            SeekThumbnails.notePriority(target)
             schedulePendingPreviewSeekExpiry()
             updatePlaybackTimeline(currentPosition = target)
             if (_uiState.value.showControls) {
