@@ -161,7 +161,8 @@ internal fun PlayerPanelRow(
     subtitle: String? = null,
     focusRequester: FocusRequester? = null,
     onFocused: (() -> Unit)? = null,
-    trailing: (@Composable (focused: Boolean) -> Unit)? = null
+    trailing: (@Composable (focused: Boolean) -> Unit)? = null,
+    belowContent: (@Composable (focused: Boolean) -> Unit)? = null
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val interactionSource = remember { MutableInteractionSource() }
@@ -224,6 +225,10 @@ internal fun PlayerPanelRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+            belowContent?.let {
+                Spacer(modifier = Modifier.height(4.dp))
+                it(isFocused)
             }
         }
         trailing?.invoke(isFocused)

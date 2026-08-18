@@ -175,6 +175,9 @@ fun PlayerScreen(
     val subtitleDelayResetFocusRequester = remember { FocusRequester() }
     val subtitleDelaySyncLineFocusRequester = remember { FocusRequester() }
     var subtitleTimingConsumeNextConfirmKeyUp by remember { mutableStateOf(false) }
+    // Measured "clear of the scrubber" bottom offset for the Skip button while controls
+    // are visible, reported by PlayerControlsOverlay. Default is the safe flat-case value.
+    var controlsSkipAnchor by remember { mutableStateOf(148.dp) }
     var reportCodeVisible by remember { mutableStateOf(false) }
     var exitDispatched by remember { mutableStateOf(false) }
     var externalHandoffInProgress by remember { mutableStateOf(false) }
@@ -993,8 +996,13 @@ fun PlayerScreen(
             )
         }
 
+        // When controls are visible the skip button must clear the scrubber and sit
+        // where the title block does (the title hides while a skip interval is active).
+        // PlayerControlsOverlay measures the exact clearance (flat AND letterbox-aware)
+        // and reports it here; 148.dp is a safe flat-case default for the first frame
+        // before measurement arrives.
         val skipButtonBottomPadding by animateDpAsState(
-            targetValue = if (uiState.showControls) 122.dp else 30.dp,
+            targetValue = if (uiState.showControls) controlsSkipAnchor else 30.dp,
             animationSpec = tween(durationMillis = NuvioMotion.tokens.durations.fast),
             label = "skipButtonBottomPadding"
         )
@@ -1022,6 +1030,12 @@ fun PlayerScreen(
                 } else {
                     subtitleDelaySyncLineFocusRequester
                 }
+            } else if (uiState.showControls) {
+                // Controls visible: UP reaches the icon cluster (Info is its leftmost,
+                // always-present button) instead of falling through to hide-controls,
+                // which previously trapped focus on the Skip button. Nav becomes
+                // scrubber -> skip -> cluster, cluster -> down -> scrubber.
+                streamInfoFocusRequester
             } else {
                 null
             },
@@ -1150,6 +1164,7 @@ fun PlayerScreen(
                     uiState.postPlayMode is PostPlayMode.AutoPlay -> nextEpisodeFocusRequester
                     else -> null
                 },
+                onSkipAnchorChanged = { controlsSkipAnchor = it },
                 onPlayPause = { viewModel.onEvent(PlayerEvent.OnPlayPause) },
                 onPlayNextEpisode = { viewModel.onEvent(PlayerEvent.OnPlayNextEpisode) },
                 onSeekForward = { viewModel.onEvent(PlayerEvent.OnSeekForward) },
@@ -1844,6 +1859,7 @@ private fun PlayerControlsOverlay(
     progressBarFocusRequester: FocusRequester,
     streamInfoFocusRequester: FocusRequester,
     progressBarUpFocusRequester: FocusRequester? = null,
+    onSkipAnchorChanged: (Dp) -> Unit = {},
     onPlayPause: () -> Unit,
     onPlayNextEpisode: () -> Unit,
     onSeekForward: () -> Unit,
@@ -2036,14 +2052,6 @@ private fun PlayerControlsOverlay(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-
-                    if (!uiState.releaseYear.isNullOrBlank()) {
-                        Text(
-                            text = uiState.releaseYear.orEmpty(),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color.White.copy(alpha = 0.68f)
-                        )
-                    }
                 }
             }
                 }
@@ -2196,6 +2204,17 @@ private fun PlayerControlsOverlay(
                 (bandDp - with(density) { belowBarHeightPx.toDp() } - 48.dp).coerceAtLeast(NuvioTheme.spacing.xs)
             } else {
                 NuvioTheme.spacing.xs
+            }
+
+            // Report where the Skip button's bottom should sit so it clears the scrubber
+            // and aligns with the title-block bottom (title hides while skipping). Stack
+            // from the screen bottom: 48dp column pad + below-bar block + edgeGap + the
+            // 20dp scrubber + the xs spacer above it. Only report once measured, so the
+            // first frame keeps PlayerScreen's safe default instead of a too-low value.
+            if (belowBarHeightPx > 0) {
+                val skipAnchor = 48.dp + with(density) { belowBarHeightPx.toDp() } +
+                    edgeGap + 20.dp + NuvioTheme.spacing.xs
+                LaunchedEffect(skipAnchor) { onSkipAnchorChanged(skipAnchor) }
             }
             Spacer(modifier = Modifier.height(edgeGap))
 
