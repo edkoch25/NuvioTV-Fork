@@ -159,10 +159,10 @@ internal fun PlayerPanelRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
+    titleEnd: String? = null,
     focusRequester: FocusRequester? = null,
     onFocused: (() -> Unit)? = null,
-    trailing: (@Composable (focused: Boolean) -> Unit)? = null,
-    belowContent: (@Composable (focused: Boolean) -> Unit)? = null
+    trailing: (@Composable (focused: Boolean) -> Unit)? = null
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val interactionSource = remember { MutableInteractionSource() }
@@ -209,13 +209,25 @@ internal fun PlayerPanelRow(
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium,
-                color = titleColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = titleColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                if (!titleEnd.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = titleEnd,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = subtitleColor,
+                        maxLines = 1
+                    )
+                }
+            }
             if (!subtitle.isNullOrBlank()) {
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
@@ -225,10 +237,6 @@ internal fun PlayerPanelRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-            }
-            belowContent?.let {
-                Spacer(modifier = Modifier.height(4.dp))
-                it(isFocused)
             }
         }
         trailing?.invoke(isFocused)

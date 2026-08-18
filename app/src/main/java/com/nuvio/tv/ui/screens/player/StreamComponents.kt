@@ -6,33 +6,23 @@
 package com.nuvio.tv.ui.screens.player
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.MarqueeSpacing
 import androidx.compose.foundation.background
-import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.wrapContentWidth
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -57,9 +47,14 @@ import com.nuvio.tv.ui.components.SourceChipItem
 import com.nuvio.tv.ui.components.PlayerPanelRow
 import com.nuvio.tv.ui.components.SourceChipStatus
 import com.nuvio.tv.ui.components.SourceStatusFilterChip
-import com.nuvio.tv.ui.components.StreamBadgeChips
-import com.nuvio.tv.ui.components.sourceBadgeResources
 import com.nuvio.tv.domain.model.DebridStreamPreferences
+import com.nuvio.tv.domain.model.DebridStreamResolution
+import com.nuvio.tv.domain.model.DebridStreamQuality
+import com.nuvio.tv.domain.model.DebridStreamVisualTag
+import com.nuvio.tv.domain.model.DebridStreamAudioTag
+import com.nuvio.tv.domain.model.DebridStreamAudioChannel
+import com.nuvio.tv.domain.model.DebridStreamEncode
+import com.nuvio.tv.core.debrid.DirectDebridStreamFilter
 import com.nuvio.tv.ui.theme.NuvioTheme
 import androidx.compose.ui.res.stringResource
 import com.nuvio.tv.R
@@ -78,54 +73,36 @@ internal fun StreamItem(
     onUpKey: (() -> Unit)? = null
 ) {
     // Title: "addon — release group" (release group dropped when underivable, worst
-    // case addon name alone). Format details live in the badge row below the title —
-    // the user's Fusion badges when configured, else the built-in badge set — so
-    // resolution/quality/HDR/audio/channels/size read off badges rather than a text
-    // subline that goes sparse on debrid sources whose resolver parse is empty.
+    // case addon name alone). Everything else reads off a single facts line derived
+    // from the classifier (factsFor), which regexes the raw name and so stays populated
+    // even when a debrid source's structured resolver parse is empty.
     val releaseGroup = remember(stream) {
-        com.nuvio.tv.core.debrid.DirectDebridStreamFilter.releaseGroupOf(stream)
+        DirectDebridStreamFilter.releaseGroupOf(stream)
     }
     val rowTitle = listOfNotNull(
         stream.addonName,
         releaseGroup.takeIf { it.isNotBlank() }
     ).joinToString(" — ")
 
-    // Fusion badges (if the user configured them) are already computed off-thread and
-    // ride on stream.badges. Otherwise derive the built-in badge set from the parsed
-    // facts. factsFor's badge fields are preference-independent (only its *Rank fields
-    // read preferences), so default preferences give correct badges.
-    val fusionBadges = remember(stream.badges) {
-        stream.badges.filter { it.imageURL.isNotBlank() }
+    // Classify once per stream. factsFor's classification fields are
+    // preference-independent (only its *Rank fields read preferences), so default
+    // preferences give correct facts. Cheap enough to do on the composition thread for
+    // the bounded set of visible rows; remember caches per stream.
+    val facts = remember(stream) {
+        DirectDebridStreamFilter.factsFor(stream, DebridStreamPreferences())
     }
-    val builtinBadgeRes = remember(stream, fusionBadges.isEmpty()) {
-        if (fusionBadges.isNotEmpty()) emptyList()
-        else sourceBadgeResources(
-            com.nuvio.tv.core.debrid.DirectDebridStreamFilter.factsFor(
-                stream,
-                DebridStreamPreferences()
-            )
-        )
-    }
-    val sizeBytes = if (showFileSizeBadges) stream.behaviorHints?.videoSize else null
-    val hasBadges = fusionBadges.isNotEmpty() || builtinBadgeRes.isNotEmpty()
-
-    // Zero-badge fallback: keep the old "size · audio" text subline so the row is never
-    // bare when nothing parses.
-    val fallbackSubtitle = if (hasBadges) null else {
-        val parsed = stream.clientResolve?.stream?.raw?.parsed
-        val audioSegment = ((parsed?.audio ?: emptyList()) + (parsed?.channels ?: emptyList()))
-            .filter { it.isNotBlank() }
-            .joinToString(" ").ifBlank { null }
-        val sizeSegment = sizeBytes?.let { bytes ->
+    val factsLine = remember(facts) { streamFactsLine(facts) }
+    val sizeLabel = if (showFileSizeBadges) remember(facts.size) {
+        facts.size?.let { bytes ->
             if (bytes >= 1_073_741_824L) "%.1f GB".format(bytes / 1_073_741_824.0)
             else "%.0f MB".format(bytes / 1_048_576.0)
         }
-        listOfNotNull(sizeSegment, audioSegment).joinToString(" · ").ifBlank { null }
-    }
+    } else null
 
     PlayerPanelRow(
         title = rowTitle,
-        subtitle = fallbackSubtitle,
+        titleEnd = sizeLabel,
+        subtitle = factsLine.ifBlank { null },
         selected = isCurrentStream,
         onClick = onClick,
         focusRequester = if (requestInitialFocus) focusRequester else null,
@@ -137,90 +114,70 @@ internal fun StreamItem(
                     onUpKey(); true
                 } else false
             } else Modifier),
-        belowContent = if (hasBadges) {
-            { focused ->
-                StreamRowBadges(
-                    fusionBadges = fusionBadges,
-                    builtinBadgeRes = builtinBadgeRes,
-                    sizeBytes = sizeBytes,
-                    focused = focused
-                )
-            }
-        } else null,
         trailing = null
     )
 }
 
 /**
- * Badge row rendered below a stream's title. Prefers the user's Fusion badges
- * (image chips) when present; otherwise renders the built-in drawable badge set.
- * A file-size chip is appended when [sizeBytes] is non-null. The row clips and
- * marquee-scrolls on focus, matching the pre-play stream list.
+ * Builds the single facts line shown beneath a stream's title, e.g.
+ * "4K · BluRay REMUX · DV · HDR10 · HEVC · 10-bit · TrueHD · Atmos · 7.1".
+ * The classifier's tag lists are additive and redundant (a DV+HDR10 file emits
+ * HDR+DV, HDR10, DV, HDR, 10-bit), so this collapses them: DV once, the single
+ * most-specific HDR flavour, and a lossless-first primary audio codec plus the
+ * object-audio flag. Empty/unknown fields are dropped, so sparse sources degrade
+ * cleanly rather than showing "Unknown".
  */
-@Composable
-private fun StreamRowBadges(
-    fusionBadges: List<com.nuvio.tv.domain.model.StreamBadge>,
-    builtinBadgeRes: List<Int>,
-    sizeBytes: Long?,
-    focused: Boolean
-) {
-    if (fusionBadges.isNotEmpty()) {
-        StreamBadgeChips(
-            badges = fusionBadges,
-            fileSizeBytes = sizeBytes,
-            showFileSizeBadge = sizeBytes != null,
-            focused = focused,
-            modifier = Modifier
-        )
-        return
+private fun streamFactsLine(facts: DirectDebridStreamFilter.StreamFacts): String {
+    val parts = mutableListOf<String>()
+
+    if (facts.resolution != DebridStreamResolution.UNKNOWN) {
+        parts += if (facts.resolution == DebridStreamResolution.P2160) "4K" else facts.resolution.label
     }
-    if (builtinBadgeRes.isEmpty() && sizeBytes == null) return
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clipToBounds()
-            .then(
-                if (focused) Modifier.basicMarquee(
-                    iterations = Int.MAX_VALUE,
-                    velocity = 45.dp,
-                    spacing = MarqueeSpacing(36.dp)
-                ) else Modifier
-            ),
-        contentAlignment = Alignment.CenterStart
-    ) {
-        Row(
-            modifier = Modifier.wrapContentWidth(align = Alignment.Start, unbounded = true),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.xs)
-        ) {
-            for (res in builtinBadgeRes) {
-                Image(
-                    painter = painterResource(id = res),
-                    contentDescription = null,
-                    modifier = Modifier.height(20.dp),
-                    contentScale = ContentScale.FillHeight
-                )
-            }
-            if (sizeBytes != null) {
-                val label = if (sizeBytes >= 1_073_741_824L) "%.1f GB".format(sizeBytes / 1_073_741_824.0)
-                    else "%.0f MB".format(sizeBytes / 1_048_576.0)
-                Box(
-                    modifier = Modifier
-                        .height(20.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xFF0A0C0C))
-                        .padding(horizontal = 6.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = label,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White
-                    )
-                }
-            }
-        }
+    if (facts.quality != DebridStreamQuality.UNKNOWN) parts += facts.quality.label
+
+    val vt = facts.visualTags
+    if (vt.contains(DebridStreamVisualTag.DV)) parts += "DV"
+    val hdrFlavour = when {
+        vt.contains(DebridStreamVisualTag.HDR10_PLUS) -> "HDR10+"
+        vt.contains(DebridStreamVisualTag.HDR10) -> "HDR10"
+        vt.contains(DebridStreamVisualTag.HLG) -> "HLG"
+        vt.contains(DebridStreamVisualTag.HDR) -> "HDR"
+        else -> null
     }
+    if (hdrFlavour != null) parts += hdrFlavour
+    if (vt.contains(DebridStreamVisualTag.IMAX)) parts += "IMAX"
+
+    if (facts.encode != DebridStreamEncode.UNKNOWN) parts += facts.encode.label
+    if (vt.contains(DebridStreamVisualTag.TEN_BIT)) parts += "10-bit"
+
+    val at = facts.audioTags
+    val atmos = at.contains(DebridStreamAudioTag.ATMOS)
+    val dtsx = at.contains(DebridStreamAudioTag.DTS_X)
+    val dtsFamily = setOf(
+        DebridStreamAudioTag.DTS_HD_MA, DebridStreamAudioTag.DTS_HD,
+        DebridStreamAudioTag.DTS_ES, DebridStreamAudioTag.DTS
+    )
+    // Lossless-first so a TrueHD+DD compat pairing shows TrueHD, not DD.
+    val basePriority = listOf(
+        DebridStreamAudioTag.TRUEHD, DebridStreamAudioTag.DTS_HD_MA, DebridStreamAudioTag.DTS_HD,
+        DebridStreamAudioTag.DTS_ES, DebridStreamAudioTag.DTS, DebridStreamAudioTag.FLAC,
+        DebridStreamAudioTag.DD_PLUS, DebridStreamAudioTag.DD, DebridStreamAudioTag.OPUS,
+        DebridStreamAudioTag.AAC
+    )
+    val base = basePriority.firstOrNull { at.contains(it) }
+    if (dtsx) {
+        parts += "DTS:X"
+        if (base != null && base !in dtsFamily) parts += base.label
+    } else if (base != null) {
+        parts += base.label
+    }
+    if (atmos) parts += "Atmos"
+
+    facts.audioChannels.firstOrNull { it != DebridStreamAudioChannel.UNKNOWN }?.let {
+        parts += it.label
+    }
+
+    return parts.joinToString(" · ")
 }
 
 @OptIn(ExperimentalTvMaterial3Api::class)
