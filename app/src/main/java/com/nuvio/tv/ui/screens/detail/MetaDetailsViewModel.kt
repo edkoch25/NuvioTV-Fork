@@ -2246,18 +2246,26 @@ class MetaDetailsViewModel @Inject constructor(
                 )
             }
             else -> {
-                val firstEpisode = episodes.firstOrNull()
+                // Fork (caught-up fix): this branch is reached only when every
+                // available episode is watched and none is resumable - e.g.
+                // the newest aired episode of an ongoing series was just
+                // finished and the next is unreleased. It previously targeted
+                // episodes.firstOrNull(), resetting the Play button to S1E1.
+                // Target the LAST episode instead (an honest replay) and flag
+                // the state so the hero source line suppresses itself (A2).
+                val lastEpisode = episodes.lastOrNull()
                 NextToWatch(
                     watchProgress = null,
                     isResume = false,
-                    nextVideoId = firstEpisode?.id ?: metaId,
-                    nextSeason = firstEpisode?.season,
-                    nextEpisode = firstEpisode?.episode,
-                    displayText = if (firstEpisode != null) {
-                        localizedContext.getString(R.string.detail_btn_play_episode, firstEpisode.season, firstEpisode.episode)
+                    nextVideoId = lastEpisode?.id ?: metaId,
+                    nextSeason = lastEpisode?.season,
+                    nextEpisode = lastEpisode?.episode,
+                    displayText = if (lastEpisode != null) {
+                        localizedContext.getString(R.string.detail_btn_play_episode, lastEpisode.season, lastEpisode.episode)
                     } else {
                         localizedContext.getString(R.string.detail_btn_play)
-                    }
+                    },
+                    isCaughtUp = true
                 )
             }
         }

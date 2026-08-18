@@ -108,5 +108,14 @@ data class NextToWatch(
     val nextVideoId: String?,           // Video ID to play next
     val nextSeason: Int?,               // Next season number
     val nextEpisode: Int?,              // Next episode number
-    val displayText: String             // Text to show on button (e.g., "Resume S1E2", "Play S1E3")
+    val displayText: String,             // Text to show on button (e.g., "Resume S1E2", "Play S1E3")
+    /**
+     * Fork (caught-up fix): true when every available episode of a series is
+     * watched and none is resumable - e.g. the newest aired episode was just
+     * finished and the next is unreleased. The Play target is then the LAST
+     * episode (an honest replay) and the details-page hero source line
+     * suppresses itself (no preview, no prefetch). Default false keeps every
+     * other construction site unchanged.
+     */
+    val isCaughtUp: Boolean = false
 )
