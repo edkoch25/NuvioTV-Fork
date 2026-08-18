@@ -378,7 +378,7 @@ internal fun PlayerRuntimeController.initializePlayer(
             // preview position on the next gesture.
             pendingPreviewSeekExpiryJob?.cancel()
             pendingPreviewSeekPosition = null
-            _uiState.update { it.copy(pendingPreviewSeekPosition = null) }
+            _uiState.update { it.copy(pendingPreviewSeekPosition = null, previewThumbPositionMs = null) }
             // Audio review F8: fresh stream, fresh output-mode state; the F9
             // listener re-derives it at AudioTrack init.
             isAudioOutputBypassing = false

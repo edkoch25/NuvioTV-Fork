@@ -66,6 +66,9 @@ object SeekThumbnails {
     private const val TAG = "ThumbWorker"
     const val SPACING_MS = 10_000L
     private const val TARGET_HEIGHT = 270
+    // Neighbourhood priority: on settle, drain center +/- this many buckets (nearest-first,
+    // forward-biased) before resuming the coarse sweep. 3 = +/-30 s at 10 s spacing (7 frames).
+    private const val PRIORITY_RADIUS = 3
     private const val GATE_BUFFER_AHEAD_MS = 14_000L
     // Build 12a gate redesign (numbers from the nt17 measurement run). The plateau
     // escape lets a stable-but-below-threshold buffer (throttled host, byte-capped
@@ -177,6 +180,18 @@ object SeekThumbnails {
             priorityBucket = (positionMs / SPACING_MS).coerceIn(0L, lastBucket)
         }
 
+        // Nearest-first, forward-biased window around a settled bucket: [c, c+1, c-1, c+2, ...].
+        // Forward first because sampling taps tend to move forward; clamped to [0, lastBucket].
+        private fun priorityWindow(center: Long, lastBucket: Long): List<Long> {
+            val out = ArrayList<Long>(2 * PRIORITY_RADIUS + 1)
+            out.add(center)
+            for (d in 1..PRIORITY_RADIUS) {
+                val hi = center + d; if (hi <= lastBucket) out.add(hi)
+                val lo = center - d; if (lo >= 0L) out.add(lo)
+            }
+            return out
+        }
+
         // T-series Build 7 probe: ONE MediaMetadataRetriever reused across the whole session.
         // The worker loop awaits each extractWithRecovery before the next bucket, so this
         // instance is touched strictly sequentially - never concurrently - even though
@@ -213,13 +228,22 @@ object SeekThumbnails {
                     while (remaining.isNotEmpty()) {
                         // Demand priority: if the user is previewing an uncached bucket,
                         // serve it next; otherwise take the next coarse-first bucket.
-                        val pri = priorityBucket
-                        val bucket: Long = if (pri != null && pri !in attempted && !cache.hasDisk(pri)) {
-                            pri
+                        // Neighbourhood priority: drain a nearest-first window around the settled
+                        // bucket before resuming coarse, so a burst of taps warms the whole region
+                        // instead of refining only the single tapped frame (Test C fix).
+                        val center = priorityBucket
+                        val bucket: Long = if (center != null) {
+                            val pick = priorityWindow(center, lastBucket)
+                                .firstOrNull { it !in attempted && !cache.hasDisk(it) }
+                            if (pick != null) {
+                                pick
+                            } else {
+                                if (priorityBucket == center) priorityBucket = null
+                                remaining.removeFirst()
+                            }
                         } else {
                             remaining.removeFirst()
                         }
-                        if (bucket == priorityBucket) priorityBucket = null
                         if (bucket in attempted || cache.hasDisk(bucket)) continue
                         attempted.add(bucket)
                         awaitGate()

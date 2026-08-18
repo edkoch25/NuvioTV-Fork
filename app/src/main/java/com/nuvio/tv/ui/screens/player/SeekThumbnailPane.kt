@@ -28,7 +28,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,9 +40,13 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
 import com.nuvio.tv.core.player.thumbnail.SeekThumbnails
 
+/** How long the seek-thumbnail pane lingers after the last preview input before dismissing. */
+private const val PREVIEW_THUMB_LINGER_MS = 3_000L
+
 /**
- * T-series Build 6: seek-thumbnail pane. Renders only while a held-key preview seek is in
- * flight (pendingPreviewSeekPosition non-null). Pure local lookup - memory hit shows
+ * T-series Build 6: seek-thumbnail pane. Shows the previewed position (previewThumbPositionMs),
+ * held ~PREVIEW_THUMB_LINGER_MS after the last preview input so a settled frame stays visible and
+ * sharpens, then auto-dismisses. Pure local lookup - memory hit shows
  * immediately, async disk hits arrive via SeekThumbnails.tick, a true miss renders nothing
  * (frontier gap = blank + the timestamp the controls already show).
  *
@@ -58,7 +65,22 @@ fun SeekThumbnailOverlayHost(
     // Composable reads first (consistent call order), then early returns.
     val timeline by viewModel.playbackTimeline.collectAsState()
     val tick by SeekThumbnails.tick
-    val previewPositionMs = uiState.pendingPreviewSeekPosition ?: return
+    // Hold the last previewed position for a short window so a settled preview stays visible
+    // (and sharpens via tick) after commit, then auto-dismisses after PREVIEW_THUMB_LINGER_MS
+    // of no input. Abandoned previews null previewThumbPositionMs upstream -> immediate hide.
+    val requestedPositionMs = uiState.previewThumbPositionMs
+    var shownPositionMs by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(requestedPositionMs) {
+        val req = requestedPositionMs
+        if (req == null) {
+            shownPositionMs = null
+        } else {
+            shownPositionMs = req
+            kotlinx.coroutines.delay(PREVIEW_THUMB_LINGER_MS)
+            if (shownPositionMs == req) shownPositionMs = null
+        }
+    }
+    val previewPositionMs = shownPositionMs ?: return
     val durationMs = timeline.duration
     if (durationMs <= 0L) return
     val bitmap = remember(previewPositionMs, tick) { SeekThumbnails.thumbFor(previewPositionMs) }

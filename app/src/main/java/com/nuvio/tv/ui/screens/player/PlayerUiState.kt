@@ -78,6 +78,7 @@ data class PlayerUiState(
     val showControls: Boolean = true,
     val showSeekOverlay: Boolean = false,
     val pendingPreviewSeekPosition: Long? = null,
+    val previewThumbPositionMs: Long? = null,
     val playbackSpeed: Float = 1f,
     val loadingOverlayEnabled: Boolean = true,
     val showPlayerLoadingStatus: Boolean = false,
