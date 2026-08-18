@@ -186,7 +186,16 @@ class MetaDetailsViewModel @Inject constructor(
                     .getWatchedEpisodesForContent(_effectiveContentId.value)
                     .first()
                 val ntw = computeNextToWatch(rawMeta, progressMap, watchedEpisodes)
-                ntw.nextVideoId?.let {
+                // Fork (caught-up fix, A2): caught-up suppresses the hero
+                // source line entirely - no early scrape, no hero key. The
+                // Play button still targets the last episode; a press pays a
+                // normal scrape under the user's auto/manual selection mode.
+                // Without this gate the early path fires for the (non-null)
+                // replay target and the line flashes before the observer
+                // hides it.
+                if (ntw.isCaughtUp) {
+                    null
+                } else ntw.nextVideoId?.let {
                     StreamPrefetchTarget(rawMeta.apiType, it, ntw.nextSeason, ntw.nextEpisode, rawMeta.id)
                 }
             } else {
@@ -308,6 +317,11 @@ class MetaDetailsViewModel @Inject constructor(
                 val nextId = ntw?.nextVideoId
                 when {
                     meta == null -> null
+                    // Fork (caught-up fix, A2): checked BEFORE nextId - the
+                    // caught-up target is the non-null LAST episode, which
+                    // would otherwise match the branch below and key the hero
+                    // line to a replay the user did not ask to preview.
+                    ntw?.isCaughtUp == true -> null
                     // Series: the hero button plays this exact video id.
                     nextId != null -> StreamPrefetchTarget(meta.apiType, nextId, ntw?.nextSeason, ntw?.nextEpisode, meta.id)
                     // Movie: the hero button plays the meta id itself.
@@ -326,6 +340,18 @@ class MetaDetailsViewModel @Inject constructor(
                         target.contentId,
                         "details_hero"
                     )
+                } else {
+                    // Fork (B1): a null target must CLEAR the hero-key state.
+                    // Otherwise the source line stays keyed to the previous
+                    // target with no prefetch behind it and the combine
+                    // synthesises SEARCHING forever (the caught-up spin, and
+                    // any future null-target transition). lastStreamPrefetchKey
+                    // is cleared with it so a later return to the SAME target
+                    // re-enters onStreamPrefetchTarget - re-keying the line via
+                    // a cheap cache-dedup republish - instead of dedup-skipping
+                    // with the line still hidden.
+                    heroSourceKey.value = null
+                    lastStreamPrefetchKey = null
                 }
             }
     }
