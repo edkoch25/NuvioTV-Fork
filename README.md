@@ -8,7 +8,7 @@ The focus is **speed, efficiency, and optimised playback of high-bitrate 4K remu
 lossless bitstream audio** -- the kind of content (100 GB+ remuxes, TrueHD/DTS-HD MA/Atmos/DTS:X
 passthrough, Dolby Vision) that stresses the parts of a player most builds don't push hard.
 
-**Will likely not work well for Anime, or on low-end devices**
+**Will likely not work well for Anime, or on low-end devices. Features that write to cache will add wear to internal storage**
 
 NuvioTV itself is a modern, TV-first media player for Android TV, written in Kotlin. It acts as a
 client-side playback interface that integrates with the Stremio addon ecosystem for content
