@@ -574,6 +574,10 @@
     <string name="advanced_clear_cw_cache">Clear Continue Watching Cache</string>
     <string name="advanced_clear_cw_cache_subtitle">Remove cached thumbnails, titles, and enrichment data for Continue Watching</string>
     <string name="advanced_clear_cw_cache_done">Cache cleared</string>
+    <string name="advanced_clear_image_cache">Clear Image Cache</string>
+    <string name="advanced_clear_image_cache_subtitle">Remove cached posters, artwork, and catalog data, then reload Home with fresh images</string>
+    <string name="advanced_clear_image_cache_working">Clearing…</string>
+    <string name="advanced_clear_image_cache_done">Cache cleared — Home is refreshing</string>
     <string name="advanced_remember_last_profile">Remember Last Profile</string>
     <string name="advanced_remember_last_profile_subtitle">Remember last selected profile at startup</string>
     <string name="settings_debug">Debug</string>

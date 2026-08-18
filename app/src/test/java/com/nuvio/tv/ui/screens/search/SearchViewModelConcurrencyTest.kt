@@ -167,6 +167,8 @@ class SearchViewModelConcurrencyTest {
             emit(NetworkResult.Success(row(addon, query)))
         }
 
+        override suspend fun clearCaches() = Unit
+
         private fun row(addon: Addon, query: String): CatalogRow = CatalogRow(
             addonId = addon.id,
             addonName = addon.displayName,

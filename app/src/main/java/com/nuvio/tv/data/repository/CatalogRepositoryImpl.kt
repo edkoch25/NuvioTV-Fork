@@ -354,6 +354,25 @@ class CatalogRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun clearCaches() {
+        // In-memory freshness LRU: a synchronizedMap, so a single clear() is
+        // atomic on its own.
+        catalogCache.clear()
+        // Disk first-paint cache: clear the map and delete the backing file
+        // under the same mutex ensureDiskLoaded()/flushDisk() take, so a
+        // concurrent flush cannot interleave with the delete. diskLoaded is
+        // left true so a later read does not reload the file just deleted.
+        // A writeDiskRow racing this clear simply repopulates afterwards,
+        // which is a fresh fetch doing exactly what it should.
+        diskMutex.withLock {
+            diskCache.clear()
+            withContext(Dispatchers.IO) {
+                runCatching { if (diskFile.exists()) diskFile.delete() }
+            }
+            diskLoaded = true
+        }
+    }
+
     private fun buildCatalogUrl(
         baseUrl: String,
         type: String,

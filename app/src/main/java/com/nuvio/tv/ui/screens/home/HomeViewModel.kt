@@ -86,7 +86,8 @@ class HomeViewModel @Inject constructor(
     internal val profileManager: com.nuvio.tv.core.profile.ProfileManager,
     internal val tvRecommendationManager: TvRecommendationManager,
     internal val streamRepository: StreamRepository,
-    internal val prefetchSelectionSupplier: com.nuvio.tv.core.stream.PrefetchSelectionSupplier
+    internal val prefetchSelectionSupplier: com.nuvio.tv.core.stream.PrefetchSelectionSupplier,
+    internal val homeRefreshSignal: com.nuvio.tv.core.util.HomeRefreshSignal
 ) : ViewModel() {
     companion object {
         internal const val TAG = "HomeViewModel"
@@ -470,6 +471,16 @@ class HomeViewModel @Inject constructor(
             observeProgressSourceChanges()
             observeCollections()
             observeInstalledAddons()
+
+            // Settings' clear-cache action: reload every catalogue through the
+            // same forceReload path the error-screen Retry uses, so cleared
+            // caches are repopulated with fresh network data immediately while
+            // the current rows stay visible (the isReload branch).
+            viewModelScope.launch {
+                homeRefreshSignal.events.collect {
+                    loadAllCatalogs(addonsCache, forceReload = true)
+                }
+            }
 
             viewModelScope.launch {
                 combine(

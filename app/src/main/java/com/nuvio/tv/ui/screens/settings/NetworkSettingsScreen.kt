@@ -89,6 +89,17 @@ private interface ClearCwCacheEntryPoint {
 
 @dagger.hilt.EntryPoint
 @dagger.hilt.InstallIn(dagger.hilt.components.SingletonComponent::class)
+private interface ClearImageCacheEntryPoint {
+    fun catalogRepository(): com.nuvio.tv.domain.repository.CatalogRepository
+    fun homeRefreshSignal(): com.nuvio.tv.core.util.HomeRefreshSignal
+    fun okHttpClient(): okhttp3.OkHttpClient
+
+    @javax.inject.Named("validated")
+    fun validatedOkHttpClient(): okhttp3.OkHttpClient
+}
+
+@dagger.hilt.EntryPoint
+@dagger.hilt.InstallIn(dagger.hilt.components.SingletonComponent::class)
 private interface ProfileManagerEntryPoint {
     fun profileManager(): com.nuvio.tv.core.profile.ProfileManager
 }
@@ -835,6 +846,48 @@ fun AdvancedSettingsContent(
                                     )
                                 entryPoint.cwEnrichmentCache().clearAll()
                                 cleared = true
+                            }
+                        }
+                    }
+                )
+            }
+        }
+
+        item(key = "clear_image_cache") {
+            SettingsGroupCard(modifier = Modifier.fillMaxWidth()) {
+                // 0 = idle, 1 = clearing, 2 = done
+                var clearState by remember { mutableStateOf(0) }
+                SettingsActionRow(
+                    title = stringResource(R.string.advanced_clear_image_cache),
+                    subtitle = when (clearState) {
+                        1 -> stringResource(R.string.advanced_clear_image_cache_working)
+                        2 -> stringResource(R.string.advanced_clear_image_cache_done)
+                        else -> stringResource(R.string.advanced_clear_image_cache_subtitle)
+                    },
+                    onClick = {
+                        if (clearState == 0) {
+                            clearState = 1
+                            scope.launch {
+                                val entryPoint = dagger.hilt.android.EntryPointAccessors
+                                    .fromApplication(
+                                        context.applicationContext,
+                                        ClearImageCacheEntryPoint::class.java
+                                    )
+                                withContext(Dispatchers.IO) {
+                                    // Coil 3.3.0: DiskCache.clear() and
+                                    // MemoryCache.clear() both exist; the
+                                    // memory cache is lock-guarded so an IO
+                                    // thread call is safe.
+                                    val loader = coil3.SingletonImageLoader
+                                        .get(context.applicationContext)
+                                    runCatching { loader.memoryCache?.clear() }
+                                    runCatching { loader.diskCache?.clear() }
+                                    runCatching { entryPoint.okHttpClient().cache?.evictAll() }
+                                    runCatching { entryPoint.validatedOkHttpClient().cache?.evictAll() }
+                                    runCatching { entryPoint.catalogRepository().clearCaches() }
+                                }
+                                entryPoint.homeRefreshSignal().requestRefresh()
+                                clearState = 2
                             }
                         }
                     }
