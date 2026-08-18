@@ -29,7 +29,6 @@ private const val EXTRACTOR_TIMEOUT_MS = 30_000L
 private const val DEFAULT_USER_AGENT =
     "Mozilla/5.0 (Linux; Android 12; Android TV) AppleWebKit/537.36 " +
         "(KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
-private const val PREFERRED_SEPARATE_CLIENT = "android_vr"
 
 private val VIDEO_ID_REGEX = Regex("^[a-zA-Z0-9_-]{11}$")
 private val API_KEY_REGEX = Regex("\"INNERTUBE_API_KEY\":\"([^\"]+)\"")
@@ -85,20 +84,18 @@ private val DEFAULT_HEADERS = mapOf(
 
 private val CLIENTS = listOf(
     YouTubeClient(
-        key = "android_vr",
-        id = "28",
-        version = "1.56.21",
-        userAgent = "com.google.android.apps.youtube.vr.oculus/1.56.21 " +
-            "(Linux; U; Android 12; en_US; Quest 3; Build/SQ3A.220605.009.A1) gzip",
+        key = "visionos",
+        id = "101",
+        version = "1.02",
+        userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 " +
+            "(KHTML, like Gecko) Version/26.0 Safari/605.1.15",
         context = mapOf(
-            "clientName" to "ANDROID_VR",
-            "clientVersion" to "1.56.21",
-            "deviceMake" to "Oculus",
-            "deviceModel" to "Quest 3",
-            "osName" to "Android",
-            "osVersion" to "12",
-            "platform" to "MOBILE",
-            "androidSdkVersion" to 32,
+            "clientName" to "VISIONOS",
+            "clientVersion" to "1.02",
+            "deviceMake" to "Apple",
+            "deviceModel" to "RealityDevice17,1",
+            "osName" to "visionOS",
+            "osVersion" to "26.5.23O471",
             "hl" to "en",
             "gl" to "US"
         ),
@@ -438,16 +435,20 @@ class InAppYouTubeExtractor @Inject constructor() {
         }
 
         val bestProgressive = sortCandidates(progressive).firstOrNull()
-        val bestVideo = pickBestForClient(adaptiveVideo, PREFERRED_SEPARATE_CLIENT)
-        val bestAudio = pickBestForClient(adaptiveAudio, PREFERRED_SEPARATE_CLIENT)
 
-        // Try adaptive video + audio first (best quality, separate streams)
+        // Probe every client's top candidates in parallel and take the best reachable
+        // pair. Token-free clients (visionos) win here even when gated clients score
+        // higher, because gated URLs fail the reachability probe.
         kotlinx.coroutines.yield()
-        val resolvedVideo = bestVideo?.url?.let { resolveReachableUrl(it) }
-        val resolvedAudio = if (resolvedVideo != null) bestAudio?.url?.let { resolveReachableUrl(it) } else null
+        val chosenVideo = probeBestPerClient(adaptiveVideo)
+        val chosenAudio = if (chosenVideo != null) {
+            probeBestPerClient(adaptiveAudio, preferClient = chosenVideo.client)
+        } else null
 
-        if (resolvedVideo != null) {
-            return TrailerPlaybackSource(videoUrl = resolvedVideo, audioUrl = resolvedAudio)
+        if (chosenVideo != null) {
+            Log.d(TAG, "Trailer adaptive: ${chosenVideo.client}/${chosenVideo.height}p " +
+                "audio=${chosenAudio?.client ?: "none"}")
+            return TrailerPlaybackSource(videoUrl = chosenVideo.url, audioUrl = chosenAudio?.url)
         }
 
         // Adaptive failed (403) — fall back to HLS manifest (1080p, always works for COPPA/kids content)
@@ -699,12 +700,33 @@ class InAppYouTubeExtractor @Inject constructor() {
         }
     }
 
-    private fun pickBestForClient(items: List<StreamCandidate>, clientKey: String): StreamCandidate? {
-        val sameClient = items.filter { it.client == clientKey }
-        if (sameClient.isNotEmpty()) {
-            return sortCandidates(sameClient).firstOrNull()
+    private suspend fun probeBestPerClient(
+        candidates: List<StreamCandidate>,
+        preferClient: String? = null,
+        perClientDepth: Int = 2
+    ): StreamCandidate? {
+        val toProbe = candidates.groupBy { it.client }
+            .flatMap { (_, list) -> sortCandidates(list).take(perClientDepth) }
+        if (toProbe.isEmpty()) return null
+        val results = java.util.Collections.synchronizedList(mutableListOf<StreamCandidate>())
+        val probeScope = CoroutineScope(Dispatchers.IO)
+        try {
+            val jobs = toProbe.map { cand ->
+                probeScope.launch {
+                    val resolved = resolveReachableUrl(cand.url)
+                    if (resolved != null) results.add(cand.copy(url = resolved))
+                }
+            }
+            withTimeoutOrNull(2_500L) { jobs.forEach { it.join() } }
+        } finally {
+            probeScope.cancel()
         }
-        return sortCandidates(items).firstOrNull()
+        val reachable = results.toList()
+        if (reachable.isEmpty()) return null
+        if (preferClient != null) {
+            sortCandidates(reachable.filter { it.client == preferClient }).firstOrNull()?.let { return it }
+        }
+        return sortCandidates(reachable).firstOrNull()
     }
 
     /**
