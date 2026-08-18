@@ -171,11 +171,17 @@ object StreamPrefetchCache {
                 // published, and a details_hero caller's hero source line stays
                 // stuck in SEARCHING. Re-invoke the supplied ranker on the cached
                 // groups (no re-scrape) so this caller's uiSignal is published.
-                if (republishOnDedup && rank != null && cached.isNotEmpty()) {
+                if (republishOnDedup && rank != null) {
+                    // Fork (B2): rank even when the cached result is empty.
+                    // rank -> rankAndPreResolve publishes a terminal EMPTY
+                    // uiSignal for this caller's uiKey when it has nothing to
+                    // pick, letting the hero source line hide itself instead
+                    // of spinning on SEARCHING forever (previously no signal
+                    // was ever published for the key on an empty dedup).
                     scope.async {
                         try {
                             rank(cached)
-                            Log.i(TAG, "PREFETCH cache-republish source=$source key=$key")
+                            Log.i(TAG, "PREFETCH cache-republish source=$source key=$key groups=${cached.size}")
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
@@ -199,19 +205,26 @@ object StreamPrefetchCache {
                         val result = try {
                             existing.await()
                         } catch (e: CancellationException) {
-                            throw e
+                            // Fork (B2): a cancelled AWAITED scrape must still
+                            // yield a terminal signal, or the hero line spins
+                            // on SEARCHING forever. Rethrow only when this
+                            // republish coroutine itself was cancelled rather
+                            // than the scrape it awaited.
+                            if (existing.isCancelled) emptyList() else throw e
                         } catch (e: Exception) {
                             emptyList()
                         }
-                        if (result.isNotEmpty()) {
-                            try {
-                                rank(result)
-                                Log.i(TAG, "PREFETCH inflight-republish source=$source key=$key")
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (e: Exception) {
-                                Log.w(TAG, "PREFETCH inflight-republish rank failed: ${e.message}")
-                            }
+                        // Fork (B2): rank even when the result is empty - rank
+                        // publishes a terminal EMPTY uiSignal for this caller's
+                        // uiKey, hiding the line instead of leaving it in
+                        // SEARCHING with no signal ever arriving.
+                        try {
+                            rank(result)
+                            Log.i(TAG, "PREFETCH inflight-republish source=$source key=$key groups=${result.size}")
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            Log.w(TAG, "PREFETCH inflight-republish rank failed: ${e.message}")
                         }
                     }
                 }
