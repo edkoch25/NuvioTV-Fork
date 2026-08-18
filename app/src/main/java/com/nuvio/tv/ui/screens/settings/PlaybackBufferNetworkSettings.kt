@@ -491,7 +491,7 @@ internal fun LazyListScope.bufferAndNetworkSettingsItems(
                     value = playerSettings.parallelConnectionCount,
                     valueText = playerSettings.parallelConnectionCount.toString(),
                     minValue = MemoryBudget.MIN_CONNECTIONS,
-                    maxValue = if (playerSettings.nuvioPerformanceModeEnabled) 16 else MemoryBudget.MAX_CONNECTIONS,
+                    maxValue = MemoryBudget.MAX_CONNECTIONS,
                     step = 1,
                     onValueChange = onSetParallelConnectionCount
                 )

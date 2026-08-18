@@ -158,10 +158,10 @@ object StreamSweepEngine {
          */
         onPassResult: (String, Double?, PassNote?) -> Unit
     ): SweepOutcome {
-        val chunkLadderMb = listOf(8, 16, 32, 64, 128)
+        val chunkLadderMb = listOf(8, 16, 32)
         val maxChunkMb = com.nuvio.tv.data.local.PlayerSettings.MAX_PARALLEL_CHUNK_SIZE_KB / 1024
         val minChunkMb = (com.nuvio.tv.data.local.PlayerSettings.MIN_PARALLEL_CHUNK_SIZE_KB + 1023) / 1024
-        val connLadder = listOf(2, 3, 4, 8, 16)
+        val connLadder = listOf(2, 3, 4)
         val standardConnLimit = com.nuvio.tv.data.local.PlayerSettings.MAX_PARALLEL_CONNECTION_COUNT
         val safeLimitMb =
             com.nuvio.tv.ui.screens.player.NuvioExoPlayerPerformanceHelper.getSafeNativeMemoryLimitMb(context)

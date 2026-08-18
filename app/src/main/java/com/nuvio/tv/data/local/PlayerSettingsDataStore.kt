@@ -391,7 +391,7 @@ data class PlayerSettings(
         const val MIN_PARALLEL_CONNECTION_COUNT = 2
         const val MAX_PARALLEL_CONNECTION_COUNT = 4
         const val MIN_PARALLEL_CHUNK_SIZE_KB = 256
-        const val MAX_PARALLEL_CHUNK_SIZE_KB = 128 * 1024
+        const val MAX_PARALLEL_CHUNK_SIZE_KB = 32 * 1024
         const val DEFAULT_ENABLE_HTTP2 = false
         const val DEFAULT_NUVIO_PERFORMANCE_MODE_ENABLED = false
     }
@@ -1026,7 +1026,7 @@ class PlayerSettingsDataStore @Inject constructor(
                 parallelConnectionCount = run {
                     val isNativeMemory = isNativeMemoryActive(prefs)
                     val defaultConnectionCount = if (isNativeMemory) 4 else PlayerSettings.DEFAULT_PARALLEL_CONNECTION_COUNT
-                    val maxConnectionCount = if (isNativeMemory) 16 else PlayerSettings.MAX_PARALLEL_CONNECTION_COUNT
+                    val maxConnectionCount = PlayerSettings.MAX_PARALLEL_CONNECTION_COUNT
                     (prefs[parallelConnectionCountKey] ?: defaultConnectionCount).coerceIn(PlayerSettings.MIN_PARALLEL_CONNECTION_COUNT, maxConnectionCount)
                 },
                 parallelChunkSizeKb = run {
@@ -1714,9 +1714,7 @@ class PlayerSettingsDataStore @Inject constructor(
     }
     suspend fun setParallelConnectionCount(count: Int) {
         store().edit { prefs ->
-            val isNativeMemory = isNativeMemoryActive(prefs)
-            val maxCount = if (isNativeMemory) 16 else PlayerSettings.MAX_PARALLEL_CONNECTION_COUNT
-            prefs[parallelConnectionCountKey] = count.coerceIn(PlayerSettings.MIN_PARALLEL_CONNECTION_COUNT, maxCount)
+            prefs[parallelConnectionCountKey] = count.coerceIn(PlayerSettings.MIN_PARALLEL_CONNECTION_COUNT, PlayerSettings.MAX_PARALLEL_CONNECTION_COUNT)
         }
     }
     suspend fun setParallelChunkSizeKb(kb: Int) { store().edit { prefs -> prefs[parallelChunkSizeKbKey] = kb.coerceIn(PlayerSettings.MIN_PARALLEL_CHUNK_SIZE_KB, PlayerSettings.MAX_PARALLEL_CHUNK_SIZE_KB); prefs.remove(parallelChunkSizeMbKey) } }
@@ -1731,9 +1729,7 @@ class PlayerSettingsDataStore @Inject constructor(
             targetBufferSizeMb?.let { prefs[targetBufferSizeMbKey] = it.coerceAtLeast(0) }
             useParallelConnections?.let { prefs[useParallelConnectionsKey] = it }
             parallelConnectionCount?.let {
-                val isNativeMemory = isNativeMemoryActive(prefs)
-                val maxCount = if (isNativeMemory) 16 else PlayerSettings.MAX_PARALLEL_CONNECTION_COUNT
-                prefs[parallelConnectionCountKey] = it.coerceIn(PlayerSettings.MIN_PARALLEL_CONNECTION_COUNT, maxCount)
+                prefs[parallelConnectionCountKey] = it.coerceIn(PlayerSettings.MIN_PARALLEL_CONNECTION_COUNT, PlayerSettings.MAX_PARALLEL_CONNECTION_COUNT)
             }
             parallelChunkSizeKb?.let {
                 prefs[parallelChunkSizeKbKey] = it.coerceIn(PlayerSettings.MIN_PARALLEL_CHUNK_SIZE_KB, PlayerSettings.MAX_PARALLEL_CHUNK_SIZE_KB)

@@ -45,7 +45,7 @@ object MemoryBudget {
     const val MIN_CONNECTIONS = 2
     const val MAX_CONNECTIONS = 4
     const val MIN_CHUNK_MB = 8
-    const val MAX_CHUNK_MB = 128
+    const val MAX_CHUNK_MB = 32
     const val BUFFER_STEP_MB = 25
     const val MIN_BUFFER_MB = 25
     const val MAX_BUFFER_MB = 1024 * 4
