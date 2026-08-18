@@ -353,10 +353,11 @@ internal fun continueWatchingImageModel(
         fun firstUsable(vararg candidates: String?): String? =
             candidates.firstOrNull { !it.isNullOrBlank() && it !in brokenImageUrls }?.trim()
         // Movies carry no episode thumbnail, so they keep their poster without needing a content type check.
+        // A thumbnail that is switched off leaves the chain entirely, because Trakt rows hydrate their artwork late and a demoted thumbnail would show until it lands.
         return if (useEpisodeThumbnails) {
             firstUsable(thumbnail, poster, backdrop)
         } else {
-            firstUsable(poster, backdrop, thumbnail)
+            firstUsable(poster, backdrop)
         }
     }
     val progress = (item as? ContinueWatchingItem.InProgress)?.progress
@@ -365,11 +366,15 @@ internal fun continueWatchingImageModel(
         candidates.firstOrNull { !it.isNullOrBlank() && it !in brokenImageUrls }?.trim()
     return when {
         nextUp != null && !nextUp.hasAired ->
-            firstNonBroken(nextUp.backdrop, nextUp.poster, nextUp.thumbnail)
+            firstNonBroken(
+                nextUp.backdrop,
+                nextUp.poster,
+                nextUp.thumbnail.takeIf { useEpisodeThumbnails }
+            )
         nextUp != null && useEpisodeThumbnails ->
             firstNonBroken(nextUp.thumbnail, nextUp.backdrop, nextUp.poster)
         nextUp != null ->
-            firstNonBroken(nextUp.backdrop, nextUp.poster, nextUp.thumbnail)
+            firstNonBroken(nextUp.backdrop, nextUp.poster)
         useEpisodeThumbnails -> firstNonBroken(
             (item as? ContinueWatchingItem.InProgress)?.episodeThumbnail,
             progress?.backdrop,
@@ -377,8 +382,7 @@ internal fun continueWatchingImageModel(
         )
         else -> firstNonBroken(
             progress?.backdrop,
-            progress?.poster,
-            (item as? ContinueWatchingItem.InProgress)?.episodeThumbnail
+            progress?.poster
         )
     }
 }

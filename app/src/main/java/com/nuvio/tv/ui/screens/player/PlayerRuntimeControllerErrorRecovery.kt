@@ -44,8 +44,6 @@ internal fun PlayerRuntimeController.attemptStartupRecovery(
     if (!isRetryablePlaybackError(error)) return false
     if (startupRetryCount >= MAX_STARTUP_AUTO_RETRIES) return false
 
-    handleParsingErrorFallback(error)
-
     val paused = userPausedManually
     val attempt = startupRetryCount
     startupRetryCount++
@@ -258,8 +256,6 @@ internal fun PlayerRuntimeController.attemptAutoRetry(
     if (isDeadSourcePlaybackError(error)) return false
     if (errorRetryCount >= MAX_AUTO_RETRIES) return false
 
-    handleParsingErrorFallback(error)
-
     val paused = userPausedManually
     val attempt = errorRetryCount
     errorRetryCount++
@@ -323,6 +319,7 @@ internal fun PlayerRuntimeController.resetErrorRetryState() {
     errorRetryCount = 0
     deadSourceFailoverCount = 0
     hasRetriedAfterMimeOverrideClear = false
+    parsingErrorProbeAttempted = false
     pendingAudioPcmFallbackRebuild = false
     errorRetryJob?.cancel()
     errorRetryJob = null
@@ -506,44 +503,89 @@ internal fun PlayerRuntimeController.tryDv7HevcFallback(
     return true
 }
 
-/**
- * Gives the next generic retry a different parsing strategy: first clear a wrong
- * cached mimeType override so the extractor auto-sniffs, and only once no
- * override is steering it, fall back to forcing HLS (upstream's recovery for
- * playlists served with a missing or bogus MIME type).
- */
-internal fun PlayerRuntimeController.handleParsingErrorFallback(error: PlaybackException) {
-    if (error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED ||
+internal fun PlayerRuntimeController.tryParsingErrorProbeFallback(
+    error: PlaybackException,
+    detailedError: String,
+    allowEngineFailover: Boolean,
+    savedPosition: Long = 0L,
+    paused: Boolean = userPausedManually
+): Boolean {
+    val isSourceOrParsingError = error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED ||
         error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED ||
         error.errorCode == PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED ||
-        error.errorCode == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED
-    ) {
-        // Dead-classified URLs (non-media body behind HTTP 200, 404/410) belong to
-        // attemptDeadSourceFailover, which owns its own one-shot override-clear
-        // retry. Mutating the mimeType here would either hand it a phantom
-        // override (the HLS value set below) or steal its recoverable sub-case
-        // (override already cleared), so leave dead sources untouched.
-        if (isDeadSourcePlaybackError(error)) return
-        if (currentStreamMimeType != null &&
-            currentStreamMimeType != androidx.media3.common.MimeTypes.APPLICATION_M3U8
-        ) {
-            Log.w(
+        error.errorCode == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED ||
+        error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW ||
+        error.errorCode == PlaybackException.ERROR_CODE_IO_UNSPECIFIED ||
+        error.findCauseOfType<androidx.media3.exoplayer.source.UnrecognizedInputFormatException>() != null ||
+        error.cause?.toString()?.contains("UnrecognizedInputFormatException") == true
+
+    if (!isSourceOrParsingError) return false
+    if (parsingErrorProbeAttempted) return false
+    parsingErrorProbeAttempted = true
+
+    val previousMimeType = currentStreamMimeType
+    Log.w(
+        PlayerRuntimeController.TAG,
+        "Source/parsing error [${error.errorCode}] detected (previous mimeType=$previousMimeType). " +
+            "Probing stream format..."
+    )
+
+    errorRetryJob?.cancel()
+    errorRetryJob = scope.launch {
+        showRecoveryOverlay()
+        val probedMime = PlayerMediaSourceFactory.probeNetworkMimeType(
+            url = currentStreamUrl,
+            headers = currentHeaders
+        )
+
+        if (probedMime != null && probedMime != previousMimeType) {
+            Log.i(
                 PlayerRuntimeController.TAG,
-                "Parsing error [${error.errorCode}] detected with mimeType=$currentStreamMimeType. " +
-                        "Clearing mimeType override for auto-sniff retry."
+                "Stream probe resolved mimeType=$probedMime (was $previousMimeType). Retrying playback..."
             )
+            currentStreamMimeType = probedMime
+            currentStreamResponseHeaders = emptyMap()
+            releasePlayer(flushPlaybackState = false)
+            if (savedPosition > 0L) {
+                _uiState.update { it.copy(pendingSeekPosition = savedPosition) }
+            }
+            initializePlayer(currentStreamUrl, currentHeaders, startPaused = paused)
+        } else if (previousMimeType == androidx.media3.common.MimeTypes.APPLICATION_M3U8) {
             currentStreamMimeType = null
             currentStreamResponseHeaders = emptyMap()
-            return
+            releasePlayer(flushPlaybackState = false)
+            if (savedPosition > 0L) {
+                _uiState.update { it.copy(pendingSeekPosition = savedPosition) }
+            }
+            initializePlayer(currentStreamUrl, currentHeaders, startPaused = paused)
+        } else {
+            // Fork dead-source rung (community 3003 report): the probe failed to
+            // name a better container, so a sniff-failure body (HTML page behind
+            // HTTP 200, .rar/.zip payload) or HTTP 404/410 is permanent for this
+            // URL. Advance to the next source instead of burning both same-URL
+            // retries on a doomed link. Checked before the engine failover: a
+            // dead URL is dead on either engine.
+            if (isDeadSourcePlaybackError(error) && attemptDeadSourceFailover(error, detailedError)) {
+                return@launch
+            }
+            if (maybeAutoSwitchInternalPlayerOnStartupError(detailedError = detailedError, allowEngineFailover = allowEngineFailover)) {
+                return@launch
+            }
+            if (attemptAutoRetry(error, detailedError)) {
+                return@launch
+            }
+            val userFacingError = error.toDisplayMessage(context)
+            _uiState.update {
+                it.copy(
+                    error = userFacingError,
+                    isBuffering = false,
+                    showLoadingOverlay = false,
+                    showPauseOverlay = false
+                )
+            }
         }
-        Log.w(
-            PlayerRuntimeController.TAG,
-            "Parsing error [${error.errorCode}] detected with previous mimeType=$currentStreamMimeType. " +
-                    "Setting mimeType to HLS (APPLICATION_M3U8) for retry fallback."
-        )
-        currentStreamMimeType = androidx.media3.common.MimeTypes.APPLICATION_M3U8
-        currentStreamResponseHeaders = emptyMap()
     }
+    return true
 }
 
 /** @return true if a mimeType override was present and has been cleared. */
@@ -582,10 +624,19 @@ private fun PlayerRuntimeController.clearMimeOverrideForParsingError(error: Play
  * burn perfectly good sources.
  */
 internal fun PlayerRuntimeController.isDeadSourcePlaybackError(error: PlaybackException): Boolean {
-    val http = error.findInvalidResponseCodeException()
-    if (http != null && (http.responseCode == 404 || http.responseCode == 410)) return true
+    if (isDeadSourceHttpError(error)) return true
     return error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED &&
         error.findCauseOfType<androidx.media3.exoplayer.source.UnrecognizedInputFormatException>() != null
+}
+
+/**
+ * The HTTP arm of the dead-source classification. 404/410 is certain-dead with
+ * no probe value, so callers can advance without spending the 0.8.5
+ * parsing-error probe on it.
+ */
+internal fun PlayerRuntimeController.isDeadSourceHttpError(error: PlaybackException): Boolean {
+    val http = error.findInvalidResponseCodeException()
+    return http != null && (http.responseCode == 404 || http.responseCode == 410)
 }
 
 /**

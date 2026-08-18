@@ -127,6 +127,7 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import androidx.compose.ui.res.stringResource
 import com.nuvio.tv.R
+import com.nuvio.tv.ui.util.localizeEpisodeTitle
 import com.nuvio.tv.data.local.InternalPlayerEngine
 import com.nuvio.tv.core.player.thumbnail.SeekThumbnailPreferences
 import com.nuvio.tv.core.player.thumbnail.SeekThumbnails
@@ -293,7 +294,7 @@ fun PlayerScreen(
             if (skipButtonActuallyVisible) {
                 runCatching { skipIntroFocusRequester.requestFocus() }
             }
-        } else if (uiState.activeSkipInterval != null && !uiState.skipIntervalDismissed && !uiState.showControls) {
+        } else if (skipButtonActuallyVisible && !uiState.showControls) {
             viewModel.onEvent(PlayerEvent.OnDismissSkipIntro)
         } else if (uiState.postPlayMode is PostPlayMode.StillWatching) {
             viewModel.onEvent(PlayerEvent.OnDismissStillWatchingPrompt)
@@ -2039,11 +2040,14 @@ private fun PlayerControlsOverlay(
                             uiState.currentSeason,
                             uiState.currentEpisode
                         )
-                        val episodeInfo = buildString {
-                            append(seasonEpisodeCode)
-                            if (!uiState.currentEpisodeTitle.isNullOrBlank()) {
-                                append(" • ${uiState.currentEpisodeTitle}")
-                            }
+                        val appContext = LocalContext.current
+                        val localizedEpisodeTitle = uiState.currentEpisodeTitle
+                            ?.takeIf { it.isNotBlank() }
+                            ?.localizeEpisodeTitle(appContext)
+                        val episodeInfo = if (localizedEpisodeTitle != null) {
+                            "$seasonEpisodeCode • $localizedEpisodeTitle"
+                        } else {
+                            seasonEpisodeCode
                         }
                         Text(
                             text = episodeInfo,

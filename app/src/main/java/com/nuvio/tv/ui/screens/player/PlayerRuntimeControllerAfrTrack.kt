@@ -196,7 +196,7 @@ internal fun PlayerRuntimeController.maybeRunTrackFormatAfr(rawFps: Float, forma
                 // Skip under an already-audio-disabled stream (don't fight the
                 // existing state machine) and under tunneling (the tunnel
                 // clock is the audio track).
-                if (!isAudioDisabledForCurrentPlayback && !playerSettings.tunnelingEnabled) {
+                if (!isAudioDisabledForCurrentPlayback && !playerSettings.effectiveTunnelingEnabled) {
                     withContext(Dispatchers.Main) {
                         _exoPlayer?.let { p ->
                             p.trackSelectionParameters = p.trackSelectionParameters

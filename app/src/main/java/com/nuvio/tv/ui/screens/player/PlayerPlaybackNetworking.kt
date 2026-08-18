@@ -67,6 +67,7 @@ internal object PlayerPlaybackNetworking {
         OkHttpClient.Builder()
             .dispatcher(dispatcher)
             .dns(IPv4FirstDns())
+            .eventListenerFactory(PlaybackConnectionEvents)
             .sslSocketFactory(sslContext.socketFactory, trustAllManager)
             .hostnameVerifier(playbackHostnameVerifier)
             .connectTimeout(15, TimeUnit.SECONDS)
@@ -454,12 +455,13 @@ internal object PlayerPlaybackNetworking {
     @UnstableApi
     fun createHttpDataSourceFactory(defaultHeaders: Map<String, String> = emptyMap()): DataSource.Factory {
         val client = createHttpClient(defaultHeaders)
-        return OkHttpDataSource.Factory(client).apply {
+        val httpFactory = OkHttpDataSource.Factory(client).apply {
             setDefaultRequestProperties(defaultHeaders)
             if (defaultHeaders.none { it.key.equals("User-Agent", ignoreCase = true) }) {
                 setUserAgent(PlayerMediaSourceFactory.DEFAULT_USER_AGENT)
             }
         }
+        return LoggingDataSourceFactory(httpFactory, "HTTP")
     }
 
     @UnstableApi

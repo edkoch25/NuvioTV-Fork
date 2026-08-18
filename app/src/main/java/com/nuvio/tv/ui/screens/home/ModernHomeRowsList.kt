@@ -236,7 +236,7 @@ internal fun ModernHomeRowsList(
     val latestOnRequestLazyCatalogLoad = rememberUpdatedState(onRequestLazyCatalogLoad)
     val latestCarouselRowsForLazy = rememberUpdatedState(carouselRows)
     LaunchedEffect(verticalRowListState) {
-        val prefetchAheadForLazy = 3
+        val prefetchAheadForLazy = 2
         snapshotFlow {
             val info = verticalRowListState.layoutInfo
             val firstVisible = info.visibleItemsInfo.firstOrNull()?.index ?: -1
@@ -245,8 +245,8 @@ internal fun ModernHomeRowsList(
         }.collectLatest { (firstVisible, lastVisible) ->
             if (lastVisible < 0) return@collectLatest
             // Debounce: restarts on every new emission during rapid scroll.
-            // Only fires when visible indices stabilize for 120ms.
-            delay(120)
+            // Only fires when visible indices stabilize for 240ms.
+            delay(240)
             val rows = latestCarouselRowsForLazy.value
             for (idx in firstVisible.coerceAtLeast(0)..(lastVisible + prefetchAheadForLazy)) {
                 val row = rows.list.getOrNull(idx) ?: continue

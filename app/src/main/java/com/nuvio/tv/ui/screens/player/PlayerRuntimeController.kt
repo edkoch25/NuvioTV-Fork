@@ -16,6 +16,10 @@ import com.nuvio.tv.core.player.BitrateAwareLoadControl
 import com.nuvio.tv.core.player.LastPlaybackDiagnostics
 import com.nuvio.tv.core.debrid.DirectDebridResolver
 import com.nuvio.tv.core.debrid.DirectDebridStreamPreparer
+import com.nuvio.tv.core.cloud.CloudLibraryPlaybackContext
+import com.nuvio.tv.core.cloud.CloudLibraryPlaybackProgressStore
+import com.nuvio.tv.core.cloud.CloudLibraryPlaybackSessionStore
+import com.nuvio.tv.core.cloud.CloudLibraryRepository
 import com.nuvio.tv.core.plugin.PluginManager
 import com.nuvio.tv.core.tracking.TrackingMediaReference
 import com.nuvio.tv.core.tracking.TrackingScrobbleCoordinator
@@ -47,7 +51,6 @@ import com.nuvio.tv.domain.repository.StreamRepository
 import com.nuvio.tv.domain.repository.WatchProgressRepository
 import androidx.media3.session.MediaSession
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -90,14 +93,16 @@ class PlayerRuntimeController(
     internal val tmdbSettingsDataStore: com.nuvio.tv.data.local.TmdbSettingsDataStore,
     internal val directDebridResolver: DirectDebridResolver,
     internal val directDebridStreamPreparer: DirectDebridStreamPreparer,
+    internal val cloudLibraryRepository: CloudLibraryRepository,
+    internal val cloudPlaybackProgressStore: CloudLibraryPlaybackProgressStore,
+    internal val cloudPlaybackSessionStore: CloudLibraryPlaybackSessionStore,
     internal val streamBadgePresentation: com.nuvio.tv.core.streams.StreamBadgePresentation,
     internal val debridSettingsDataStore: com.nuvio.tv.data.local.DebridSettingsDataStore,
     internal val playbackIssueReportRepository: PlaybackIssueReportRepository,
+    internal val tvRecommendationManager: com.nuvio.tv.core.recommendations.TvRecommendationManager,
     savedStateHandle: SavedStateHandle,
     internal val scope: CoroutineScope
 ) {
-
-    internal val watchedWriteDispatcher = Dispatchers.IO.limitedParallelism(1)
 
     companion object {
         internal const val TAG = "PlayerViewModel"
@@ -193,6 +198,7 @@ class PlayerRuntimeController(
     internal val launchStartedAtElapsedMs: Long? = navigationArgs.launchStartedAtMs
     internal val rememberedAudioLanguage: String? = navigationArgs.rememberedAudioLanguage
     internal val rememberedAudioName: String? = navigationArgs.rememberedAudioName
+    internal val cloudSessionToken: String? = navigationArgs.cloudSessionToken
     internal val mediaSourceFactory = PlayerMediaSourceFactory(context.applicationContext)
 
     internal var currentVideoHash: String? = navigationArgs.videoHash
@@ -459,6 +465,8 @@ class PlayerRuntimeController(
      *  pre-start can derive geometry without suspending on the settings Flow. */
     @Volatile internal var lastAppliedPlayerSettings: PlayerSettings? = null
     internal var metaVideos: List<Video> = emptyList()
+    internal var cloudPlaybackContext: CloudLibraryPlaybackContext? =
+        cloudPlaybackSessionStore.load(cloudSessionToken)
     internal var metaGenres: List<String> = emptyList()
     internal var metaCountry: String? = null
     internal var metaFetchJob: Job? = null
@@ -610,6 +618,7 @@ class PlayerRuntimeController(
     internal var hasTriedDv7HevcFallback: Boolean = false
     internal var forceDv7ToHevc: Boolean = false
     internal var startupRetryCount: Int = 0
+    internal var parsingErrorProbeAttempted: Boolean = false
     internal var hasRetriedCurrentStreamAfterUnexpectedNpe: Boolean = false
     internal var hasRetriedCurrentStreamAfterMediaPeriodHolderCrash: Boolean = false
     internal var timeoutRecoveryAttempts: Int = 0
@@ -729,7 +738,11 @@ class PlayerRuntimeController(
         // causing the resume seek to be silently lost when ExoPlayer's STATE_READY
         // fired before the DB read completed.
         observeSubtitleSettings()
-        fetchMetaDetails(contentId, contentType)
+        if (contentType.equals("cloud", ignoreCase = true)) {
+            initializeCloudPlaybackSequence()
+        } else {
+            fetchMetaDetails(contentId, contentType)
+        }
         observeBlurUnwatchedEpisodes()
         observeEpisodeWatchProgress()
         observeTorrentSettings()

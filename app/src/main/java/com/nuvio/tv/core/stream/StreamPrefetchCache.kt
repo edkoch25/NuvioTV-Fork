@@ -355,8 +355,17 @@ object StreamPrefetchCache {
         type: String,
         videoId: String,
         season: Int?,
-        episode: Int?
+        episode: Int?,
+        forceRefresh: Boolean = false
     ): Flow<NetworkResult<List<AddonStreams>>> {
+        // 0.8.5 source-refresh: a user refresh must bypass BOTH caches -- this
+        // prefetch layer (hit/join below) AND the repository session cache
+        // (forwarded via getStreamsFromAllAddons). Skipping the hit/join here
+        // means a refresh always reaches a live scrape rather than replaying a
+        // warmed or in-flight prefetch.
+        if (forceRefresh) {
+            return repository.getStreamsFromAllAddons(type, videoId, season, episode, forceRefresh = true)
+        }
         val key = keyOf(type, videoId, season, episode)
         var hit: List<AddonStreams>? = null
         var join: Deferred<List<AddonStreams>>? = null

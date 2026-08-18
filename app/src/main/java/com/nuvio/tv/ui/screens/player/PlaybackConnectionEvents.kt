@@ -1,4 +1,4 @@
-package com.nuvio.tv.ui.screens.player
+﻿package com.nuvio.tv.ui.screens.player
 
 import android.os.SystemClock
 import android.util.Log
@@ -13,8 +13,10 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedDeque
 
 /**
  * N6 V2: prices a connection open on the playback path.
@@ -53,6 +55,9 @@ import java.util.concurrent.ConcurrentHashMap
 internal class PlaybackConnectionEventListener(
     private val id: Long
 ) : EventListener() {
+    // 0.8.5 hardening: one terminal emission per call, ever.
+    private val emitted = AtomicBoolean(false)
+
 
     private var callT0 = 0L
     private var dnsT0 = 0L
@@ -90,8 +95,9 @@ internal class PlaybackConnectionEventListener(
         callT0 = now()
         val request = call.request()
         range = request.header("Range")
-        host = request.url.host
-        val before = PlaybackConnectionEvents.enter(host ?: "unknown")
+        val reqHost = request.url.host
+        host = reqHost
+        val before = PlaybackConnectionEvents.enter(reqHost)
         inflightAtStart = before[0]
         hostInflightAtStart = before[1]
     }
@@ -102,7 +108,7 @@ internal class PlaybackConnectionEventListener(
 
     override fun dnsEnd(call: Call, domainName: String, inetAddressList: List<InetAddress>) {
         dnsEndT = now()
-        dnsMs = dnsEndT - dnsT0
+        dnsMs = if (dnsT0 > 0L) (dnsEndT - dnsT0).coerceAtLeast(0L) else -1L
     }
 
     override fun connectStart(call: Call, inetSocketAddress: InetSocketAddress, proxy: Proxy) {
@@ -115,7 +121,7 @@ internal class PlaybackConnectionEventListener(
     }
 
     override fun secureConnectEnd(call: Call, handshake: Handshake?) {
-        tlsMs = now() - tlsT0
+        tlsMs = if (tlsT0 > 0L) (now() - tlsT0).coerceAtLeast(0L) else -1L
     }
 
     override fun connectEnd(
@@ -125,7 +131,7 @@ internal class PlaybackConnectionEventListener(
         protocol: Protocol?
     ) {
         connEndT = now()
-        connMs = connEndT - connT0
+        connMs = if (connT0 > 0L) (connEndT - connT0).coerceAtLeast(0L) else -1L
         if (protocol != null) proto = protocol.toString()
     }
 
@@ -136,8 +142,11 @@ internal class PlaybackConnectionEventListener(
         protocol: Protocol?,
         ioe: IOException
     ) {
-        connMs = now() - connT0
-        Log.w(TAG, "NET_CONN id=$id connectFailed after ${connMs}ms host=$host err=${ioe.message}")
+        connMs = if (connT0 > 0L) (now() - connT0).coerceAtLeast(0L) else -1L
+        val currentHost = host ?: "unknown"
+        val msg = "NET_CONN id=$id connectFailed after ${connMs}ms host=$currentHost err=${ioe.message}"
+        Log.w(TAG, msg)
+        PlaybackConnectionEvents.recordEvent(msg)
     }
 
     override fun connectionAcquired(call: Call, connection: Connection) {
@@ -147,7 +156,7 @@ internal class PlaybackConnectionEventListener(
 
     override fun responseHeadersEnd(call: Call, response: Response) {
         headersT = now()
-        headersMs = headersT - callT0
+        headersMs = if (callT0 > 0L) (headersT - callT0).coerceAtLeast(0L) else -1L
         code = response.code
         if (!response.isRedirect) {
             PlaybackConnectionEvents.setResolvedHost(response.request.url.host)
@@ -162,30 +171,41 @@ internal class PlaybackConnectionEventListener(
         emit("failed")
     }
 
+    override fun canceled(call: Call) {
+        emit("canceled")
+    }
+
     private fun emit(outcome: String) {
-        PlaybackConnectionEvents.exit(host ?: "unknown")
-        val totalMs = now() - callT0
+        if (!emitted.compareAndSet(false, true)) return
+
+        val currentHost = host ?: "unknown"
+        if (callT0 > 0L) {
+            PlaybackConnectionEvents.exit(currentHost)
+        }
+
+        val totalMs = if (callT0 > 0L) (now() - callT0).coerceAtLeast(0L) else -1L
         val rangeLabel = range ?: "none"
-        val hostLabel = host ?: "unknown"
         val protoLabel = proto ?: "unknown"
         // V3-lite derived windows; -1 when the bracketing events never fired
         // (e.g. dns/connect on a pooled call). preDns = dispatcher/queue wait,
         // route = dnsEnd->connectStart, ttfb = connectEnd->headers (request
         // write + server think), acqToHdr = acquisition->headers, the only
         // decomposition available on a pooled call.
-        val preDnsMs = if (dnsT0 > 0L) dnsT0 - callT0 else -1L
-        val routeMs = if (dnsEndT > 0L && connT0 > 0L) connT0 - dnsEndT else -1L
-        val ttfbMs = if (connEndT > 0L && headersT > 0L) headersT - connEndT else -1L
-        val acqToHdrMs = if (acqT > 0L && headersT > 0L) headersT - acqT else -1L
-        Log.i(
-            TAG,
-            "NET_CONN id=$id outcome=$outcome pooled=${opens == 0} opens=$opens " +
-                "dns=${dnsMs}ms connect=${connMs}ms tls=${tlsMs}ms " +
-                "headers=${headersMs}ms total=${totalMs}ms " +
-                "preDns=${preDnsMs}ms route=${routeMs}ms ttfb=${ttfbMs}ms acqToHdr=${acqToHdrMs}ms " +
-                "inflight=$inflightAtStart hostInflight=$hostInflightAtStart " +
-                "code=$code proto=$protoLabel range=$rangeLabel host=$hostLabel"
-        )
+        val preDnsMs = if (dnsT0 > 0L && callT0 > 0L) (dnsT0 - callT0).coerceAtLeast(0L) else -1L
+        val routeMs = if (dnsEndT > 0L && connT0 > 0L) (connT0 - dnsEndT).coerceAtLeast(0L) else -1L
+        val ttfbMs = if (connEndT > 0L && headersT > 0L) (headersT - connEndT).coerceAtLeast(0L) else -1L
+        val acqToHdrMs = if (acqT > 0L && headersT > 0L) (headersT - acqT).coerceAtLeast(0L) else -1L
+        val logLine = "NET_CONN id=$id outcome=$outcome pooled=${opens == 0} opens=$opens " +
+            "dns=${dnsMs}ms connect=${connMs}ms tls=${tlsMs}ms " +
+            "headers=${headersMs}ms total=${totalMs}ms " +
+            "preDns=${preDnsMs}ms route=${routeMs}ms ttfb=${ttfbMs}ms acqToHdr=${acqToHdrMs}ms " +
+            "inflight=$inflightAtStart hostInflight=$hostInflightAtStart " +
+            "code=$code proto=$protoLabel range=$rangeLabel host=$currentHost"
+        // Fork: logcat stays the primary emission -- the N-series capture
+        // methodology reads NET_CONN from logcat. The 0.8.5 in-app ring buffer
+        // is additive (feeds the in-app network log surface).
+        Log.i(TAG, logLine)
+        PlaybackConnectionEvents.recordEvent(logLine)
     }
 
     private companion object {
@@ -223,17 +243,38 @@ internal object PlaybackConnectionEvents : EventListener.Factory {
     fun resolvedHost(): String? = resolvedServingHost
     fun clearResolvedHost() { resolvedServingHost = null }
 
+    // 0.8.5: bounded in-app ring of recent NET_CONN lines. Additive to (never
+    // a replacement for) the logcat emission above.
+    private val recentLogs = ConcurrentLinkedDeque<String>()
+    private const val MAX_RECENT_LOGS = 50
+
+    fun recordEvent(msg: String) {
+        recentLogs.addLast(msg)
+        while (recentLogs.size > MAX_RECENT_LOGS) {
+            recentLogs.pollFirst()
+        }
+    }
+
+    fun recentEvents(): List<String> = recentLogs.toList()
+
+    fun clear() {
+        recentLogs.clear()
+        resolvedServingHost = null
+        inflightTotal.set(0)
+        inflightPerHost.clear()
+    }
+
     /** Returns [totalBefore, hostBefore] - the counts prior to this call. */
     fun enter(host: String): IntArray {
         val hostCounter = inflightPerHost.getOrPut(host) { AtomicInteger(0) }
-        val totalBefore = inflightTotal.getAndIncrement()
-        val hostBefore = hostCounter.getAndIncrement()
+        val totalBefore = inflightTotal.getAndIncrement().coerceAtLeast(0)
+        val hostBefore = hostCounter.getAndIncrement().coerceAtLeast(0)
         return intArrayOf(totalBefore, hostBefore)
     }
 
     fun exit(host: String) {
-        inflightTotal.decrementAndGet()
-        inflightPerHost[host]?.decrementAndGet()
+        inflightTotal.updateAndGet { if (it > 0) it - 1 else 0 }
+        inflightPerHost[host]?.updateAndGet { if (it > 0) it - 1 else 0 }
     }
 
     override fun create(call: Call): EventListener =

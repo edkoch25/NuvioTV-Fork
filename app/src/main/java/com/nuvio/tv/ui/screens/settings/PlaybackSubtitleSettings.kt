@@ -78,6 +78,7 @@ internal fun LazyListScope.subtitleSettingsItems(
     onSetUseForcedSubtitles: (Boolean) -> Unit,
     onSetSubtitleShowOnlyPreferredLanguages: (Boolean) -> Unit,
     onSetAddonSubtitlesEnabled: (Boolean) -> Unit,
+    onSetSubtitleStripSdh: (Boolean) -> Unit,
     onSetSubtitleOutlineEnabled: (Boolean) -> Unit,
     onSetUseLibass: (Boolean) -> Unit,
     onSetLibassRenderType: (LibassRenderType) -> Unit,
@@ -156,6 +157,19 @@ internal fun LazyListScope.subtitleSettingsItems(
             enabled = enabled
         )
     }
+
+    item(key = "subtitle_strip_sdh") {
+        ToggleSettingsItem(
+            icon = Icons.Default.ClosedCaption,
+            title = stringResource(R.string.sub_strip_sdh),
+            subtitle = stringResource(R.string.sub_strip_sdh_desc),
+            isChecked = playerSettings.subtitleStyle.stripSdh,
+            onCheckedChange = onSetSubtitleStripSdh,
+            onFocused = onItemFocused,
+            enabled = enabled
+        )
+    }
+
     item(key = "subtitle_size") {
         SliderSettingsItem(
             icon = Icons.Default.FormatSize,
