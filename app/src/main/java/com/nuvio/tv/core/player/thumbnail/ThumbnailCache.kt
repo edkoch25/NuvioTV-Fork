@@ -31,20 +31,27 @@ import kotlinx.coroutines.withContext
 
 /**
  * Disk + memory cache for seek thumbnails (rev5 S5 rules, v1):
- * - Key: sha1(titleKey|durationMs) - video identity, never the URL (debrid URLs rotate).
+ * - Key: sha1(titleKey|sNN|hNNN|durationMs|vN) - video identity, never the URL (debrid URLs
+ *   rotate). Engine folds in spacing (sNN) + frame height (hNNN); vN is the store-version.
  *   v1 deviation, documented: rev5 asks for contentId+fileSize; title+durationMs is the
  *   identity available at the player layer today and survives URL rotation. Fold in
  *   contentId+size when the provider layer exposes them.
  * - Persistent LRU across sessions: 200 MB standard / 50 MB low tier, evict oldest by
  *   lastModified across all title dirs; free-space check before every write.
- * - In-RAM bitmap LRU: 10 thumbs standard / 4 low tier.
- * - Entries: one JPEG per 30 s bucket, ~640x360 (worker downscales via GL effect).
+ * - In-RAM bitmap LRU: 64 thumbs standard / 16 low tier (holds the coarse lattice +
+ *   scrub working set at 10 s spacing).
+ * - Entries: one JPEG per 10 s bucket, 480x270 (worker downscales on the CPU via MMR
+ *   getScaledFrameAtTime; the GL-effect path was dropped on Amlogic).
  */
 class ThumbnailCache(context: Context, titleKey: String, durationMs: Long) {
     companion object {
         private const val TAG = "ThumbCache"
         private const val ROOT_DIR = "seek_thumbs"
         private const val MIN_FREE_BYTES = 50L * 1024 * 1024
+
+        // On-disk store-format version. Bump on ANY format change (frame size, filename
+        // scheme, JPEG->sprite layout); folded into the cache key so a bump re-extracts once.
+        private const val STORE_VERSION = 2
 
         /** Deletes the entire seek-thumbnail cache root (all titles). Runs on IO. */
         suspend fun clearAll(context: Context): Boolean = withContext(Dispatchers.IO) {
@@ -74,8 +81,11 @@ class ThumbnailCache(context: Context, titleKey: String, durationMs: Long) {
     private val lowTier = isLowTier(appContext)
     private val diskBudgetBytes = if (lowTier) 50L * 1024 * 1024 else 200L * 1024 * 1024
     private val rootDir = File(appContext.cacheDir, ROOT_DIR)
-    private val titleDir = File(rootDir, sha1("$titleKey|$durationMs").take(24))
-    private val memCache = LruCache<Long, Bitmap>(if (lowTier) 4 else 10)
+    private val titleDir = File(rootDir, sha1("$titleKey|$durationMs|v$STORE_VERSION").take(24))
+    // Mem cap sized for 10 s density: hold the coarse (stride-30) lattice + a scrub
+    // working set so nearest-resident serving doesn't collapse to one frame across an
+    // unfilled span. ~0.5 MB per 480x270 frame => 64 ~= 33 MB (AM9 Pro 4 GB); 16 ~= 8 MB.
+    private val memCache = LruCache<Long, Bitmap>(if (lowTier) 16 else 64)
 
     fun getMem(bucket: Long): Bitmap? = memCache.get(bucket)
 

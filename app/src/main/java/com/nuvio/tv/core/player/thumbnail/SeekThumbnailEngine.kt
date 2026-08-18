@@ -51,21 +51,21 @@ import kotlinx.coroutines.withContext
  *   its protections: inter-frame pacing keeps connection churn low and the consecutive-failure
  *   streak aborts the session; playback is never the casualty.
  * - Bucket 0 extracts at 5 s, not 0 s - the 0 s frame of most titles is a black fade-in.
- * - Density derived from the measured scrub ramp (PlayerScrubRates: 10 s steps then 20 s
- *   steps at ~6 repeats/s => ~60-120 s of content per real second while ramping): coarse
- *   pass at 5 min matches sweep readability; 60 s final density serves the rest/landing
- *   moment (thumb <=30 s off, proportionate to CLOSEST_SYNC landing). Halves frame count,
- *   connection churn (429 exposure) and disk vs 30 s spacing.
- * - Coarse-first ordering (stride 5 -> 1 over 60 s buckets = 5 min -> 60 s)
- *   gives full-timeline coverage within the first ~2 minutes; nearest-thumb serving makes
- *   far seeks show an approximate frame instead of a blank; disk loads are rest-debounced so
- *   the accelerating held-seek ramp cannot flood IO.
+ * - Density (D1, density arc): final lattice 10 s = one seek-tap = one distinct frame.
+ *   Three-stride coarse-first (30 -> 6 -> 1 over 10 s buckets = 5 min -> 60 s -> 10 s): the
+ *   5 min sweep still lands full-timeline coverage within the first ~2 minutes for
+ *   readability, the 60 s pass refines, and the 10 s pass serves the tap-precise landing
+ *   (thumb <=10 s off, proportionate to CLOSEST_SYNC). 6x the frames/connection churn of
+ *   60 s spacing - the soak + gate posture (single connection, streak-abort) must cover it.
+ * - Coarse-first ordering gives full-timeline coverage early; ownership-interval serving
+ *   (Build 12b) shows the nearest existing frame for far seeks instead of a blank; disk
+ *   loads are rest-debounced so the accelerating held-seek ramp cannot flood IO.
  * - Bitmap ownership: EFE's frame bitmap is borrowed/read-only - always copy, never recycle.
  */
 object SeekThumbnails {
     private const val TAG = "ThumbWorker"
-    const val SPACING_MS = 60_000L
-    private const val TARGET_HEIGHT = 360
+    const val SPACING_MS = 10_000L
+    private const val TARGET_HEIGHT = 270
     private const val GATE_BUFFER_AHEAD_MS = 14_000L
     // Build 12a gate redesign (numbers from the nt17 measurement run). The plateau
     // escape lets a stable-but-below-threshold buffer (throttled host, byte-capped
@@ -152,7 +152,7 @@ object SeekThumbnails {
         private val playerProvider: () -> ExoPlayer?
     ) {
         private val appContext = context.applicationContext
-        private val cache = ThumbnailCache(appContext, "$titleKey|s${SPACING_MS / 1000}", durationMs)
+        private val cache = ThumbnailCache(appContext, "$titleKey|s${SPACING_MS / 1000}|h$TARGET_HEIGHT", durationMs)
         private var workerJob: Job? = null
         private val diskLoadsInFlight = HashSet<Long>()
         private var lastDiskLoadRequestAt = 0L
@@ -190,7 +190,7 @@ object SeekThumbnails {
                 // Coarse-first ordering: full-timeline coverage early, then refine.
                 val order = buildList {
                     val seen = HashSet<Long>()
-                    for (stride in listOf(5L, 1L)) {
+                    for (stride in listOf(30L, 6L, 1L)) {
                         var b = 0L
                         while (b <= lastBucket) {
                             if (seen.add(b)) add(b)
@@ -266,7 +266,9 @@ object SeekThumbnails {
                             cache.putMem(bucket, bmp)
                             tick.intValue++
                             generated++
-                            if (generated == ((lastBucket / 5L) + 1L).toInt()) {
+                            // Divisor tracks the first coarse stride (head of the stride
+                            // list); bump both together if the strides change. Log-only.
+                            if (generated == ((lastBucket / 30L) + 1L).toInt()) {
                                 Log.i(TAG, "coarse pass complete (~5min spacing) " +
                                     "generated=$generated t+${t()}ms")
                             }
