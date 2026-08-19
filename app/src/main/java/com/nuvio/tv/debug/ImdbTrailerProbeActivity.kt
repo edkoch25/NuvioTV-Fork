@@ -285,6 +285,25 @@ class ImdbTrailerProbeActivity : Activity() {
         okResults.add(OkResult(vi, "video", resp.code, resp.wafAction, true, encStr, "encodings=${info.encodings.size}"))
     }
 
+    // v8: block until the box can actually reach IMDb (any HTTP code > 0), or give up after maxMs.
+    // Warms the shared OS resolver + connection pool for BOTH arms before any measured fetch, and
+    // the WARMUP line records how long the cold-start resolver race lasts.
+    private suspend fun warmUpNetwork(maxMs: Long = 30_000L) {
+        val start = System.currentTimeMillis()
+        var attempt = 0
+        while (System.currentTimeMillis() - start < maxMs) {
+            attempt++
+            val r = okhttpGet("https://www.imdb.com/", REFERER)
+            if (r.code > 0) {
+                Log.i(TAG, "WARMUP ok after $attempt attempt(s) in ${System.currentTimeMillis() - start}ms code=${r.code} waf=${r.wafAction ?: "-"}")
+                return
+            }
+            Log.w(TAG, "WARMUP attempt $attempt failed (${r.error}) - backoff 1500ms")
+            delay(1500)
+        }
+        Log.w(TAG, "WARMUP gave up after ${maxMs}ms - proceeding anyway")
+    }
+
     private fun okSummarise() {
         val ok200 = okResults.count { it.code == 200 }
         val challenged = okResults.count { it.wafAction != null || it.code == 202 || it.code == 403 }
@@ -298,6 +317,7 @@ class ImdbTrailerProbeActivity : Activity() {
 
     private suspend fun runAb(tts: List<String>) {
         Log.i(TAG, "=== v7 A/B START (OkHttp-first, WebView-second) - ${tts.size} titles ===")
+        withContext(Dispatchers.IO) { warmUpNetwork() }
         for (tt in tts) {
             try { withContext(Dispatchers.IO) { okhttpProbeOne(tt) } }
             catch (e: Exception) { Log.e(TAG, "[$tt] OKHTTP threw: ${e.message}") }
@@ -316,6 +336,7 @@ class ImdbTrailerProbeActivity : Activity() {
 
     private suspend fun runAbVis(vis: List<String>) {
         Log.i(TAG, "=== v7 A/B vis-dump START - ${vis.size} video ids ===")
+        withContext(Dispatchers.IO) { warmUpNetwork() }
         for (vi in vis) {
             try { withContext(Dispatchers.IO) { okhttpDumpVideo(vi) } }
             catch (e: Exception) { Log.e(TAG, "[$vi] OKHTTP dump threw: ${e.message}") }
@@ -332,6 +353,7 @@ class ImdbTrailerProbeActivity : Activity() {
 
     private suspend fun runOkhttpTts(tts: List<String>) {
         Log.i(TAG, "=== v7 OkHttp-only START - ${tts.size} titles ===")
+        withContext(Dispatchers.IO) { warmUpNetwork() }
         for (tt in tts) {
             try { withContext(Dispatchers.IO) { okhttpProbeOne(tt) } }
             catch (e: Exception) { Log.e(TAG, "[$tt] OKHTTP threw: ${e.message}") }
@@ -343,6 +365,7 @@ class ImdbTrailerProbeActivity : Activity() {
 
     private suspend fun runOkhttpVis(vis: List<String>) {
         Log.i(TAG, "=== v7 OkHttp-only vis-dump START - ${vis.size} video ids ===")
+        withContext(Dispatchers.IO) { warmUpNetwork() }
         for (vi in vis) {
             try { withContext(Dispatchers.IO) { okhttpDumpVideo(vi) } }
             catch (e: Exception) { Log.e(TAG, "[$vi] OKHTTP dump threw: ${e.message}") }
