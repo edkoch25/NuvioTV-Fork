@@ -32,6 +32,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.Cookie
+import okhttp3.CookieJar
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -126,6 +129,229 @@ class ImdbTrailerProbeActivity : Activity() {
             .build()
     }
 
+    // ---- v7: on-box OkHttp-direct A/B (Tier 0) ---------------------------------------------
+    // Same UA + Referer as the WebView path; the ONLY intended difference is the client stack
+    // (OkHttp/Conscrypt TLS vs Chrome/BoringSSL). OkHttp-first / WebView-second, same run, same
+    // IP, isolates a client-fingerprint block (P2: OkHttp challenged, WebView passes) from an
+    // IP-reputation block (P3: both challenged). Additive; nothing here touches the v6 path.
+
+    private val abCookies = mutableListOf<Cookie>()
+    private val abCookieJar = object : CookieJar {
+        @Synchronized override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+            for (c in cookies) {
+                abCookies.removeAll { it.name == c.name && it.domain == c.domain && it.path == c.path }
+                abCookies.add(c)
+            }
+        }
+        @Synchronized override fun loadForRequest(url: HttpUrl): List<Cookie> =
+            abCookies.filter { it.matches(url) }
+    }
+
+    // Separate from `http` (the validated CDN range-probe client) so that instrument is unperturbed.
+    private val okhttpAb: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .cookieJar(abCookieJar)
+            .build()
+    }
+
+    private data class OkResp(
+        val code: Int, val proto: String, val wafAction: String?, val contentEncoding: String?,
+        val finalUrl: String, val body: String, val error: String?
+    )
+    private data class OkResult(
+        val id: String, val phase: String, val code: Int, val wafAction: String?,
+        val parsed: Boolean, val encodings: String, val note: String
+    )
+    private val okResults = mutableListOf<OkResult>()
+
+    private fun okhttpGet(url: String, referer: String): OkResp = try {
+        val req = Request.Builder().url(url)
+            .header("User-Agent", UA)
+            .header("Referer", referer)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+            .header("Accept-Language", "en-US,en;q=0.9")
+            .get().build()
+        okhttpAb.newCall(req).execute().use { r ->
+            val body = r.body?.string() ?: ""
+            OkResp(r.code, r.protocol.toString(), r.header("x-amzn-waf-action"),
+                r.header("content-encoding"), r.request.url.toString(), body, null)
+        }
+    } catch (e: Exception) {
+        OkResp(-1, "?", null, null, url, "", e.message ?: "error")
+    }
+
+    // Pull the server-rendered __NEXT_DATA__ JSON straight out of raw HTML (no DOM needed).
+    private fun extractNextData(html: String): String? {
+        val idx = html.indexOf("id=\"__NEXT_DATA__\"")
+        if (idx < 0) return null
+        val gt = html.indexOf('>', idx)
+        if (gt < 0) return null
+        val end = html.indexOf("</script>", gt)
+        if (end < 0) return null
+        return html.substring(gt + 1, end).trim().takeIf { it.isNotBlank() }
+    }
+
+    private fun logOk(label: String, url: String, r: OkResp, nd: String?, parseState: String) {
+        Log.i(TAG, "[$label] OKHTTP url=$url status=${r.code} proto=${r.proto} " +
+            "waf-action=${r.wafAction ?: "-"} enc=${r.contentEncoding ?: "-"} redirected=${r.finalUrl != url} " +
+            "finalUrl=${r.finalUrl} bytes=${r.body.length} nextdata=${if (nd != null) "y" else "n"} parse=$parseState")
+        if (r.code != 200 || nd == null) {
+            val head = r.body.replace("\n", " ").replace("\r", " ").take(300)
+            Log.w(TAG, "[$label] OKHTTP bodyHead=$head")
+        }
+        if (r.error != null) Log.w(TAG, "[$label] OKHTTP error=${r.error}")
+    }
+
+    private suspend fun okhttpProbeOne(tt: String) {
+        Log.i(TAG, "[$tt] ---- OKHTTP begin ----")
+        val titleUrl = "https://www.imdb.com/title/$tt/"
+        val resp = okhttpGet(titleUrl, REFERER)
+        val nd = extractNextData(resp.body)
+        val wafSeen = WAF_MARKERS.any { resp.body.contains(it, ignoreCase = true) }
+        logOk("$tt title", titleUrl, resp, nd, if (nd != null) "ok" else "fail")
+        if (resp.code != 200) {
+            okResults.add(OkResult(tt, "title", resp.code, resp.wafAction, false, "", "non-200 wafSeen=$wafSeen"))
+            Log.w(TAG, "[$tt] OKHTTP title non-200 (${resp.code}) waf=${resp.wafAction ?: "-"} - abort")
+            return
+        }
+        val candidates = selectCandidates(nd, resp.body)
+        if (candidates.isEmpty()) {
+            okResults.add(OkResult(tt, "title", resp.code, resp.wafAction, nd != null, "", "no-video-nodes wafSeen=$wafSeen"))
+            Log.w(TAG, "[$tt] OKHTTP no video nodes on title page (wafSeen=$wafSeen)")
+            return
+        }
+        Log.i(TAG, "[$tt] OKHTTP wafSeen=$wafSeen candidates=" +
+            candidates.take(MAX_CANDIDATES).joinToString(" | ") { "${it.vi}(${it.type ?: "?"}/${it.name ?: "?"}:${it.score})" })
+        okResults.add(OkResult(tt, "title", resp.code, resp.wafAction, nd != null, "", "cands=${candidates.size} wafSeen=$wafSeen"))
+
+        for ((idx, cand) in candidates.take(MAX_CANDIDATES).withIndex()) {
+            val videoUrl = "https://www.imdb.com/video/${cand.vi}"
+            val vresp = okhttpGet(videoUrl, REFERER)
+            val vnd = extractNextData(vresp.body)
+            val vinfo = parseVideo(vnd, vresp.body)
+            val encStr = vinfo?.encodings?.joinToString(",") { "${it.def}${if (it.mp4) "" else "/hls"}" } ?: ""
+            logOk("$tt/${cand.vi}", videoUrl, vresp, vnd, if (vinfo != null && vinfo.encodings.isNotEmpty()) "ok" else "fail")
+            if (vresp.code != 200) {
+                okResults.add(OkResult(tt, "video/${cand.vi}", vresp.code, vresp.wafAction, false, "", "non-200"))
+                Log.w(TAG, "[$tt]   OKHTTP cand#$idx ${cand.vi} non-200 (${vresp.code}) - next")
+                continue
+            }
+            if (vinfo == null || vinfo.encodings.isEmpty()) {
+                okResults.add(OkResult(tt, "video/${cand.vi}", vresp.code, vresp.wafAction, false, "", "no-encodings"))
+                Log.w(TAG, "[$tt]   OKHTTP cand#$idx ${cand.vi} no playbackURLs parsed - next")
+                continue
+            }
+            Log.i(TAG, "[$tt]   OKHTTP cand#$idx ${cand.vi} type=${vinfo.contentType ?: "?"} " +
+                "name=\"${vinfo.name ?: "?"}\" menu=[$encStr]")
+            dumpEncodings("OK:$tt/${cand.vi}", vinfo.encodings)
+            val best = vinfo.encodings.filter { it.mp4 }.maxByOrNull { it.height }
+            if (best == null) {
+                okResults.add(OkResult(tt, "video/${cand.vi}", vresp.code, vresp.wafAction, true, encStr, "hls-only"))
+                Log.w(TAG, "[$tt]   OKHTTP cand#$idx ${cand.vi} HLS-only - next")
+                continue
+            }
+            val range = rangeProbe(best.url)
+            Log.i(TAG, "[$tt] OKHTTP CHOSE ${cand.vi} def=${best.def} httpRange=${range.first} ${range.second} url=${trimUrl(best.url)}")
+            okResults.add(OkResult(tt, "video/${cand.vi}", vresp.code, vresp.wafAction, true, encStr, "chose=${best.def} range=${range.first}"))
+            return
+        }
+        Log.w(TAG, "[$tt] OKHTTP exhausted candidates without a playable trailer")
+    }
+
+    private suspend fun okhttpDumpVideo(vi: String) {
+        Log.i(TAG, "[$vi] ---- OKHTTP dump begin ----")
+        val url = "https://www.imdb.com/video/$vi"
+        val resp = okhttpGet(url, REFERER)
+        val nd = extractNextData(resp.body)
+        val info = parseVideo(nd, resp.body)
+        val encStr = info?.encodings?.joinToString(",") { "${it.def}${if (it.mp4) "" else "/hls"}" } ?: ""
+        logOk("$vi", url, resp, nd, if (info != null && info.encodings.isNotEmpty()) "ok" else "fail")
+        if (resp.code != 200) {
+            okResults.add(OkResult(vi, "video", resp.code, resp.wafAction, false, "", "non-200"))
+            Log.w(TAG, "[$vi] OKHTTP non-200 (${resp.code}) waf=${resp.wafAction ?: "-"}")
+            return
+        }
+        if (info == null || info.encodings.isEmpty()) {
+            okResults.add(OkResult(vi, "video", resp.code, resp.wafAction, false, "", "no-encodings"))
+            Log.w(TAG, "[$vi] OKHTTP no playbackURLs parsed")
+            return
+        }
+        Log.i(TAG, "[$vi] OKHTTP type=${info.contentType ?: "?"} name=\"${info.name ?: "?"}\"")
+        dumpEncodings("OK:$vi", info.encodings)
+        okResults.add(OkResult(vi, "video", resp.code, resp.wafAction, true, encStr, "encodings=${info.encodings.size}"))
+    }
+
+    private fun okSummarise() {
+        val ok200 = okResults.count { it.code == 200 }
+        val challenged = okResults.count { it.wafAction != null || it.code == 202 || it.code == 403 }
+        val parsed = okResults.count { it.parsed }
+        Log.i(TAG, "=== OKHTTP SUMMARY: ${okResults.size} fetches | 200 $ok200 | challenged $challenged | parsed $parsed ===")
+        for (r in okResults) {
+            Log.i(TAG, "  OK ${r.id}/${r.phase} code=${r.code} waf=${r.wafAction ?: "-"} " +
+                "parsed=${r.parsed} enc=[${r.encodings}] note=${r.note}")
+        }
+    }
+
+    private suspend fun runAb(tts: List<String>) {
+        Log.i(TAG, "=== v7 A/B START (OkHttp-first, WebView-second) - ${tts.size} titles ===")
+        for (tt in tts) {
+            try { withContext(Dispatchers.IO) { okhttpProbeOne(tt) } }
+            catch (e: Exception) { Log.e(TAG, "[$tt] OKHTTP threw: ${e.message}") }
+            delay(500)
+            try { probeOne(tt) }
+            catch (e: Exception) {
+                Log.e(TAG, "[$tt] WebView probe threw: ${e.message}")
+                results.add(Result(tt, false, null, null, null, 0, 0, false, "exception:${e.message}"))
+            }
+            delay(500)
+        }
+        okSummarise()
+        summarise()
+        Log.i(TAG, "=== v7 A/B DONE ===")
+    }
+
+    private suspend fun runAbVis(vis: List<String>) {
+        Log.i(TAG, "=== v7 A/B vis-dump START - ${vis.size} video ids ===")
+        for (vi in vis) {
+            try { withContext(Dispatchers.IO) { okhttpDumpVideo(vi) } }
+            catch (e: Exception) { Log.e(TAG, "[$vi] OKHTTP dump threw: ${e.message}") }
+            delay(500)
+            try {
+                if (webViewDead) recreateWebView()
+                withTimeoutOrNull(TITLE_BUDGET_MS) { dumpVideo(vi); true } ?: Log.w(TAG, "[$vi] TITLE-TIMEOUT")
+            } catch (e: Exception) { Log.e(TAG, "[$vi] dump threw: ${e.message}") }
+            delay(500)
+        }
+        okSummarise()
+        Log.i(TAG, "=== v7 A/B vis-dump DONE ===")
+    }
+
+    private suspend fun runOkhttpTts(tts: List<String>) {
+        Log.i(TAG, "=== v7 OkHttp-only START - ${tts.size} titles ===")
+        for (tt in tts) {
+            try { withContext(Dispatchers.IO) { okhttpProbeOne(tt) } }
+            catch (e: Exception) { Log.e(TAG, "[$tt] OKHTTP threw: ${e.message}") }
+            delay(500)
+        }
+        okSummarise()
+        Log.i(TAG, "=== v7 OkHttp-only DONE ===")
+    }
+
+    private suspend fun runOkhttpVis(vis: List<String>) {
+        Log.i(TAG, "=== v7 OkHttp-only vis-dump START - ${vis.size} video ids ===")
+        for (vi in vis) {
+            try { withContext(Dispatchers.IO) { okhttpDumpVideo(vi) } }
+            catch (e: Exception) { Log.e(TAG, "[$vi] OKHTTP dump threw: ${e.message}") }
+            delay(500)
+        }
+        okSummarise()
+        Log.i(TAG, "=== v7 OkHttp-only vis-dump DONE ===")
+    }
+
     private data class Candidate(val vi: String, val type: String?, val name: String?, val score: Int)
     private data class Encoding(val def: String, val height: Int, val mp4: Boolean, val url: String)
     private data class Result(
@@ -147,11 +373,14 @@ class ImdbTrailerProbeActivity : Activity() {
         root.addView(webView, FrameLayout.LayoutParams(1, 1).apply { gravity = Gravity.TOP or Gravity.START })
         configureWebView(webView)
 
+        val mode = intent?.getStringExtra("mode")?.trim()?.lowercase()
+            ?.takeIf { it == "ab" || it == "okhttp" || it == "webview" } ?: "ab"
+        Log.i(TAG, "=== v7 probe mode=$mode ===")
         val vis = intent?.getStringExtra("vis")
             ?.split(",")?.map { it.trim() }?.filter { it.startsWith("vi") }?.takeIf { it.isNotEmpty() }
         if (vis != null) {
             Log.i(TAG, "=== IMDb trailer probe v6 START (vis-dump) — ${vis.size} video ids — UA=$UA")
-            scope.launch { runVis(vis) }
+            scope.launch { when (mode) { "webview" -> runVis(vis); "okhttp" -> runOkhttpVis(vis); else -> runAbVis(vis) } }
             return
         }
 
@@ -160,7 +389,7 @@ class ImdbTrailerProbeActivity : Activity() {
             ?: DEFAULT_TTS
 
         Log.i(TAG, "=== IMDb trailer probe v6 START — ${tts.size} titles — UA=$UA")
-        scope.launch { runAll(tts) }
+        scope.launch { when (mode) { "webview" -> runAll(tts); "okhttp" -> runOkhttpTts(tts); else -> runAb(tts) } }
     }
 
     private fun configureWebView(wv: WebView) {
