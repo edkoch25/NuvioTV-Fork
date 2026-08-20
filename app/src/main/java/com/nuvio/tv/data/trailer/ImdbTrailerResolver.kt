@@ -82,7 +82,7 @@ class ImdbTrailerResolver @Inject constructor(
     )
     private data class Candidate(
         val vi: String, val type: String?, val name: String?, val runtime: Int?,
-        val description: String?, val createdDate: String?, val score: Int
+        val description: String?, val createdDate: String?, val score: Int, val order: Int
     )
     private data class Encoding(val def: String, val height: Int, val mp4: Boolean, val url: String)
     private data class VideoInfo(val contentType: String?, val name: String?, val encodings: List<Encoding>)
@@ -159,8 +159,9 @@ class ImdbTrailerResolver @Inject constructor(
             val videoPage = loadAndSettle(wv, videoUrl, cand.vi, flag) ?: continue
             val vinfo = withContext(Dispatchers.Default) { parseVideo(videoPage.nextData, videoPage.html) } ?: continue
             val best = pickBestMp4(vinfo.encodings) ?: continue
-            if (best.height in 1 until RES_FLOOR) {
-                Log.i(TAG, "[$imdbId] ${cand.vi} best mp4 ${best.height}p < ${RES_FLOOR}p floor -> skip candidate")
+            if (best.height < RES_FLOOR) {
+                val why = if (best.height <= 0) "unverified-res(${best.def})" else "${best.height}p"
+                Log.i(TAG, "[$imdbId] ${cand.vi} best mp4 $why < ${RES_FLOOR}p floor -> skip candidate")
                 continue
             }
             Log.i(TAG, "[$imdbId] SELECTED ${cand.vi} \"${cand.name ?: "?"}\" rt=${cand.runtime ?: "-"} score=${cand.score} def=${best.def} h=${best.height}")
@@ -277,12 +278,17 @@ class ImdbTrailerResolver @Inject constructor(
             // Fallback: bare id scrape when JSON parse fails. No metadata, so score neutrally by type-less rule.
             for (m in Regex("""vi\d{6,}""").findAll(html)) nodes.putIfAbsent(m.value, RawNode(null, null, null, null, null))
         }
-        val scored = nodes.entries.mapNotNull { (vi, n) ->
-            val score = classify(n) ?: return@mapNotNull null
-            Candidate(vi, n.type, n.name, n.runtime, n.description, n.createdDate, score)
+        val scored = nodes.entries.mapIndexedNotNull { idx, (vi, n) ->
+            val score = classify(n) ?: return@mapIndexedNotNull null
+            Candidate(vi, n.type, n.name, n.runtime, n.description, n.createdDate, score, idx)
         }
+        // IMDb's primaryVideos order is its own designation (edge[0] == the home-page trailer,
+        // confirmed on Inception/Parasite/Oppenheimer). Prefer position; the runtime gate in
+        // classify() has already removed junk (e.g. Breaking Bad's 31s edge[0] scene), so the
+        // first SURVIVING position is IMDb's marquee minus obvious garbage. Score/date only break
+        // ties between equal positions (shouldn't happen) -- position is authoritative.
         return scored.sortedWith(
-            compareByDescending<Candidate> { it.score }.thenByDescending { it.createdDate ?: "" }
+            compareBy<Candidate> { it.order }.thenByDescending { it.score }.thenByDescending { it.createdDate ?: "" }
         )
     }
 
@@ -355,9 +361,19 @@ class ImdbTrailerResolver @Inject constructor(
                             val e = urls.optJSONObject(i) ?: continue
                             val u = normalise(e.optString("url", ""))
                             if (u.isBlank()) continue
-                            val def = deep(e, "displayName", "value") ?: e.optString("definition", "") ?: ""
-                            val mime = e.optString("mimeType", "")
-                            val mp4 = mime.contains("mp4", true) || u.contains(".mp4", true)
+                            // Resolution: prefer videoDefinition (DEF_1080p/DEF_SD/DEF_AUTO...), then
+                            // displayName.value ("1080p"/"SD"/"AUTO"), then legacy "definition".
+                            val vdef = e.optString("videoDefinition", "")
+                            val ddef = deep(e, "displayName", "value") ?: ""
+                            val def = when {
+                                vdef.isNotBlank() -> vdef
+                                ddef.isNotBlank() -> ddef
+                                else -> e.optString("definition", "")
+                            }
+                            // mp4 vs HLS: videoMimeType is "MP4" or "M3U8" (fallback to url/legacy mimeType).
+                            val vmime = e.optString("videoMimeType", "").ifBlank { e.optString("mimeType", "") }
+                            val isHls = vmime.contains("m3u8", true) || def.contains("AUTO", true) || u.contains(".m3u8", true)
+                            val mp4 = !isHls && (vmime.contains("mp4", true) || u.contains(".mp4", true))
                             encs.add(Encoding(def, defHeight(def), mp4, u))
                         }
                     }
@@ -397,15 +413,17 @@ class ImdbTrailerResolver @Inject constructor(
 
     /** Height from an IMDb definition label, hardened against non-`NNNNp` variants (4K/UHD/HD/SD...). */
     private fun defHeight(def: String): Int {
-        val d = def.trim().uppercase()
+        val d = def.trim().uppercase().removePrefix("DEF_").uppercase()
         when {
             d.contains("2160") || d == "4K" || d == "UHD" -> return 2160
             d.contains("1440") || d == "2K" || d == "QHD" -> return 1440
             d.contains("1080") || d == "FHD" || d == "FULLHD" || d == "FULL HD" -> return 1080
             d.contains("720") || d == "HD" -> return 720
-            d.contains("480") || d == "SD" -> return 480
+            d.contains("480") -> return 480
+            d == "SD" -> return 480
             d.contains("360") -> return 360
             d.contains("240") -> return 240
+            d == "AUTO" || d.isBlank() -> return 0 // adaptive/HLS or unknown -> unverified
         }
         return Regex("""(\d{3,4})""").find(d)?.value?.toIntOrNull() ?: 0
     }
