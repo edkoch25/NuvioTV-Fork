@@ -22,18 +22,26 @@ import javax.inject.Singleton
 import kotlin.coroutines.resume
 
 /**
- * Phase 1a: productionised IMDb trailer discovery. Owns a windowless, application-context WebView
- * (proven in the Phase 0 host probe to clear IMDb's awsWaf JS challenge on the AM9 Pro) and scrapes
- * the title page -> candidate trailer -> video page -> playbackURLs, returning the best progressive
- * mp4 as a [TrailerPlaybackSource]. No token harvest, no OkHttp discovery (Tier 0 proved AWS WAF
- * fingerprint-blocks non-browser clients); the WebView does the whole scrape and hands off only the
- * signed CloudFront mp4 URL, which is NOT WAF-walled and streams over plain HTTP in ExoPlayer.
+ * IMDb trailer discovery. Owns a windowless, application-context WebView (proven in the Phase 0 host
+ * probe to clear IMDb's awsWaf JS challenge) and scrapes the title page's primaryVideos, picks the
+ * marquee trailer, resolves its video page and returns the best progressive mp4 as a
+ * [TrailerPlaybackSource]. The WebView does the whole scrape; only the signed CloudFront mp4 URL
+ * (NOT WAF-walled) is handed off, streaming over plain HTTP in ExoPlayer.
  *
- * Selection here is deliberately naive (first candidate, best mp4 by height) -- marquee selection
- * (Official > real-trailer, >=720p floor, prefer 1080p, else YouTube fallback) is Phase 1b.
+ * Phase 1b selection, derived from cross-title sampling (1968..2023, film/series/anime/foreign,
+ * SD..4K):
+ *   - Tiered runtime gate: reject <=35s (scene/clip), 36-74s keep only if corroborated as a trailer,
+ *     75-240s normal window, reject >240s (long-form). Missing runtime never rejects.
+ *   - Rank: exact "Official Trailer" > official+trailer > Trailer(type)+name > Trailer(type) >
+ *     Teaser > name-only "trailer"; +bonus if description says "trailer"; clip/scene name penalties;
+ *     tie-break newest createdDate. Candidate must score > 0 to be selectable.
+ *   - Resolution: best mp4 capped at 1080p (trailers are throwaway hero backdrop, 4K isn't worth the
+ *     file size); >=720p floor -- sub-720p with no >=720p option returns null -> YouTube fallback.
+ *   - Empty/missing primaryVideos returns null -> YouTube.
  *
- * A fresh WebView is built and destroyed per resolve, always on the main thread. resolve() retries
- * up to LOAD_ATTEMPTS with a fresh WebView; each attempt is bounded by TITLE_BUDGET_MS.
+ * A fresh WebView is built and destroyed per resolve attempt, always on the main thread; resolve()
+ * retries up to LOAD_ATTEMPTS, each bounded by TITLE_BUDGET_MS. A main-frame net error trips a
+ * fail-fast flag so a dead load abandons early instead of polling to the ceiling.
  *
  * GPL-3.0: additive file; no upstream headers, licence text or attributions touched.
  */
@@ -49,25 +57,42 @@ class ImdbTrailerResolver @Inject constructor(
         const val REFERER = "https://www.imdb.com/"
         const val POLL_MS = 600L
         const val POLL_MAX = 30
-        const val MAX_CANDIDATES = 3
+        const val MAX_CANDIDATES = 4
         const val MAX_EVAL_MS = 4_000L
         const val TITLE_BUDGET_MS = 45_000L
         const val MAX_NULL_STREAK = 5
         const val LOAD_ATTEMPTS = 3
 
+        // Runtime gate thresholds (seconds).
+        const val RT_CLIP_MAX = 35        // <= this is a scene/clip (Breaking Bad "Say My Name" 31s)
+        const val RT_CORROBORATE_MAX = 74 // 36..74 keep only if corroborated (One Piece 62s official)
+        const val RT_LONGFORM_MIN = 241   // >= this is long-form (Lion King 597s quiz)
+
+        const val RES_FLOOR = 720         // never serve below this from IMDb
+        const val RES_CAP = 1080          // cap picks at 1080p even when 4K exists (The Last of Us)
+
         val VI_ID = Regex("""^vi\d{6,}$""")
-        val TRAILER_NEG = listOf("clip", "featurette", "interview", "behind", "scene", "spot", "promo", "recap")
+        val TRAILER_NEG = listOf("clip", "featurette", "interview", "behind", "scene", "spot", "promo", "recap", "quiz", "moment")
         val CDN_MP4 = Regex("""https://imdb-video\.media-imdb\.com/[^\s"'<>\\]+?\.mp4[^\s"'<>\\]*""")
     }
 
-    private data class Candidate(val vi: String, val type: String?, val name: String?, val score: Int)
+    private data class RawNode(
+        val type: String?, val name: String?, val runtime: Int?,
+        val description: String?, val createdDate: String?
+    )
+    private data class Candidate(
+        val vi: String, val type: String?, val name: String?, val runtime: Int?,
+        val description: String?, val createdDate: String?, val score: Int
+    )
     private data class Encoding(val def: String, val height: Int, val mp4: Boolean, val url: String)
     private data class VideoInfo(val contentType: String?, val name: String?, val encodings: List<Encoding>)
     private data class Page(val html: String, val nextData: String?)
+    private class NetFlag { @Volatile var tripped = false }
 
     /**
      * Resolve an IMDb trailer for [imdbId] (a `tt...` id). Returns a playback source pointing at a
-     * signed CloudFront mp4, or null if discovery failed / no playable trailer was found.
+     * signed CloudFront mp4 (>=720p, <=1080p), or null if discovery failed / no acceptable trailer
+     * was found (caller should fall back to YouTube on null).
      */
     suspend fun resolve(imdbId: String, type: String? = null): TrailerPlaybackSource? {
         if (!imdbId.startsWith("tt")) {
@@ -75,10 +100,11 @@ class ImdbTrailerResolver @Inject constructor(
             return null
         }
         repeat(LOAD_ATTEMPTS) { attempt ->
+            val flag = NetFlag()
             val result = withTimeoutOrNull(TITLE_BUDGET_MS) {
-                val wv = buildWebView() ?: return@withTimeoutOrNull null
+                val wv = buildWebView(flag) ?: return@withTimeoutOrNull null
                 try {
-                    resolveInternal(imdbId, wv)
+                    resolveInternal(imdbId, wv, flag)
                 } finally {
                     withContext(Dispatchers.Main) { runCatching { wv.stopLoading(); wv.destroy() } }
                 }
@@ -89,14 +115,14 @@ class ImdbTrailerResolver @Inject constructor(
                 delay(500)
             }
         }
-        Log.w(TAG, "[$imdbId] resolve exhausted $LOAD_ATTEMPTS attempts")
+        Log.w(TAG, "[$imdbId] resolve exhausted $LOAD_ATTEMPTS attempts -> null (YouTube fallback)")
         return null
     }
 
-    private suspend fun buildWebView(): WebView? = withContext(Dispatchers.Main) {
+    private suspend fun buildWebView(flag: NetFlag): WebView? = withContext(Dispatchers.Main) {
         try {
             val wv = WebView(appContext)
-            configureWebView(wv)
+            configureWebView(wv, flag)
             val w = 1280
             val h = 720
             wv.layoutParams = ViewGroup.LayoutParams(w, h)
@@ -114,30 +140,48 @@ class ImdbTrailerResolver @Inject constructor(
         }
     }
 
-    private suspend fun resolveInternal(imdbId: String, wv: WebView): TrailerPlaybackSource? {
+    private suspend fun resolveInternal(imdbId: String, wv: WebView, flag: NetFlag): TrailerPlaybackSource? {
         val titleUrl = "https://www.imdb.com/title/$imdbId/"
-        val titlePage = loadAndSettle(wv, titleUrl, imdbId) ?: run {
+        val titlePage = loadAndSettle(wv, titleUrl, imdbId, flag) ?: run {
             Log.w(TAG, "[$imdbId] title page never committed")
             return null
         }
         val candidates = withContext(Dispatchers.Default) { selectCandidates(titlePage.nextData, titlePage.html) }
         if (candidates.isEmpty()) {
-            Log.w(TAG, "[$imdbId] no candidate video nodes on title page")
+            Log.w(TAG, "[$imdbId] no eligible trailer candidates in primaryVideos -> null")
             return null
         }
+        Log.i(TAG, "[$imdbId] ranked candidates: " +
+            candidates.take(MAX_CANDIDATES).joinToString(" | ") { "${it.vi}(\"${it.name ?: "?"}\" rt=${it.runtime ?: "-"} s=${it.score})" })
+
         for (cand in candidates.take(MAX_CANDIDATES)) {
             val videoUrl = "https://www.imdb.com/video/${cand.vi}"
-            val videoPage = loadAndSettle(wv, videoUrl, cand.vi) ?: continue
+            val videoPage = loadAndSettle(wv, videoUrl, cand.vi, flag) ?: continue
             val vinfo = withContext(Dispatchers.Default) { parseVideo(videoPage.nextData, videoPage.html) } ?: continue
-            val best = vinfo.encodings.filter { it.mp4 }.maxByOrNull { it.height } ?: continue
-            Log.i(TAG, "[$imdbId] resolved -> ${cand.vi} def=${best.def} h=${best.height} type=${vinfo.contentType ?: cand.type ?: "?"}")
+            val best = pickBestMp4(vinfo.encodings) ?: continue
+            if (best.height in 1 until RES_FLOOR) {
+                Log.i(TAG, "[$imdbId] ${cand.vi} best mp4 ${best.height}p < ${RES_FLOOR}p floor -> skip candidate")
+                continue
+            }
+            Log.i(TAG, "[$imdbId] SELECTED ${cand.vi} \"${cand.name ?: "?"}\" rt=${cand.runtime ?: "-"} score=${cand.score} def=${best.def} h=${best.height}")
             return TrailerPlaybackSource(videoUrl = normalise(best.url))
         }
-        Log.w(TAG, "[$imdbId] no playable mp4 among ${minOf(MAX_CANDIDATES, candidates.size)} candidates")
+        Log.i(TAG, "[$imdbId] no candidate cleared the ${RES_FLOOR}p floor -> null (YouTube fallback)")
         return null
     }
 
-    private fun configureWebView(wv: WebView) {
+    /** Best progressive mp4 <= RES_CAP; if only >cap rungs exist take the smallest of those; height 0 (unknown) last. */
+    private fun pickBestMp4(encodings: List<Encoding>): Encoding? {
+        val mp4s = encodings.filter { it.mp4 }
+        if (mp4s.isEmpty()) return null
+        val capped = mp4s.filter { it.height in 1..RES_CAP }
+        if (capped.isNotEmpty()) return capped.maxByOrNull { it.height }
+        val overCap = mp4s.filter { it.height > RES_CAP }
+        if (overCap.isNotEmpty()) return overCap.minByOrNull { it.height }
+        return mp4s.maxByOrNull { it.height } // all unknown height
+    }
+
+    private fun configureWebView(wv: WebView, flag: NetFlag) {
         CookieManager.getInstance().apply {
             setAcceptCookie(true); setAcceptThirdPartyCookies(wv, true)
         }
@@ -149,10 +193,19 @@ class ImdbTrailerResolver @Inject constructor(
             loadsImagesAutomatically = false
             cacheMode = WebSettings.LOAD_NO_CACHE
         }
-        wv.webViewClient = WebViewClient()
+        wv.webViewClient = object : WebViewClient() {
+            override fun onReceivedError(view: WebView?, request: android.webkit.WebResourceRequest?, error: android.webkit.WebResourceError?) {
+                if (request?.isForMainFrame == true) {
+                    when (error?.errorCode) {
+                        ERROR_HOST_LOOKUP, ERROR_CONNECT, ERROR_TIMEOUT, ERROR_IO -> flag.tripped = true
+                    }
+                }
+            }
+        }
     }
 
-    private suspend fun loadAndSettle(wv: WebView, url: String, expectKey: String): Page? {
+    private suspend fun loadAndSettle(wv: WebView, url: String, expectKey: String, flag: NetFlag): Page? {
+        flag.tripped = false
         withContext(Dispatchers.Main) { wv.loadUrl("about:blank") }
         delay(200)
         withContext(Dispatchers.Main) { wv.loadUrl(url, mapOf("Referer" to REFERER)) }
@@ -161,6 +214,10 @@ class ImdbTrailerResolver @Inject constructor(
         var nullStreak = 0
         repeat(POLL_MAX) {
             delay(POLL_MS)
+            if (flag.tripped) {
+                Log.w(TAG, "main-frame net error during load ($url) -> abandon (fail-fast)")
+                return null
+            }
             val href = readHref(wv)
             if (href == null) {
                 if (++nullStreak >= MAX_NULL_STREAK) return null
@@ -209,21 +266,61 @@ class ImdbTrailerResolver @Inject constructor(
         return try { JSONArray("[$raw]").getString(0) } catch (e: Exception) { raw }
     }
 
+    // ---- selection ----
+
     private fun selectCandidates(nextData: String?, html: String): List<Candidate> {
-        val nodes = LinkedHashMap<String, Pair<String?, String?>>()
+        val nodes = LinkedHashMap<String, RawNode>()
         if (nextData != null) {
             try { collectVideoNodes(JSONObject(nextData), nodes) } catch (_: Exception) {}
         }
         if (nodes.isEmpty()) {
-            for (m in Regex("""vi\d{6,}""").findAll(html)) nodes.putIfAbsent(m.value, null to null)
+            // Fallback: bare id scrape when JSON parse fails. No metadata, so score neutrally by type-less rule.
+            for (m in Regex("""vi\d{6,}""").findAll(html)) nodes.putIfAbsent(m.value, RawNode(null, null, null, null, null))
         }
-        return nodes.entries.map { (vi, tn) ->
-            val (type, name) = tn
-            Candidate(vi, type, name, scoreCandidate(type, name))
-        }.sortedByDescending { it.score }
+        val scored = nodes.entries.mapNotNull { (vi, n) ->
+            val score = classify(n) ?: return@mapNotNull null
+            Candidate(vi, n.type, n.name, n.runtime, n.description, n.createdDate, score)
+        }
+        return scored.sortedWith(
+            compareByDescending<Candidate> { it.score }.thenByDescending { it.createdDate ?: "" }
+        )
     }
 
-    private fun collectVideoNodes(any: Any?, out: LinkedHashMap<String, Pair<String?, String?>>) {
+    /** Apply the tiered runtime gate + trailer ranking. Returns null = ineligible (gated out / non-trailer). */
+    private fun classify(n: RawNode): Int? {
+        val type = (n.type ?: "")
+        val name = (n.name ?: "").lowercase()
+        val desc = (n.description ?: "").lowercase()
+        val rt = n.runtime
+
+        // Runtime gate (only when runtime is present; missing runtime never rejects).
+        if (rt != null) {
+            if (rt <= RT_CLIP_MAX) return null
+            if (rt >= RT_LONGFORM_MIN) return null
+            if (rt in (RT_CLIP_MAX + 1)..RT_CORROBORATE_MAX) {
+                val corroborated = type.equals("Trailer", true) &&
+                    (name.contains("trailer") || name.contains("official") || desc.contains("trailer"))
+                if (!corroborated) return null
+            }
+        }
+
+        var s = 0
+        when {
+            name == "official trailer" || name.endsWith("official trailer") -> s += 200
+            name.contains("official") && name.contains("trailer") -> s += 180
+            type.equals("Trailer", true) && name.contains("trailer") -> s += 140
+            type.equals("Trailer", true) -> s += 120
+            type.equals("Teaser", true) || name.contains("teaser") -> s += 80
+            name.contains("trailer") -> s += 100
+        }
+        if (desc.contains("trailer")) s += 20
+        for (neg in TRAILER_NEG) if (name.contains(neg)) s -= 100
+
+        // Must retain a positive trailer signal to be selectable; pure clips (<=0) defer to YouTube.
+        return if (s > 0) s else null
+    }
+
+    private fun collectVideoNodes(any: Any?, out: LinkedHashMap<String, RawNode>) {
         when (any) {
             is JSONObject -> {
                 val id = any.optString("id", "")
@@ -231,25 +328,16 @@ class ImdbTrailerResolver @Inject constructor(
                     val type = deep(any, "contentType", "displayName", "value")
                         ?: deep(any, "contentType", "id") ?: any.optString("videoType", null)
                     val name = deep(any, "name", "value") ?: any.optString("name", null)
-                    out.putIfAbsent(id, type to name)
+                    val runtime = deepInt(any, "runtime", "value") ?: deepInt(any, "runtime", "seconds")
+                    val description = deep(any, "description", "value")
+                    val created = any.optString("createdDate", null)?.takeIf { it.isNotBlank() && it != "null" }
+                    out.putIfAbsent(id, RawNode(type, name, runtime, description, created))
                 }
                 val it = any.keys()
                 while (it.hasNext()) collectVideoNodes(any.opt(it.next()), out)
             }
             is JSONArray -> for (i in 0 until any.length()) collectVideoNodes(any.opt(i), out)
         }
-    }
-
-    private fun scoreCandidate(type: String?, name: String?): Int {
-        val hay = ((type ?: "") + " " + (name ?: "")).lowercase()
-        var s = 0
-        if (hay.isBlank()) return 0
-        if (hay.contains("official trailer")) s += 120
-        else if (hay.contains("trailer")) s += 100
-        else if (hay.contains("teaser")) s += 60
-        if (hay.contains("official")) s += 20
-        for (neg in TRAILER_NEG) if (hay.contains(neg)) s -= 100
-        return s
     }
 
     private fun parseVideo(nextData: String?, html: String): VideoInfo? {
@@ -290,13 +378,35 @@ class ImdbTrailerResolver @Inject constructor(
         return (cur as? String) ?: cur?.toString()?.takeIf { it != "null" }
     }
 
+    private fun deepInt(o: JSONObject?, vararg keys: String): Int? {
+        var cur: Any? = o
+        for (k in keys) { cur = (cur as? JSONObject)?.opt(k) ?: return null }
+        return when (cur) {
+            is Int -> cur
+            is Number -> cur.toInt()
+            is String -> cur.toIntOrNull()
+            else -> null
+        }
+    }
+
     private fun deepObj(o: JSONObject?, vararg keys: String): JSONObject? {
         var cur: Any? = o
         for (k in keys) { cur = (cur as? JSONObject)?.opt(k) ?: return null }
         return cur as? JSONObject
     }
 
-    private fun defHeight(def: String): Int =
-        Regex("""(\d{3,4})""").find(def)?.value?.toIntOrNull()
-            ?: when (def.uppercase()) { "SD" -> 480; "HD" -> 720; else -> 0 }
+    /** Height from an IMDb definition label, hardened against non-`NNNNp` variants (4K/UHD/HD/SD...). */
+    private fun defHeight(def: String): Int {
+        val d = def.trim().uppercase()
+        when {
+            d.contains("2160") || d == "4K" || d == "UHD" -> return 2160
+            d.contains("1440") || d == "2K" || d == "QHD" -> return 1440
+            d.contains("1080") || d == "FHD" || d == "FULLHD" || d == "FULL HD" -> return 1080
+            d.contains("720") || d == "HD" -> return 720
+            d.contains("480") || d == "SD" -> return 480
+            d.contains("360") -> return 360
+            d.contains("240") -> return 240
+        }
+        return Regex("""(\d{3,4})""").find(d)?.value?.toIntOrNull() ?: 0
+    }
 }
