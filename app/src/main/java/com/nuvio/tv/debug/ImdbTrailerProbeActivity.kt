@@ -42,6 +42,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
+import com.nuvio.tv.data.trailer.ImdbTrailerResolver
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
 
 /**
  * DEBUG / TEST-ONLY probe, v6. Not referenced anywhere in the app; reachable only via `am start`.
@@ -402,6 +407,13 @@ class ImdbTrailerProbeActivity : Activity() {
         Log.i(TAG, "=== v10 host=$currentHost ===")
         webView = buildHostedWebView(currentHost, root)
         configureWebView(webView)
+
+        val resolveTt = intent?.getStringExtra("resolve")?.trim()?.takeIf { it.startsWith("tt") }
+        if (resolveTt != null) {
+            Log.i(TAG, "=== Phase1a RESOLVE test: $resolveTt ===")
+            scope.launch { runResolveTest(resolveTt) }
+            return
+        }
 
         val mode = intent?.getStringExtra("mode")?.trim()?.lowercase()
             ?.takeIf { it == "ab" || it == "okhttp" || it == "webview" } ?: "ab"
@@ -913,12 +925,39 @@ class ImdbTrailerProbeActivity : Activity() {
         }
     }
 
+    private suspend fun runResolveTest(tt: String) {
+        val resolver = try {
+            EntryPointAccessors.fromApplication(applicationContext, ImdbResolverEntryPoint::class.java).imdbTrailerResolver()
+        } catch (e: Exception) {
+            Log.e(TAG, "RESOLVE could not obtain resolver singleton: ${e.message}")
+            return
+        }
+        val t0 = System.currentTimeMillis()
+        val src = resolver.resolve(tt, null)
+        val ms = System.currentTimeMillis() - t0
+        if (src == null) {
+            Log.w(TAG, "RESOLVE $tt -> null (${ms}ms)")
+            Log.i(TAG, "=== Phase1a RESOLVE DONE ===")
+            return
+        }
+        Log.i(TAG, "RESOLVE $tt -> ${trimUrl(src.videoUrl)} (${ms}ms)")
+        val code = withContext(Dispatchers.IO) { rangeProbe(src.videoUrl) }
+        Log.i(TAG, "RESOLVE $tt range=${code.first} ${code.second}")
+        Log.i(TAG, "=== Phase1a RESOLVE DONE ===")
+    }
+
     override fun onDestroy() {
         scope.coroutineContext[Job]?.cancel()
         runCatching { getSystemService(ConnectivityManager::class.java)?.bindProcessToNetwork(null) }
         runCatching { webView.stopLoading(); webView.destroy() }
         super.onDestroy()
     }
+}
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface ImdbResolverEntryPoint {
+    fun imdbTrailerResolver(): ImdbTrailerResolver
 }
 
 private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
