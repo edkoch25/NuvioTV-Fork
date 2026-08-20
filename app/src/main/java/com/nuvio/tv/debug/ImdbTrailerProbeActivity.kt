@@ -6,6 +6,7 @@ import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.util.Log
 import android.view.Gravity
+import android.view.View
 import android.view.SurfaceView
 import android.view.ViewGroup
 import android.webkit.CookieManager
@@ -120,6 +121,9 @@ class ImdbTrailerProbeActivity : Activity() {
     private lateinit var surface: SurfaceView
     @Volatile private var webViewDead = false
     @Volatile private var netErrorSeen = false
+
+    private var currentHost: String = "attached"
+    private var rootView: ViewGroup? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val http: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -387,13 +391,16 @@ class ImdbTrailerProbeActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        bindToEthernet()
+        val doBind = intent?.getStringExtra("bind")?.trim()?.lowercase() == "on"
+        if (doBind) bindToEthernet() else Log.i(TAG, "=== bind=off (process on system-default resolver) ===")
         val root = FrameLayout(this)
         setContentView(root)
         surface = SurfaceView(this)
         root.addView(surface, ViewGroup.LayoutParams(MATCH, MATCH))
-        webView = WebView(this)
-        root.addView(webView, FrameLayout.LayoutParams(1, 1).apply { gravity = Gravity.TOP or Gravity.START })
+        rootView = root
+        currentHost = intent?.getStringExtra("host")?.trim()?.lowercase()?.takeIf { it == "detached" } ?: "attached"
+        Log.i(TAG, "=== v10 host=$currentHost ===")
+        webView = buildHostedWebView(currentHost, root)
         configureWebView(webView)
 
         val mode = intent?.getStringExtra("mode")?.trim()?.lowercase()
@@ -413,6 +420,37 @@ class ImdbTrailerProbeActivity : Activity() {
 
         Log.i(TAG, "=== IMDb trailer probe v6 START — ${tts.size} titles — UA=$UA")
         scope.launch { when (mode) { "webview" -> runAll(tts); "okhttp" -> runOkhttpTts(tts); else -> runAb(tts) } }
+    }
+
+    // v10 (Phase 0): build the WebView per host config. attached = activity-window WebView
+    // (v6 baseline, proven to clear the awsWaf JS challenge). detached = app-context, windowless,
+    // measured WebView -- the config a context-less TrailerService singleton must use in production
+    // (no Activity, no overlay permission). Phase 0 measures whether detached still passes the WAF.
+    private fun buildHostedWebView(host: String, root: ViewGroup): WebView {
+        if (host == "detached") {
+            val wv = try {
+                WebView(applicationContext)
+            } catch (e: Exception) {
+                Log.e(TAG, "DETACHED app-context WebView construction threw: ${e.message} - fallback to activity ctx")
+                WebView(this)
+            }
+            val w = 1280
+            val h = 720
+            wv.layoutParams = ViewGroup.LayoutParams(w, h)
+            wv.measure(
+                View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY)
+            )
+            wv.layout(0, 0, w, h)
+            wv.visibility = View.VISIBLE
+            runCatching { wv.resumeTimers() }
+            Log.i(TAG, "built DETACHED app-context WebView ${w}x$h (windowless, not attached to any window)")
+            return wv
+        }
+        val wv = WebView(this)
+        root.addView(wv, FrameLayout.LayoutParams(1, 1).apply { gravity = Gravity.TOP or Gravity.START })
+        Log.i(TAG, "built ATTACHED activity WebView 1x1 (added to content view)")
+        return wv
     }
 
     private fun configureWebView(wv: WebView) {
@@ -452,14 +490,12 @@ class ImdbTrailerProbeActivity : Activity() {
 
     private suspend fun recreateWebView() = withContext(Dispatchers.Main) {
         runCatching {
-            val root = webView.parent as? ViewGroup
-            root?.removeView(webView)
+            (webView.parent as? ViewGroup)?.removeView(webView)
             runCatching { webView.destroy() }
-            webView = WebView(this@ImdbTrailerProbeActivity)
-            root?.addView(webView, FrameLayout.LayoutParams(1, 1).apply { gravity = Gravity.TOP or Gravity.START })
+            webView = buildHostedWebView(currentHost, rootView ?: FrameLayout(this@ImdbTrailerProbeActivity))
             configureWebView(webView)
             webViewDead = false
-            Log.i(TAG, "WebView recreated after wedge/render-gone")
+            Log.i(TAG, "WebView recreated (host=$currentHost) after wedge/render-gone")
         }
         Unit
     }
