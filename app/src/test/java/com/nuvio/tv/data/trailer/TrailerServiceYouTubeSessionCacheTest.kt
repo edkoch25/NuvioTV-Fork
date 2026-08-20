@@ -42,7 +42,7 @@ class TrailerServiceYouTubeSessionCacheTest {
         val tmdbService = mockk<TmdbService>()
         every { tmdbSettingsDataStore.settings } returns flowOf(TmdbSettings(language = "en"))
         every { tmdbService.apiKey() } returns "tmdb-key"
-        val service = TrailerService(trailerApi, tmdbApi, extractor, tmdbSettingsDataStore, tmdbService)
+        val service = TrailerService(trailerApi, tmdbApi, extractor, tmdbSettingsDataStore, tmdbService, mockk(relaxed = true), mockk(relaxed = true))
 
         val cached = TrailerPlaybackSource(
             videoUrl = "https://cdn.example/video.mp4",
@@ -72,7 +72,7 @@ class TrailerServiceYouTubeSessionCacheTest {
         val tmdbService = mockk<TmdbService>()
         every { tmdbSettingsDataStore.settings } returns flowOf(TmdbSettings(language = "en"))
         every { tmdbService.apiKey() } returns "tmdb-key"
-        val service = TrailerService(trailerApi, tmdbApi, extractor, tmdbSettingsDataStore, tmdbService)
+        val service = TrailerService(trailerApi, tmdbApi, extractor, tmdbSettingsDataStore, tmdbService, mockk(relaxed = true), mockk(relaxed = true))
 
         coEvery { extractor.extractPlaybackSource("https://www.youtube.com/watch?v=dQw4w9WgXcQ") } returnsMany listOf(
             null,

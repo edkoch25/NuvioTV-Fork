@@ -486,6 +486,20 @@ fun LayoutSettingsContent(
                     )
 
                     CompactToggleRow(
+                        title = "Use IMDb trailers",
+                        subtitle = "Play ad-free IMDb trailers when available (HD only); otherwise falls back to YouTube. IMDb discovery runs in the background.",
+                        checked = uiState.imdbTrailersEnabled,
+                        onToggle = {
+                            viewModel.onEvent(
+                                LayoutSettingsEvent.SetImdbTrailersEnabled(
+                                    !uiState.imdbTrailersEnabled
+                                )
+                            )
+                        },
+                        onFocused = { focusedSection = LayoutSettingsSection.DETAIL_PAGE }
+                    )
+
+                    CompactToggleRow(
                         title = stringResource(R.string.layout_prefer_external_meta),
                         subtitle = stringResource(R.string.layout_prefer_external_meta_sub),
                         checked = uiState.preferExternalMetaAddonDetail,

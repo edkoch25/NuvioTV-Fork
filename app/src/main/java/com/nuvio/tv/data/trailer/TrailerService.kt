@@ -6,6 +6,8 @@ import com.nuvio.tv.data.local.TmdbSettingsDataStore
 import com.nuvio.tv.data.remote.api.TmdbApi
 import com.nuvio.tv.data.remote.api.TmdbVideoResult
 import com.nuvio.tv.data.remote.api.TrailerApi
+import com.nuvio.tv.data.local.TrailerSettingsDataStore
+import com.nuvio.tv.data.local.TrailerSource
 import java.time.Clock
 import java.net.URI
 import java.time.Instant
@@ -29,6 +31,8 @@ class TrailerService(
     private val inAppYouTubeExtractor: InAppYouTubeExtractor,
     private val tmdbSettingsDataStore: TmdbSettingsDataStore,
     private val tmdbService: TmdbService,
+    private val imdbTrailerResolver: ImdbTrailerResolver,
+    private val trailerSettingsDataStore: TrailerSettingsDataStore,
     private val clock: Clock
 ) {
     @Inject
@@ -37,13 +41,17 @@ class TrailerService(
         tmdbApi: TmdbApi,
         inAppYouTubeExtractor: InAppYouTubeExtractor,
         tmdbSettingsDataStore: TmdbSettingsDataStore,
-        tmdbService: TmdbService
+        tmdbService: TmdbService,
+        imdbTrailerResolver: ImdbTrailerResolver,
+        trailerSettingsDataStore: TrailerSettingsDataStore
     ) : this(
         trailerApi = trailerApi,
         tmdbApi = tmdbApi,
         inAppYouTubeExtractor = inAppYouTubeExtractor,
         tmdbSettingsDataStore = tmdbSettingsDataStore,
         tmdbService = tmdbService,
+        imdbTrailerResolver = imdbTrailerResolver,
+        trailerSettingsDataStore = trailerSettingsDataStore,
         clock = Clock.systemUTC()
     )
 
@@ -76,7 +84,13 @@ class TrailerService(
         }
         val tmdbLanguage = normalizeTmdbTrailerLanguage(tmdbSettings.language)
 
-        val cacheKey = "$title|$year|$tmdbId|$type"
+        // Read the trailer-source setting BEFORE building the cache key and fold it in, so
+        // toggling YouTube<->IMDb takes effect immediately (each source has its own cache
+        // namespace) instead of serving this session's stale other-source entries.
+        val trailerSettings = runCatching { trailerSettingsDataStore.settings.first() }.getOrNull()
+        val trailerSource = trailerSettings?.source ?: TrailerSource.YOUTUBE
+
+        val cacheKey = "$title|$year|$tmdbId|$type|$trailerSource"
 
         cache[cacheKey]?.let { cached ->
             val hit = cached !== NEGATIVE_CACHE
@@ -86,6 +100,22 @@ class TrailerService(
 
         try {
             Log.d(TAG, "Searching trailer: title=$title, year=$year, tmdbId=$tmdbId, type=$type")
+
+            // IMDb-first path (opt-in via Settings > Layout). On success, cache + return;
+            // on null (no trailer >=720p -- SD-only or scene-only title) fall through to the
+            // existing TMDB->YouTube path below. This is the null-means-fallthrough contract the
+            // hero/detail callers already expect (they treat a returned source as cacheable).
+            if (trailerSource == TrailerSource.IMDB) {
+                val imdbId = tmdbId?.toIntOrNull()?.let { runCatching { tmdbService.tmdbToImdb(it, type ?: "movie") }.getOrNull() }
+                if (imdbId != null) {
+                    val imdbSource = imdbTrailerResolver.resolve(imdbId, type)
+                    if (imdbSource != null) {
+                        cache[cacheKey] = imdbSource
+                        return@withContext imdbSource
+                    }
+                    Log.d(TAG, "IMDb resolve returned null for $imdbId; falling through to YouTube")
+                }
+            }
 
             // TMDB-first path. Gated on `useTrailers` above so the
             // user's toggle in TMDB enrichment settings is honored.
