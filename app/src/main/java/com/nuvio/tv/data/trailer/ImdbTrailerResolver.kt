@@ -102,7 +102,9 @@ class ImdbTrailerResolver @Inject constructor(
         repeat(LOAD_ATTEMPTS) { attempt ->
             val flag = NetFlag()
             val result = withTimeoutOrNull(TITLE_BUDGET_MS) {
+                val tBuild0 = android.os.SystemClock.elapsedRealtime()
                 val wv = buildWebView(flag) ?: return@withTimeoutOrNull null
+                Log.i(TAG, "[$imdbId] IMDB_TIMING buildWebView=${android.os.SystemClock.elapsedRealtime() - tBuild0}ms")
                 try {
                     resolveInternal(imdbId, wv, flag)
                 } finally {
@@ -142,11 +144,16 @@ class ImdbTrailerResolver @Inject constructor(
 
     private suspend fun resolveInternal(imdbId: String, wv: WebView, flag: NetFlag): TrailerPlaybackSource? {
         val titleUrl = "https://www.imdb.com/title/$imdbId/"
-        val titlePage = loadAndSettle(wv, titleUrl, imdbId, flag) ?: run {
+        val tTitle0 = android.os.SystemClock.elapsedRealtime()
+        val titlePage = loadAndSettle(wv, titleUrl, imdbId, flag)
+        Log.i(TAG, "[$imdbId] IMDB_TIMING titlePage=${android.os.SystemClock.elapsedRealtime() - tTitle0}ms htmlLen=${titlePage?.html?.length ?: -1}")
+        if (titlePage == null) {
             Log.w(TAG, "[$imdbId] title page never committed")
             return null
         }
+        val tSel0 = android.os.SystemClock.elapsedRealtime()
         val candidates = withContext(Dispatchers.Default) { selectCandidates(titlePage.nextData, titlePage.html) }
+        Log.i(TAG, "[$imdbId] IMDB_TIMING selectCandidates=${android.os.SystemClock.elapsedRealtime() - tSel0}ms n=${candidates.size}")
         if (candidates.isEmpty()) {
             Log.w(TAG, "[$imdbId] no eligible trailer candidates in primaryVideos -> null")
             return null
@@ -156,7 +163,10 @@ class ImdbTrailerResolver @Inject constructor(
 
         for (cand in candidates.take(MAX_CANDIDATES)) {
             val videoUrl = "https://www.imdb.com/video/${cand.vi}"
-            val videoPage = loadAndSettle(wv, videoUrl, cand.vi, flag) ?: continue
+            val tVid0 = android.os.SystemClock.elapsedRealtime()
+            val videoPage = loadAndSettle(wv, videoUrl, cand.vi, flag)
+            Log.i(TAG, "[$imdbId] IMDB_TIMING videoPage[${cand.vi}]=${android.os.SystemClock.elapsedRealtime() - tVid0}ms htmlLen=${videoPage?.html?.length ?: -1}")
+            if (videoPage == null) continue
             val vinfo = withContext(Dispatchers.Default) { parseVideo(videoPage.nextData, videoPage.html) } ?: continue
             val best = pickBestMp4(vinfo.encodings) ?: continue
             if (best.height < RES_FLOOR) {
