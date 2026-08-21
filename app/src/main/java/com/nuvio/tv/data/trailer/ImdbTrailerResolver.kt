@@ -17,6 +17,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
@@ -35,10 +36,17 @@ import kotlin.coroutines.resume
  *
  * Fast path: the title page usually embeds the hero video's full playbackURLs (mp4 rungs + definition),
  * so we resolve with a single page load. Fallback: if only HLS/AUTO is inline (no acceptable mp4), we
- * load the hero's /video/vi... page and parse that. A fresh WebView is built and destroyed per resolve
- * attempt, always on the main thread; resolve() retries up to LOAD_ATTEMPTS, each bounded by
- * TITLE_BUDGET_MS. A main-frame net error, or a stalled (no-progress) load, fails fast rather than
- * polling to the ceiling.
+ * load the hero's /video/vi... page and parse that.
+ *
+ * Speed (Phase 2b): the settle loop polls a small in-WebView probe that reports only whether the target
+ * data (__NEXT_DATA__ with playbackURLs / a CDN mp4) has arrived -- it does NOT marshal the ~1.4 MB DOM
+ * across the JS bridge each poll (only once, on settle). A shouldInterceptRequest blocks static
+ * sub-resources (images/CSS/fonts/media) by file extension only -- never scripts, XHR or the document,
+ * so the WAF challenge and hydration are untouched -- to cut download contention.
+ *
+ * A fresh WebView is built and destroyed per resolve attempt, always on the main thread; resolve()
+ * retries up to LOAD_ATTEMPTS, each bounded by TITLE_BUDGET_MS. A main-frame net error, or a stalled
+ * (no-progress) load, fails fast rather than polling to the ceiling.
  *
  * GPL-3.0: additive file; no upstream headers, licence text or attributions touched.
  */
@@ -52,20 +60,26 @@ class ImdbTrailerResolver @Inject constructor(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
         const val REFERER = "https://www.imdb.com/"
-        const val POLL_MS = 600L
-        const val POLL_MAX = 30
-        const val DEAD_STALL_POLLS = 12   // abandon a load showing no progress for this many polls (dead/blocked page)
+        const val POLL_MS = 300L           // finer cadence (cheap probe, not full-DOM marshalling)
+        const val POLL_MAX = 60            // 60 * 300ms = ~18s ceiling (unchanged wall-clock)
+        const val DEAD_STALL_POLLS = 24    // 24 * 300ms = ~7s of no progress before dead-fast bail
         const val MAX_EVAL_MS = 4_000L
         const val TITLE_BUDGET_MS = 45_000L
-        const val MAX_NULL_STREAK = 5
+        const val MAX_NULL_STREAK = 10     // scaled to 300ms polls (~3s of null probes)
         const val LOAD_ATTEMPTS = 3
 
-        const val RES_FLOOR = 720         // never serve below this from IMDb
-        const val RES_CAP = 1080          // cap picks at 1080p even when 4K exists (throwaway hero backdrop)
+        const val RES_FLOOR = 720          // never serve below this from IMDb
+        const val RES_CAP = 1080           // cap picks at 1080p even when 4K exists (throwaway hero backdrop)
 
         val VI_ID = Regex("""^vi\d{6,}$""")
         val CDN_MP4 = Regex("""https://imdb-video\.media-imdb\.com/[^\s"'<>\\]+?\.mp4[^\s"'<>\\]*""")
+
+        // Static sub-resources we never need for __NEXT_DATA__. Extension-only: never matches scripts,
+        // XHR/fetch (extensionless), the main document, or the awsWaf challenge.
+        val BLOCK_EXT = Regex("""\.(?:css|woff2?|ttf|otf|eot|jpe?g|png|gif|webp|bmp|ico|svg|mp4|m3u8|ts|mp3|aac)(?:[?#].*)?$""", RegexOption.IGNORE_CASE)
     }
+
+    private val blockedAssets = AtomicInteger(0)
 
     private data class Encoding(val def: String, val height: Int, val mp4: Boolean, val url: String)
     private data class VideoInfo(val contentType: String?, val name: String?, val encodings: List<Encoding>)
@@ -131,7 +145,7 @@ class ImdbTrailerResolver @Inject constructor(
         val titleUrl = "https://www.imdb.com/title/$imdbId/"
         val tTitle0 = android.os.SystemClock.elapsedRealtime()
         val titlePage = loadAndSettle(wv, titleUrl, imdbId, flag)
-        Log.i(TAG, "[$imdbId] IMDB_TIMING titlePage=${android.os.SystemClock.elapsedRealtime() - tTitle0}ms htmlLen=${titlePage?.html?.length ?: -1}")
+        Log.i(TAG, "[$imdbId] IMDB_TIMING titlePage=${android.os.SystemClock.elapsedRealtime() - tTitle0}ms htmlLen=${titlePage?.html?.length ?: -1} blocked=${blockedAssets.get()}")
         if (titlePage == null) {
             Log.w(TAG, "[$imdbId] title page never committed")
             return null
@@ -157,7 +171,7 @@ class ImdbTrailerResolver @Inject constructor(
         val videoUrl = "https://www.imdb.com/video/${hero.vi}"
         val tVid0 = android.os.SystemClock.elapsedRealtime()
         val videoPage = loadAndSettle(wv, videoUrl, hero.vi, flag)
-        Log.i(TAG, "[$imdbId] IMDB_TIMING videoPage[${hero.vi}]=${android.os.SystemClock.elapsedRealtime() - tVid0}ms htmlLen=${videoPage?.html?.length ?: -1}")
+        Log.i(TAG, "[$imdbId] IMDB_TIMING videoPage[${hero.vi}]=${android.os.SystemClock.elapsedRealtime() - tVid0}ms htmlLen=${videoPage?.html?.length ?: -1} blocked=${blockedAssets.get()}")
         if (videoPage == null) {
             Log.w(TAG, "[$imdbId] hero video page never committed -> null (YouTube fallback)")
             return null
@@ -287,6 +301,17 @@ class ImdbTrailerResolver @Inject constructor(
             cacheMode = WebSettings.LOAD_NO_CACHE
         }
         wv.webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(view: WebView?, request: android.webkit.WebResourceRequest?): android.webkit.WebResourceResponse? {
+                // Never intercept the main document; block only static assets by extension.
+                if (request?.isForMainFrame == true) return null
+                val u = request?.url?.toString() ?: return null
+                if (BLOCK_EXT.containsMatchIn(u)) {
+                    blockedAssets.incrementAndGet()
+                    return android.webkit.WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
+                }
+                return null
+            }
+
             override fun onReceivedError(view: WebView?, request: android.webkit.WebResourceRequest?, error: android.webkit.WebResourceError?) {
                 if (request?.isForMainFrame == true) {
                     when (error?.errorCode) {
@@ -297,13 +322,19 @@ class ImdbTrailerResolver @Inject constructor(
         }
     }
 
+    /**
+     * Load [url] and settle when the target data has arrived. The per-poll cost is a tiny in-WebView
+     * probe (returns a short status string, not the DOM); the ~1.4 MB DOM is marshalled once, on settle.
+     * Progress is tracked via a monotonic signal (navigation -> __NEXT_DATA__ present -> data growing);
+     * no progress for DEAD_STALL_POLLS polls -> dead-fast bail.
+     */
     private suspend fun loadAndSettle(wv: WebView, url: String, expectKey: String, flag: NetFlag): Page? {
         flag.tripped = false
+        blockedAssets.set(0)
         withContext(Dispatchers.Main) { wv.loadUrl("about:blank") }
         delay(200)
         withContext(Dispatchers.Main) { wv.loadUrl(url, mapOf("Referer" to REFERER)) }
-        var lastLen = -1
-        var stable = 0
+        var lastSignal = -1L
         var nullStreak = 0
         var lastProgressPoll = 0
         repeat(POLL_MAX) { pollIndex ->
@@ -312,51 +343,61 @@ class ImdbTrailerResolver @Inject constructor(
                 Log.w(TAG, "main-frame net error during load ($url) -> abandon (fail-fast)")
                 return null
             }
-            val href = readHref(wv)
-            if (href == null) {
+            val status = probe(wv, expectKey)
+            if (status == null || status == "err") {
                 if (++nullStreak >= MAX_NULL_STREAK) return null
                 if (pollIndex - lastProgressPoll >= DEAD_STALL_POLLS) {
-                    Log.w(TAG, "[$expectKey] load stalled (no navigation) after ${pollIndex + 1} polls -> abandon (dead-fast)")
+                    Log.w(TAG, "[$expectKey] load stalled (probe null) after ${pollIndex + 1} polls -> abandon (dead-fast)")
                     return null
                 }
                 return@repeat
             }
             nullStreak = 0
-            if (!href.contains(expectKey)) {
-                if (pollIndex - lastProgressPoll >= DEAD_STALL_POLLS) {
-                    Log.w(TAG, "[$expectKey] load stalled (no navigation) after ${pollIndex + 1} polls -> abandon (dead-fast)")
-                    return null
-                }
-                return@repeat
+            if (status.startsWith("ready:")) {
+                return Page(readOuterHtml(wv) ?: "", readNextData(wv))
             }
-            val html = readOuterHtml(wv) ?: return@repeat
-            val hasCdn = html.contains("imdb-video.media-imdb.com")
-            val hasNext = html.contains("__NEXT_DATA__") || html.contains("videoPlaybackData") || html.contains("primaryVideos")
-            if (hasCdn || (hasNext && html.length == lastLen)) {
-                return Page(html, readNextData(wv))
+            // Monotonic progress signal: nav(0) < nonext(1) < wait+len(2+). Any forward move = progress.
+            val signal = when {
+                status == "nav" -> 0L
+                status == "nonext" -> 1L
+                status.startsWith("wait:") -> 2L + (status.substringAfter(':').toLongOrNull() ?: 0L)
+                else -> 0L
             }
-            // Progress = data markers present, or HTML still growing toward the real page.
-            if (hasNext || html.length != lastLen) {
+            if (signal > lastSignal) {
+                lastSignal = signal
                 lastProgressPoll = pollIndex
             }
-            if (hasNext) {
-                if (html.length == lastLen) stable++ else stable = 0
-                lastLen = html.length
-                if (stable >= 2) return Page(html, readNextData(wv))
-            } else {
-                lastLen = html.length
-            }
-            // Dead-load early bail: no progress toward real content for DEAD_STALL_POLLS polls.
             if (pollIndex - lastProgressPoll >= DEAD_STALL_POLLS) {
                 Log.w(TAG, "[$expectKey] load stalled (no data progress) after ${pollIndex + 1} polls -> abandon (dead-fast)")
                 return null
             }
         }
-        val href = readHref(wv) ?: ""
-        return if (href.contains(expectKey)) Page(readOuterHtml(wv) ?: "", readNextData(wv)) else null
+        val s = probe(wv, expectKey)
+        return if (s != null && (s.startsWith("wait:") || s.startsWith("ready:"))) {
+            Page(readOuterHtml(wv) ?: "", readNextData(wv))
+        } else null
     }
 
-    private suspend fun readHref(wv: WebView): String? = evalJs(wv, "(function(){return location.href})()")
+    /**
+     * Small in-WebView probe. Returns a short status string (never the DOM):
+     *   "nav"       navigation hasn't reached the expected URL yet
+     *   "nonext"    navigated, but __NEXT_DATA__ not in the DOM yet
+     *   "wait:N"    __NEXT_DATA__ present (length N), target data not yet
+     *   "ready:N"   target data (playbackURLs / CDN mp4) present -> settle
+     *   "err"/null  probe failed
+     */
+    private suspend fun probe(wv: WebView, expectKey: String): String? = evalJs(
+        wv,
+        "(function(){try{" +
+            "if(location.href.indexOf('$expectKey')<0)return 'nav';" +
+            "var e=document.getElementById('__NEXT_DATA__');" +
+            "if(!e)return 'nonext';" +
+            "var t=e.textContent||'';" +
+            "if(t.indexOf('imdb-video.media-imdb.com')>=0||t.indexOf('\"playbackURLs\"')>=0)return 'ready:'+t.length;" +
+            "return 'wait:'+t.length;" +
+            "}catch(x){return 'err';}})()"
+    )
+
     private suspend fun readOuterHtml(wv: WebView): String? = evalJs(wv, "(function(){return document.documentElement.outerHTML})()")
     private suspend fun readNextData(wv: WebView): String? =
         evalJs(wv, "(function(){var e=document.getElementById('__NEXT_DATA__');return e?e.textContent:''})()")
