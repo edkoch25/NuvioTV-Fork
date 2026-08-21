@@ -57,6 +57,7 @@ class ImdbTrailerResolver @Inject constructor(
         const val REFERER = "https://www.imdb.com/"
         const val POLL_MS = 600L
         const val POLL_MAX = 30
+        const val DEAD_STALL_POLLS = 12   // abandon a load showing no progress for this many polls (dead/blocked page)
         const val MAX_CANDIDATES = 4
         const val MAX_EVAL_MS = 4_000L
         const val TITLE_BUDGET_MS = 45_000L
@@ -223,7 +224,8 @@ class ImdbTrailerResolver @Inject constructor(
         var lastLen = -1
         var stable = 0
         var nullStreak = 0
-        repeat(POLL_MAX) {
+        var lastProgressPoll = 0
+        repeat(POLL_MAX) { pollIndex ->
             delay(POLL_MS)
             if (flag.tripped) {
                 Log.w(TAG, "main-frame net error during load ($url) -> abandon (fail-fast)")
@@ -232,15 +234,29 @@ class ImdbTrailerResolver @Inject constructor(
             val href = readHref(wv)
             if (href == null) {
                 if (++nullStreak >= MAX_NULL_STREAK) return null
+                if (pollIndex - lastProgressPoll >= DEAD_STALL_POLLS) {
+                    Log.w(TAG, "[$expectKey] load stalled (no navigation) after ${pollIndex + 1} polls -> abandon (dead-fast)")
+                    return null
+                }
                 return@repeat
             }
             nullStreak = 0
-            if (!href.contains(expectKey)) return@repeat
+            if (!href.contains(expectKey)) {
+                if (pollIndex - lastProgressPoll >= DEAD_STALL_POLLS) {
+                    Log.w(TAG, "[$expectKey] load stalled (no navigation) after ${pollIndex + 1} polls -> abandon (dead-fast)")
+                    return null
+                }
+                return@repeat
+            }
             val html = readOuterHtml(wv) ?: return@repeat
             val hasCdn = html.contains("imdb-video.media-imdb.com")
             val hasNext = html.contains("__NEXT_DATA__") || html.contains("videoPlaybackData") || html.contains("primaryVideos")
             if (hasCdn || (hasNext && html.length == lastLen)) {
                 return Page(html, readNextData(wv))
+            }
+            // Progress = data markers present, or HTML still growing toward the real page.
+            if (hasNext || html.length != lastLen) {
+                lastProgressPoll = pollIndex
             }
             if (hasNext) {
                 if (html.length == lastLen) stable++ else stable = 0
@@ -248,6 +264,11 @@ class ImdbTrailerResolver @Inject constructor(
                 if (stable >= 2) return Page(html, readNextData(wv))
             } else {
                 lastLen = html.length
+            }
+            // Dead-load early bail: no progress toward real content for DEAD_STALL_POLLS polls.
+            if (pollIndex - lastProgressPoll >= DEAD_STALL_POLLS) {
+                Log.w(TAG, "[$expectKey] load stalled (no data progress) after ${pollIndex + 1} polls -> abandon (dead-fast)")
+                return null
             }
         }
         val href = readHref(wv) ?: ""
