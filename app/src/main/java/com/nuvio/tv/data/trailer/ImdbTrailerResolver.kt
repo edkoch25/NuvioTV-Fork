@@ -23,25 +23,22 @@ import kotlin.coroutines.resume
 
 /**
  * IMDb trailer discovery. Owns a windowless, application-context WebView (proven in the Phase 0 host
- * probe to clear IMDb's awsWaf JS challenge) and scrapes the title page's primaryVideos, picks the
- * marquee trailer, resolves its video page and returns the best progressive mp4 as a
- * [TrailerPlaybackSource]. The WebView does the whole scrape; only the signed CloudFront mp4 URL
- * (NOT WAF-walled) is handed off, streaming over plain HTTP in ExoPlayer.
+ * probe to clear IMDb's awsWaf JS challenge) and reads the title page's primaryVideos.edges[0] -- the
+ * SAME video IMDb features in the title-page hero "Play trailer" slot -- returning its best progressive
+ * mp4 as a [TrailerPlaybackSource].
  *
- * Phase 1b selection, derived from cross-title sampling (1968..2023, film/series/anime/foreign,
- * SD..4K):
- *   - Tiered runtime gate: reject <=35s (scene/clip), 36-74s keep only if corroborated as a trailer,
- *     75-240s normal window, reject >240s (long-form). Missing runtime never rejects.
- *   - Rank: exact "Official Trailer" > official+trailer > Trailer(type)+name > Trailer(type) >
- *     Teaser > name-only "trailer"; +bonus if description says "trailer"; clip/scene name penalties;
- *     tie-break newest createdDate. Candidate must score > 0 to be selectable.
- *   - Resolution: best mp4 capped at 1080p (trailers are throwaway hero backdrop, 4K isn't worth the
- *     file size); >=720p floor -- sub-720p with no >=720p option returns null -> YouTube fallback.
- *   - Empty/missing primaryVideos returns null -> YouTube.
+ * Design (mirror-IMDb, Phase 2): we do NOT rank, score or runtime-gate candidates. We take exactly the
+ * one video IMDb chose for the hero (primaryVideos.edges[0]), so playback matches what a user sees on
+ * the IMDb title page -- including the cases where IMDb itself features a short clip or a "featurette".
+ * Resolution is capped at 1080p (throwaway hero backdrop) with a >=720p floor: a sub-720p hero returns
+ * null so the caller falls back to YouTube.
  *
- * A fresh WebView is built and destroyed per resolve attempt, always on the main thread; resolve()
- * retries up to LOAD_ATTEMPTS, each bounded by TITLE_BUDGET_MS. A main-frame net error trips a
- * fail-fast flag so a dead load abandons early instead of polling to the ceiling.
+ * Fast path: the title page usually embeds the hero video's full playbackURLs (mp4 rungs + definition),
+ * so we resolve with a single page load. Fallback: if only HLS/AUTO is inline (no acceptable mp4), we
+ * load the hero's /video/vi... page and parse that. A fresh WebView is built and destroyed per resolve
+ * attempt, always on the main thread; resolve() retries up to LOAD_ATTEMPTS, each bounded by
+ * TITLE_BUDGET_MS. A main-frame net error, or a stalled (no-progress) load, fails fast rather than
+ * polling to the ceiling.
  *
  * GPL-3.0: additive file; no upstream headers, licence text or attributions touched.
  */
@@ -58,42 +55,29 @@ class ImdbTrailerResolver @Inject constructor(
         const val POLL_MS = 600L
         const val POLL_MAX = 30
         const val DEAD_STALL_POLLS = 12   // abandon a load showing no progress for this many polls (dead/blocked page)
-        const val MAX_CANDIDATES = 4
         const val MAX_EVAL_MS = 4_000L
         const val TITLE_BUDGET_MS = 45_000L
         const val MAX_NULL_STREAK = 5
         const val LOAD_ATTEMPTS = 3
 
-        // Runtime gate thresholds (seconds).
-        const val RT_CLIP_MAX = 35        // <= this is a scene/clip (Breaking Bad "Say My Name" 31s)
-        const val RT_CORROBORATE_MAX = 74 // 36..74 keep only if corroborated (One Piece 62s official)
-        const val RT_LONGFORM_MIN = 241   // >= this is long-form (Lion King 597s quiz)
-
         const val RES_FLOOR = 720         // never serve below this from IMDb
-        const val RES_CAP = 1080          // cap picks at 1080p even when 4K exists (The Last of Us)
+        const val RES_CAP = 1080          // cap picks at 1080p even when 4K exists (throwaway hero backdrop)
 
         val VI_ID = Regex("""^vi\d{6,}$""")
-        val TRAILER_NEG = listOf("clip", "featurette", "interview", "behind", "scene", "spot", "promo", "recap", "quiz", "moment")
         val CDN_MP4 = Regex("""https://imdb-video\.media-imdb\.com/[^\s"'<>\\]+?\.mp4[^\s"'<>\\]*""")
     }
 
-    private data class RawNode(
-        val type: String?, val name: String?, val runtime: Int?,
-        val description: String?, val createdDate: String?
-    )
-    private data class Candidate(
-        val vi: String, val type: String?, val name: String?, val runtime: Int?,
-        val description: String?, val createdDate: String?, val score: Int, val order: Int
-    )
     private data class Encoding(val def: String, val height: Int, val mp4: Boolean, val url: String)
     private data class VideoInfo(val contentType: String?, val name: String?, val encodings: List<Encoding>)
+    private data class Hero(val vi: String, val name: String?, val runtime: Int?, val encodings: List<Encoding>)
     private data class Page(val html: String, val nextData: String?)
     private class NetFlag { @Volatile var tripped = false }
 
     /**
-     * Resolve an IMDb trailer for [imdbId] (a `tt...` id). Returns a playback source pointing at a
-     * signed CloudFront mp4 (>=720p, <=1080p), or null if discovery failed / no acceptable trailer
-     * was found (caller should fall back to YouTube on null).
+     * Resolve the IMDb hero trailer for [imdbId] (a `tt...` id). Returns a playback source pointing at a
+     * signed CloudFront mp4 (>=720p, <=1080p), or null if discovery failed / the hero video has no
+     * acceptable mp4 (caller should fall back to YouTube on null). [type] is unused (kept for source
+     * compatibility) -- mirror-IMDb selects the hero regardless of title type.
      */
     suspend fun resolve(imdbId: String, type: String? = null): TrailerPlaybackSource? {
         if (!imdbId.startsWith("tt")) {
@@ -152,34 +136,129 @@ class ImdbTrailerResolver @Inject constructor(
             Log.w(TAG, "[$imdbId] title page never committed")
             return null
         }
-        val tSel0 = android.os.SystemClock.elapsedRealtime()
-        val candidates = withContext(Dispatchers.Default) { selectCandidates(titlePage.nextData, titlePage.html) }
-        Log.i(TAG, "[$imdbId] IMDB_TIMING selectCandidates=${android.os.SystemClock.elapsedRealtime() - tSel0}ms n=${candidates.size}")
-        if (candidates.isEmpty()) {
-            Log.w(TAG, "[$imdbId] no eligible trailer candidates in primaryVideos -> null")
+
+        // Mirror IMDb: the hero "Play trailer" video is primaryVideos.edges[0]. Take exactly that node
+        // -- no ranking, scoring or runtime gate.
+        val hero = withContext(Dispatchers.Default) { readHeroVideo(titlePage.nextData) }
+        if (hero == null) {
+            Log.w(TAG, "[$imdbId] no primaryVideos edge[0] hero node -> null (YouTube fallback)")
             return null
         }
-        Log.i(TAG, "[$imdbId] ranked candidates: " +
-            candidates.take(MAX_CANDIDATES).joinToString(" | ") { "${it.vi}(\"${it.name ?: "?"}\" rt=${it.runtime ?: "-"} s=${it.score})" })
+        Log.i(TAG, "[$imdbId] hero video ${hero.vi} \"${hero.name ?: "?"}\" rt=${hero.runtime ?: "-"} inlineEncs=${hero.encodings.size}")
 
-        for (cand in candidates.take(MAX_CANDIDATES)) {
-            val videoUrl = "https://www.imdb.com/video/${cand.vi}"
-            val tVid0 = android.os.SystemClock.elapsedRealtime()
-            val videoPage = loadAndSettle(wv, videoUrl, cand.vi, flag)
-            Log.i(TAG, "[$imdbId] IMDB_TIMING videoPage[${cand.vi}]=${android.os.SystemClock.elapsedRealtime() - tVid0}ms htmlLen=${videoPage?.html?.length ?: -1}")
-            if (videoPage == null) continue
-            val vinfo = withContext(Dispatchers.Default) { parseVideo(videoPage.nextData, videoPage.html) } ?: continue
-            val best = pickBestMp4(vinfo.encodings) ?: continue
-            if (best.height < RES_FLOOR) {
-                val why = if (best.height <= 0) "unverified-res(${best.def})" else "${best.height}p"
-                Log.i(TAG, "[$imdbId] ${cand.vi} best mp4 $why < ${RES_FLOOR}p floor -> skip candidate")
-                continue
-            }
-            Log.i(TAG, "[$imdbId] SELECTED ${cand.vi} \"${cand.name ?: "?"}\" rt=${cand.runtime ?: "-"} score=${cand.score} def=${best.def} h=${best.height}")
-            return TrailerPlaybackSource(videoUrl = normalise(best.url))
+        // Fast path: the title page usually embeds the hero's mp4 rungs -> resolve with one page load.
+        val inlineBest = pickBestMp4(hero.encodings)
+        if (inlineBest != null && inlineBest.height >= RES_FLOOR) {
+            Log.i(TAG, "[$imdbId] SELECTED ${hero.vi} (title-page) def=${inlineBest.def} h=${inlineBest.height}")
+            return TrailerPlaybackSource(videoUrl = normalise(inlineBest.url))
         }
-        Log.i(TAG, "[$imdbId] no candidate cleared the ${RES_FLOOR}p floor -> null (YouTube fallback)")
+
+        // Fallback: load only the hero's video page and parse its playback data (mp4 rung not inline).
+        val videoUrl = "https://www.imdb.com/video/${hero.vi}"
+        val tVid0 = android.os.SystemClock.elapsedRealtime()
+        val videoPage = loadAndSettle(wv, videoUrl, hero.vi, flag)
+        Log.i(TAG, "[$imdbId] IMDB_TIMING videoPage[${hero.vi}]=${android.os.SystemClock.elapsedRealtime() - tVid0}ms htmlLen=${videoPage?.html?.length ?: -1}")
+        if (videoPage == null) {
+            Log.w(TAG, "[$imdbId] hero video page never committed -> null (YouTube fallback)")
+            return null
+        }
+        val vinfo = withContext(Dispatchers.Default) { parseVideo(videoPage.nextData, videoPage.html) }
+        val best = vinfo?.let { pickBestMp4(it.encodings) }
+        if (best == null || best.height < RES_FLOOR) {
+            val why = when {
+                best == null -> "no mp4"
+                best.height <= 0 -> "unverified-res(${best.def})"
+                else -> "${best.height}p"
+            }
+            Log.i(TAG, "[$imdbId] hero ${hero.vi} best mp4 $why < ${RES_FLOOR}p floor -> null (YouTube fallback)")
+            return null
+        }
+        Log.i(TAG, "[$imdbId] SELECTED ${hero.vi} (video-page) def=${best.def} h=${best.height}")
+        return TrailerPlaybackSource(videoUrl = normalise(best.url))
+    }
+
+    // ---- hero extraction (mirror IMDb: primaryVideos.edges[0]) ----
+
+    private fun readHeroVideo(nextData: String?): Hero? {
+        if (nextData == null) return null
+        val root = try { JSONObject(nextData) } catch (_: Exception) { return null }
+        val node = findPrimaryVideosEdge0(root) ?: return null
+        val vi = node.optString("id", "")
+        if (!VI_ID.matches(vi)) return null
+        val name = deep(node, "name", "value") ?: node.optString("name", null)
+        val runtime = deepInt(node, "runtime", "value") ?: deepInt(node, "runtime", "seconds")
+        val encs = parsePlaybackURLs(node.optJSONArray("playbackURLs"))
+        return Hero(vi, name, runtime, encs)
+    }
+
+    /** Depth-first search for the first primaryVideos.edges[0].node in the __NEXT_DATA__ tree. */
+    private fun findPrimaryVideosEdge0(any: Any?): JSONObject? {
+        when (any) {
+            is JSONObject -> {
+                val pv = any.optJSONObject("primaryVideos")
+                if (pv != null) {
+                    val node = pv.optJSONArray("edges")?.optJSONObject(0)?.optJSONObject("node")
+                    if (node != null && VI_ID.matches(node.optString("id", ""))) return node
+                }
+                val it = any.keys()
+                while (it.hasNext()) {
+                    val found = findPrimaryVideosEdge0(any.opt(it.next()))
+                    if (found != null) return found
+                }
+            }
+            is JSONArray -> for (i in 0 until any.length()) {
+                val found = findPrimaryVideosEdge0(any.opt(i))
+                if (found != null) return found
+            }
+        }
         return null
+    }
+
+    // ---- video-page parse (fallback path) ----
+
+    private fun parseVideo(nextData: String?, html: String): VideoInfo? {
+        if (nextData != null) {
+            try {
+                val root = JSONObject(nextData)
+                val video = deepObj(root, "props", "pageProps", "videoPlaybackData", "video")
+                if (video != null) {
+                    val type = deep(video, "contentType", "displayName", "value") ?: deep(video, "contentType", "id")
+                    val name = deep(video, "name", "value")
+                    val encs = parsePlaybackURLs(video.optJSONArray("playbackURLs"))
+                    if (encs.isNotEmpty()) return VideoInfo(type, name, encs)
+                }
+            } catch (_: Exception) {}
+        }
+        val u = CDN_MP4.find(normalise(html))?.value ?: return null
+        return VideoInfo(null, null, listOf(Encoding("unknown", 0, true, u)))
+    }
+
+    /**
+     * Parse an IMDb playbackURLs array into encodings. Resolution: prefer videoDefinition
+     * (DEF_1080p/DEF_SD/DEF_AUTO...), then displayName.value ("1080p"/"SD"/"AUTO"), then legacy
+     * "definition". mp4 vs HLS from videoMimeType ("MP4"/"M3U8"), url and legacy mimeType as fallback.
+     */
+    private fun parsePlaybackURLs(urls: JSONArray?): List<Encoding> {
+        val encs = mutableListOf<Encoding>()
+        if (urls != null) {
+            for (i in 0 until urls.length()) {
+                val e = urls.optJSONObject(i) ?: continue
+                val u = normalise(e.optString("url", ""))
+                if (u.isBlank()) continue
+                val vdef = e.optString("videoDefinition", "")
+                val ddef = deep(e, "displayName", "value") ?: ""
+                val def = when {
+                    vdef.isNotBlank() -> vdef
+                    ddef.isNotBlank() -> ddef
+                    else -> e.optString("definition", "")
+                }
+                val vmime = e.optString("videoMimeType", "").ifBlank { e.optString("mimeType", "") }
+                val isHls = vmime.contains("m3u8", true) || def.contains("AUTO", true) || u.contains(".m3u8", true)
+                val mp4 = !isHls && (vmime.contains("mp4", true) || u.contains(".mp4", true))
+                encs.add(Encoding(def, defHeight(def), mp4, u))
+            }
+        }
+        return encs
     }
 
     /** Best progressive mp4 <= RES_CAP; if only >cap rungs exist take the smallest of those; height 0 (unknown) last. */
@@ -192,6 +271,8 @@ class ImdbTrailerResolver @Inject constructor(
         if (overCap.isNotEmpty()) return overCap.minByOrNull { it.height }
         return mp4s.maxByOrNull { it.height } // all unknown height
     }
+
+    // ---- webview + settle ----
 
     private fun configureWebView(wv: WebView, flag: NetFlag) {
         CookieManager.getInstance().apply {
@@ -298,123 +379,7 @@ class ImdbTrailerResolver @Inject constructor(
         return try { JSONArray("[$raw]").getString(0) } catch (e: Exception) { raw }
     }
 
-    // ---- selection ----
-
-    private fun selectCandidates(nextData: String?, html: String): List<Candidate> {
-        val nodes = LinkedHashMap<String, RawNode>()
-        if (nextData != null) {
-            try { collectVideoNodes(JSONObject(nextData), nodes) } catch (_: Exception) {}
-        }
-        if (nodes.isEmpty()) {
-            // Fallback: bare id scrape when JSON parse fails. No metadata, so score neutrally by type-less rule.
-            for (m in Regex("""vi\d{6,}""").findAll(html)) nodes.putIfAbsent(m.value, RawNode(null, null, null, null, null))
-        }
-        val scored = nodes.entries.mapIndexedNotNull { idx, (vi, n) ->
-            val score = classify(n) ?: return@mapIndexedNotNull null
-            Candidate(vi, n.type, n.name, n.runtime, n.description, n.createdDate, score, idx)
-        }
-        // IMDb's primaryVideos order is its own designation (edge[0] == the home-page trailer,
-        // confirmed on Inception/Parasite/Oppenheimer). Prefer position; the runtime gate in
-        // classify() has already removed junk (e.g. Breaking Bad's 31s edge[0] scene), so the
-        // first SURVIVING position is IMDb's marquee minus obvious garbage. Score/date only break
-        // ties between equal positions (shouldn't happen) -- position is authoritative.
-        return scored.sortedWith(
-            compareBy<Candidate> { it.order }.thenByDescending { it.score }.thenByDescending { it.createdDate ?: "" }
-        )
-    }
-
-    /** Apply the tiered runtime gate + trailer ranking. Returns null = ineligible (gated out / non-trailer). */
-    private fun classify(n: RawNode): Int? {
-        val type = (n.type ?: "")
-        val name = (n.name ?: "").lowercase()
-        val desc = (n.description ?: "").lowercase()
-        val rt = n.runtime
-
-        // Runtime gate (only when runtime is present; missing runtime never rejects).
-        if (rt != null) {
-            if (rt <= RT_CLIP_MAX) return null
-            if (rt >= RT_LONGFORM_MIN) return null
-            if (rt in (RT_CLIP_MAX + 1)..RT_CORROBORATE_MAX) {
-                val corroborated = type.equals("Trailer", true) &&
-                    (name.contains("trailer") || name.contains("official") || desc.contains("trailer"))
-                if (!corroborated) return null
-            }
-        }
-
-        var s = 0
-        when {
-            name == "official trailer" || name.endsWith("official trailer") -> s += 200
-            name.contains("official") && name.contains("trailer") -> s += 180
-            type.equals("Trailer", true) && name.contains("trailer") -> s += 140
-            type.equals("Trailer", true) -> s += 120
-            type.equals("Teaser", true) || name.contains("teaser") -> s += 80
-            name.contains("trailer") -> s += 100
-        }
-        if (desc.contains("trailer")) s += 20
-        for (neg in TRAILER_NEG) if (name.contains(neg)) s -= 100
-
-        // Must retain a positive trailer signal to be selectable; pure clips (<=0) defer to YouTube.
-        return if (s > 0) s else null
-    }
-
-    private fun collectVideoNodes(any: Any?, out: LinkedHashMap<String, RawNode>) {
-        when (any) {
-            is JSONObject -> {
-                val id = any.optString("id", "")
-                if (VI_ID.matches(id)) {
-                    val type = deep(any, "contentType", "displayName", "value")
-                        ?: deep(any, "contentType", "id") ?: any.optString("videoType", null)
-                    val name = deep(any, "name", "value") ?: any.optString("name", null)
-                    val runtime = deepInt(any, "runtime", "value") ?: deepInt(any, "runtime", "seconds")
-                    val description = deep(any, "description", "value")
-                    val created = any.optString("createdDate", null)?.takeIf { it.isNotBlank() && it != "null" }
-                    out.putIfAbsent(id, RawNode(type, name, runtime, description, created))
-                }
-                val it = any.keys()
-                while (it.hasNext()) collectVideoNodes(any.opt(it.next()), out)
-            }
-            is JSONArray -> for (i in 0 until any.length()) collectVideoNodes(any.opt(i), out)
-        }
-    }
-
-    private fun parseVideo(nextData: String?, html: String): VideoInfo? {
-        if (nextData != null) {
-            try {
-                val root = JSONObject(nextData)
-                val video = deepObj(root, "props", "pageProps", "videoPlaybackData", "video")
-                if (video != null) {
-                    val type = deep(video, "contentType", "displayName", "value") ?: deep(video, "contentType", "id")
-                    val name = deep(video, "name", "value")
-                    val urls = video.optJSONArray("playbackURLs")
-                    val encs = mutableListOf<Encoding>()
-                    if (urls != null) {
-                        for (i in 0 until urls.length()) {
-                            val e = urls.optJSONObject(i) ?: continue
-                            val u = normalise(e.optString("url", ""))
-                            if (u.isBlank()) continue
-                            // Resolution: prefer videoDefinition (DEF_1080p/DEF_SD/DEF_AUTO...), then
-                            // displayName.value ("1080p"/"SD"/"AUTO"), then legacy "definition".
-                            val vdef = e.optString("videoDefinition", "")
-                            val ddef = deep(e, "displayName", "value") ?: ""
-                            val def = when {
-                                vdef.isNotBlank() -> vdef
-                                ddef.isNotBlank() -> ddef
-                                else -> e.optString("definition", "")
-                            }
-                            // mp4 vs HLS: videoMimeType is "MP4" or "M3U8" (fallback to url/legacy mimeType).
-                            val vmime = e.optString("videoMimeType", "").ifBlank { e.optString("mimeType", "") }
-                            val isHls = vmime.contains("m3u8", true) || def.contains("AUTO", true) || u.contains(".m3u8", true)
-                            val mp4 = !isHls && (vmime.contains("mp4", true) || u.contains(".mp4", true))
-                            encs.add(Encoding(def, defHeight(def), mp4, u))
-                        }
-                    }
-                    if (encs.isNotEmpty()) return VideoInfo(type, name, encs)
-                }
-            } catch (_: Exception) {}
-        }
-        val u = CDN_MP4.find(normalise(html))?.value ?: return null
-        return VideoInfo(null, null, listOf(Encoding("unknown", 0, true, u)))
-    }
+    // ---- json helpers ----
 
     private fun normalise(s: String): String =
         s.replace("\\u002F", "/").replace("\\u0026", "&").replace("\\/", "/").replace("&amp;", "&")
