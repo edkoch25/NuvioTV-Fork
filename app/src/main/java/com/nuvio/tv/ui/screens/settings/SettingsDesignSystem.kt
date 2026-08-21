@@ -313,13 +313,13 @@ internal fun SettingsRailButton(
         colors = CardDefaults.colors(
             containerColor = when {
                 zen -> Color.Transparent
-                isSelected -> Color.White.copy(alpha = 0.07f)
+                isSelected -> NuvioTheme.colors.Secondary.copy(alpha = 0.07f)
                 else -> NuvioTheme.colors.Background
             },
             focusedContainerColor = when {
                 glideIndicator -> Color.Transparent
                 zen -> settingsFocusFillColor()
-                else -> Color.White.copy(alpha = 0.07f)
+                else -> NuvioTheme.colors.FocusBackground
             }
         ),
         border = if (zen) {
@@ -327,11 +327,11 @@ internal fun SettingsRailButton(
         } else {
             CardDefaults.border(
                 border = if (isSelected) Border(
-                    border = BorderStroke(NuvioTheme.spacing.hairline, Color.White),
+                    border = BorderStroke(NuvioTheme.spacing.hairline, NuvioTheme.colors.FocusRing),
                     shape = RoundedCornerShape(SettingsPillRadius)
                 ) else Border.None,
                 focusedBorder = Border(
-                    border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
+                    border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
                     shape = RoundedCornerShape(SettingsPillRadius)
                 )
             )
@@ -363,7 +363,7 @@ internal fun SettingsRailButton(
                                 .height(16.dp)
                                 .clip(RoundedCornerShape(SettingsPillRadius))
                                 .background(
-                                    if (isSelected) Color.White else Color.Transparent
+                                    if (isSelected) NuvioTheme.colors.Secondary else Color.Transparent
                                 )
                         )
                         Spacer(modifier = Modifier.width(NuvioTheme.spacing.md))
@@ -436,7 +436,7 @@ internal fun SettingsTopBarTab(
     }
     val contentColor by animateColorAsState(
         targetValue = when {
-            isFocused -> Color.White
+            isFocused -> if (glideIndicator) Color.White else NuvioTheme.colors.OnSecondary
             isSelected -> NuvioTheme.colors.TextPrimary
             else -> NuvioTheme.colors.TextSecondary
         },
@@ -463,14 +463,14 @@ internal fun SettingsTopBarTab(
             },
         colors = CardDefaults.colors(
             containerColor = if (isSelected) {
-                Color.White.copy(alpha = 0.18f)
+                NuvioTheme.colors.Secondary.copy(alpha = 0.18f)
             } else {
                 Color.Transparent
             },
             focusedContainerColor = if (glideIndicator) {
                 Color.Transparent
             } else {
-                Color.White
+                NuvioTheme.colors.Secondary
             }
         ),
         border = CardDefaults.border(border = Border.None, focusedBorder = Border.None),
@@ -535,7 +535,7 @@ internal fun SettingsDetailHeader(
                     .width(28.dp)
                     .height(3.dp)
                     .clip(RoundedCornerShape(SettingsPillRadius))
-                    .background(Color.White.copy(alpha = 0.14f))
+                    .background(NuvioTheme.colors.Secondary.copy(alpha = 0.14f))
             )
             Text(
                 text = subtitle,
@@ -718,7 +718,7 @@ internal fun SettingsToggleRow(
         } else {
             CardDefaults.border(
                 focusedBorder = Border(
-                    border = BorderStroke(NuvioTheme.spacing.xxs, Color.White.copy(alpha = contentAlpha)),
+                    border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing.copy(alpha = contentAlpha)),
                     shape = RoundedCornerShape(SettingsPillRadius)
                 )
             )
@@ -813,7 +813,7 @@ internal fun SettingsActionRow(
         } else {
             CardDefaults.border(
                 focusedBorder = Border(
-                    border = BorderStroke(NuvioTheme.spacing.xxs, Color.White.copy(alpha = contentAlpha)),
+                    border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing.copy(alpha = contentAlpha)),
                     shape = shape ?: RoundedCornerShape(SettingsPillRadius)
                 )
             )
@@ -954,12 +954,12 @@ internal fun <T> SettingsSingleChoiceDialog(
                             .fillMaxWidth()
                             .then(if (index == focusedIndex) Modifier.focusRequester(focusRequester) else Modifier),
                         colors = CardDefaults.colors(
-                            containerColor = if (isSelected) Color.White.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.5f),
-                            focusedContainerColor = Color.White.copy(alpha = 0.14f)
+                            containerColor = if (isSelected) NuvioTheme.colors.Secondary.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.5f),
+                            focusedContainerColor = NuvioTheme.colors.FocusBackground
                         ),
                         border = CardDefaults.border(
                             focusedBorder = Border(
-                                border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
+                                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
                                 shape = RoundedCornerShape(10.dp)
                             )
                         ),
@@ -975,7 +975,7 @@ internal fun <T> SettingsSingleChoiceDialog(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = option.title,
-                                    color = if (isSelected) Color.White else NuvioTheme.colors.TextPrimary,
+                                    color = if (isSelected) NuvioTheme.colors.Secondary else NuvioTheme.colors.TextPrimary,
                                     style = MaterialTheme.typography.bodyLarge,
                                     fontFamily = option.titleFontFamily
                                 )
@@ -1001,7 +1001,7 @@ internal fun <T> SettingsSingleChoiceDialog(
                                 Icon(
                                     imageVector = Icons.Default.Check,
                                     contentDescription = stringResource(R.string.cd_selected),
-                                    tint = Color.White,
+                                    tint = NuvioTheme.colors.Secondary,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -1074,12 +1074,12 @@ internal fun <T> SettingsMultiChoiceDialog(
                                 .fillMaxWidth()
                                 .then(if (index == firstSelectedIndex) Modifier.focusRequester(focusRequester) else Modifier),
                             colors = CardDefaults.colors(
-                                containerColor = if (isSelected) Color.White.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.5f),
-                                focusedContainerColor = Color.White.copy(alpha = 0.14f)
+                                containerColor = if (isSelected) NuvioTheme.colors.Secondary.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.5f),
+                                focusedContainerColor = NuvioTheme.colors.FocusBackground
                             ),
                             border = CardDefaults.border(
                                 focusedBorder = Border(
-                                    border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
+                                    border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
                                     shape = RoundedCornerShape(10.dp)
                                 )
                             ),
@@ -1095,7 +1095,7 @@ internal fun <T> SettingsMultiChoiceDialog(
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = option.title,
-                                        color = if (isSelected) Color.White else NuvioTheme.colors.TextPrimary,
+                                        color = if (isSelected) NuvioTheme.colors.Secondary else NuvioTheme.colors.TextPrimary,
                                         style = MaterialTheme.typography.bodyLarge,
                                         fontFamily = option.titleFontFamily
                                     )
@@ -1113,7 +1113,7 @@ internal fun <T> SettingsMultiChoiceDialog(
                                     Icon(
                                         imageVector = Icons.Default.Check,
                                         contentDescription = stringResource(R.string.cd_selected),
-                                        tint = Color.White,
+                                        tint = NuvioTheme.colors.Secondary,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
@@ -1161,9 +1161,9 @@ internal fun SettingsDialogActionButton(
         onClick = onClick,
         enabled = enabled,
         colors = ButtonDefaults.colors(
-            containerColor = if (primary) Color.White.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.06f),
+            containerColor = if (primary) NuvioTheme.colors.Secondary.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.06f),
             contentColor = NuvioTheme.colors.TextPrimary,
-            focusedContainerColor = if (primary) Color.White.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.14f),
+            focusedContainerColor = if (primary) NuvioTheme.colors.Secondary.copy(alpha = 0.28f) else NuvioTheme.colors.FocusBackground,
             focusedContentColor = NuvioTheme.colors.TextPrimary
         )
     ) {
@@ -1197,36 +1197,36 @@ internal fun SettingsChoiceChip(
         },
         colors = CardDefaults.colors(
             containerColor = when {
-                zen && selected -> Color.White.copy(alpha = 0.18f)
+                zen && selected -> NuvioTheme.colors.Secondary.copy(alpha = 0.18f)
                 zen -> Color.Transparent
-                selected -> Color.White.copy(alpha = 0.12f)
+                selected -> NuvioTheme.colors.Secondary.copy(alpha = 0.12f)
                 else -> NuvioTheme.colors.Background
             },
             focusedContainerColor = when {
                 zen -> settingsFocusFillColor()
-                selected -> Color.White.copy(alpha = 0.12f)
+                selected -> NuvioTheme.colors.Secondary.copy(alpha = 0.12f)
                 else -> NuvioTheme.colors.Background
             }
         ),
         border = if (zen) {
             CardDefaults.border(
                 border = if (selected) Border(
-                    border = BorderStroke(NuvioTheme.spacing.hairline, Color.White.copy(alpha = 0.6f)),
+                    border = BorderStroke(NuvioTheme.spacing.hairline, NuvioTheme.colors.FocusRing.copy(alpha = 0.6f)),
                     shape = RoundedCornerShape(SettingsPillRadius)
                 ) else Border.None,
                 focusedBorder = if (selected) Border(
-                    border = BorderStroke(NuvioTheme.spacing.hairline, Color.White.copy(alpha = 0.6f)),
+                    border = BorderStroke(NuvioTheme.spacing.hairline, NuvioTheme.colors.FocusRing.copy(alpha = 0.6f)),
                     shape = RoundedCornerShape(SettingsPillRadius)
                 ) else Border.None
             )
         } else {
             CardDefaults.border(
                 border = if (selected) Border(
-                    border = BorderStroke(NuvioTheme.spacing.hairline, Color.White),
+                    border = BorderStroke(NuvioTheme.spacing.hairline, NuvioTheme.colors.FocusRing),
                     shape = RoundedCornerShape(SettingsPillRadius)
                 ) else Border.None,
                 focusedBorder = Border(
-                    border = BorderStroke(NuvioTheme.spacing.hairline, Color.White),
+                    border = BorderStroke(NuvioTheme.spacing.hairline, NuvioTheme.colors.FocusRing),
                     shape = RoundedCornerShape(SettingsPillRadius)
                 )
             )
@@ -1251,8 +1251,8 @@ private fun SettingsTogglePill(
     val alpha = if (enabled) 1f else 0.35f
     val zen = isFlatSettingsStyle()
     val trackColor = when {
-        zen && checked -> Color.White.copy(alpha = 0.9f * alpha)
-        checked -> Color.White.copy(alpha = 0.35f * alpha)
+        zen && checked -> NuvioTheme.colors.Secondary.copy(alpha = 0.9f * alpha)
+        checked -> NuvioTheme.colors.Secondary.copy(alpha = 0.35f * alpha)
         else -> NuvioTheme.colors.Border.copy(alpha = alpha)
     }
     val knobColor = if (zen && checked) {

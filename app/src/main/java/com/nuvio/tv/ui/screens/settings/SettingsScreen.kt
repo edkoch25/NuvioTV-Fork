@@ -423,7 +423,7 @@ fun SettingsScreen(
                                     )
                                     .graphicsLayer { alpha = pillAlpha }
                                     .clip(RoundedCornerShape(SettingsPillRadius))
-                                    .background(Color.White.copy(alpha = 0.14f))
+                                    .background(NuvioTheme.colors.FocusBackground)
                             )
                         }
                         LazyRow(

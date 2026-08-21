@@ -1413,7 +1413,7 @@ private fun ModernCarouselCard(
                             .zIndex(2f)
                             .fillMaxWidth(fraction.coerceIn(0f, 1f))
                             .height(3.dp)
-                            .background(Color.White)
+                            .background(NuvioTheme.colors.Secondary)
                     )
                 }
 
@@ -1425,11 +1425,11 @@ private fun ModernCarouselCard(
                             .zIndex(2f)
                             .size(21.dp)
                             .shadow(10.dp, shape = CircleShape, spotColor = Color.Transparent)
-                            .background(Color.White, CircleShape)
+                            .background(NuvioTheme.colors.Secondary, CircleShape)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Check,
-                            tint = Color.Black,
+                            tint = NuvioTheme.colors.OnSecondary,
                             contentDescription = stringResource(R.string.episodes_cd_watched),
                             modifier = Modifier.size(20.dp)
                         )

@@ -281,8 +281,8 @@ fun HeroContentSection(
                                 onClick = onToggleMovieWatched,
                                 enabled = !isMovieWatchedPending,
                                 selected = isMovieWatched,
-                                selectedContainerColor = Color.White,
-                                selectedContentColor = Color.Black,
+                                selectedContainerColor = NuvioTheme.colors.Secondary,
+                                selectedContentColor = NuvioTheme.colors.OnSecondary,
                                 onFocused = onHeroActionFocused
                             )
                         }
@@ -503,10 +503,10 @@ private fun PlayButton(
             }
             .focusProperties { up = FocusRequester.Cancel },
         colors = ButtonDefaults.colors(
-            containerColor = androidx.compose.ui.graphics.Color.White,
-            focusedContainerColor = androidx.compose.ui.graphics.Color.White,
-            contentColor = androidx.compose.ui.graphics.Color.Black,
-            focusedContentColor = androidx.compose.ui.graphics.Color.Black
+            containerColor = NuvioTheme.colors.Secondary,
+            focusedContainerColor = NuvioTheme.colors.Secondary,
+            contentColor = NuvioTheme.colors.OnSecondary,
+            focusedContentColor = NuvioTheme.colors.OnSecondary
         ),
         shape = ButtonDefaults.shape(
             shape = RoundedCornerShape(NuvioTheme.spacing.xxl)

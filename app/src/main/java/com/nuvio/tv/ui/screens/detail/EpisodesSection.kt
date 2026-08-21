@@ -227,8 +227,8 @@ fun SeasonTabs(
                     },
                 shape = CardDefaults.shape(shape = tabShape),
                 colors = CardDefaults.colors(
-                    containerColor = if (isSelected) Color.White else Color.White.copy(alpha = 0.08f),
-                    focusedContainerColor = Color.White
+                    containerColor = if (isSelected) NuvioTheme.colors.Secondary else Color.White.copy(alpha = 0.08f),
+                    focusedContainerColor = NuvioTheme.colors.Secondary
                 ),
                 border = tabBorder,
                 scale = tabScale
@@ -237,8 +237,8 @@ fun SeasonTabs(
                     text = if (season == 0) stringResource(R.string.episodes_specials) else stringResource(R.string.episodes_season, season),
                     style = tabTextStyle,
                     color = when {
-                        isFocused -> Color.Black
-                        isSelected -> Color.Black
+                        isFocused -> NuvioTheme.colors.OnSecondary
+                        isSelected -> NuvioTheme.colors.OnSecondary
                         else -> Color(0xFFE8E8EC)
                     },
                     modifier = Modifier.padding(vertical = 10.dp, horizontal = 20.dp)
@@ -572,6 +572,7 @@ private fun EpisodeCard(
     val badgeBgColor = remember { Color.Black.copy(alpha = 0.42f) }
     val badgeShape = remember(cardMetrics.episodeBadgeCornerRadius) { RoundedCornerShape(cardMetrics.episodeBadgeCornerRadius) }
     val progressBgColor = remember { Color.Black.copy(alpha = 0.45f) }
+    val progressFillColor = NuvioTheme.colors.Secondary
     val notStartedBadgeColor = remember(textSecondary) { textSecondary.copy(alpha = 0.9f) }
     val thumbnailRequest = remember(context, episode.thumbnail, thumbnailWidthPx, thumbnailHeightPx, shouldBlur) {
         ImageRequest.Builder(context)
@@ -594,7 +595,7 @@ private fun EpisodeCard(
     }
 
     val textPrimary = NuvioTheme.colors.TextPrimary
-    val focusRing = Color.White
+    val focusRing = NuvioTheme.colors.FocusRing
     val cardShape = CardDefaults.shape(shape = shape)
     val cardColors = CardDefaults.colors(
         containerColor = Color.Transparent,
@@ -849,7 +850,7 @@ private fun EpisodeCard(
                             onDrawBehind {
                                 drawRoundRect(color = progressBgColor, cornerRadius = cr)
                                 drawRoundRect(
-                                    color = Color.White,
+                                    color = progressFillColor,
                                     size = androidx.compose.ui.geometry.Size(fillWidth, size.height),
                                     cornerRadius = cr
                                 )
@@ -868,13 +869,13 @@ private fun EpisodeCard(
                         )
                         .size(cardMetrics.statusBadgeSize)
                         .shadow(10.dp, shape = CircleShape, spotColor = Color.Transparent)
-                        .background(Color.White, CircleShape),
+                        .background(NuvioTheme.colors.Secondary, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.Check,
                         contentDescription = strCdWatched,
-                        tint = Color.Black,
+                        tint = NuvioTheme.colors.OnSecondary,
                         modifier = Modifier.size(cardMetrics.statusIconSize)
                     )
                 }

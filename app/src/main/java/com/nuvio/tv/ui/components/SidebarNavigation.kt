@@ -115,8 +115,8 @@ private fun SidebarNavItem(
     var isFocused by remember { mutableStateOf(false) }
     val backgroundColor by animateColorAsState(
         targetValue = when {
-            isFocused -> Color.White
-            isSelected -> Color.White.copy(alpha = 0.12f)
+            isFocused -> NuvioTheme.colors.Secondary
+            isSelected -> NuvioTheme.colors.Secondary.copy(alpha = 0.12f)
             else -> Color.Transparent
         },
         label = "navItemBackground"
@@ -159,7 +159,7 @@ private fun SidebarNavItem(
             Icon(
                 imageVector = item.icon,
                 contentDescription = item.label,
-                tint = if (isFocused) Color.Black else NuvioTheme.colors.TextPrimary,
+                tint = if (isFocused) NuvioTheme.colors.OnSecondary else NuvioTheme.colors.TextPrimary,
                 modifier = Modifier.size(NuvioTheme.sizes.icons.sm)
             )
         }
@@ -167,7 +167,7 @@ private fun SidebarNavItem(
         Text(
             text = item.label,
             style = MaterialTheme.typography.titleMedium,
-            color = when { isFocused -> Color.Black; isSelected -> NuvioTheme.colors.TextPrimary; else -> NuvioTheme.colors.TextSecondary }
+            color = when { isFocused -> NuvioTheme.colors.OnSecondary; isSelected -> NuvioTheme.colors.TextPrimary; else -> NuvioTheme.colors.TextSecondary }
         )
     }
     }
