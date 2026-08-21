@@ -69,7 +69,6 @@ fun TrailerPlayer(
     val currentOnFirstFrameRendered by rememberUpdatedState(onFirstFrameRendered)
     val currentOnProgressChanged by rememberUpdatedState(onProgressChanged)
     val currentOnRemoteKey by rememberUpdatedState(onRemoteKey)
-    val zoomScale = if (cropToFill) overscanZoom.coerceAtLeast(1f) else 1f
     var hasRenderedFirstFrame by remember(trailerUrl) { mutableStateOf(false) }
     val playerAlphaState = animateFloatAsState(
         targetValue = if (isPlaying && hasRenderedFirstFrame) 1f else 0f,
@@ -259,8 +258,6 @@ fun TrailerPlayer(
                     .clipToBounds()
                     .graphicsLayer {
                         alpha = playerAlphaState.value
-                        scaleX = zoomScale
-                        scaleY = zoomScale
                     }
             )
         }
