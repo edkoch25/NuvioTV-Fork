@@ -147,22 +147,32 @@ internal class ParallelRangeDataSource(
 
         // nt-tier2: HTTP 429/503 is server-side rate-limiting, not a stalled
         // socket. Back off before retrying (immediate retry just re-hits the
-        // limit), and after repeated hits set a one-way session latch so
-        // prefetch drops to a single connection. Only reachable when parallel
-        // connections are enabled (opt-in; off by default).
+        // limit). nt6(0.8.5): the response is now shaped like congestion
+        // control — waits honour a server-stated Retry-After and escalate
+        // across episodes, and prefetch depth adapts multiplicatively down /
+        // additively up (AIMD) so a session converges just under the
+        // provider's actual request budget. Reachable from any chunk-session
+        // path (parallel-on and MP4 session mode).
         private const val RATE_LIMIT_MAX_BACKOFF_RETRIES = 3
-        private const val RATE_LIMIT_CLAMP_THRESHOLD = 3
         private const val RATE_LIMIT_BACKOFF_BASE_MS = 500L
-        private const val RATE_LIMIT_BACKOFF_MAX_MS = 3_000L
+        // Cap for GUESSED waits in a first episode. Deliberately short:
+        // playback is real-time, so long speculative sleeps on a download
+        // thread trade a maybe-429 for a certain stall.
+        private const val RATE_LIMIT_BACKOFF_CYCLE_CAP_MS = 3_000L
+        // Absolute ceiling for any single wait, including a server-stated
+        // Retry-After — a broken or hostile header must never camp a
+        // real-time pipeline.
+        private const val RATE_LIMIT_WAIT_HARD_CAP_MS = 15_000L
         private const val RATE_LIMIT_BACKOFF_JITTER_MS = 250L
         private const val RATE_LIMIT_SLEEP_SLICE_MS = 100L
 
-        // nt3 Lever 1: the clamp above is no longer session-permanent. After a
-        // quiet period with no 429/503 the read path lifts it and restores full
-        // prefetch depth; each re-trip doubles the next required quiet period
-        // (capped) so a persistently limiting server cannot make us oscillate.
-        private const val RATE_LIMIT_RECOVERY_BASE_MS = 45_000L
-        private const val RATE_LIMIT_RECOVERY_MAX_MS = 360_000L
+        // nt6(0.8.5): additive-recovery probe cadence — +1 depth per quiet
+        // interval; the interval doubles on every re-trip during the climb
+        // (gentler probing of a strict provider) and resets once the cap
+        // fully clears. Replaces the nt3 45s/360s boolean-clamp cooldown.
+        private const val RATE_LIMIT_DEPTH_STEP_BASE_MS = 10_000L
+        private const val RATE_LIMIT_DEPTH_STEP_MAX_MS = 60_000L
+        private const val RATE_LIMIT_ESCALATION_MAX = 5
 
         // nt6: HUD mirror of the rate-limit clamp. Written ONLY by the
         // download/read paths below; read by the stats overlay
@@ -174,14 +184,18 @@ internal class ParallelRangeDataSource(
         @Volatile var hudClampLatched: Boolean = false
         @Volatile var hudClampTrips: Int = 0
         @Volatile var hudClampLastHitAtMs: Long = 0L
+        // nt6(0.8.5): AIMD state for the HUD row — current depth cap vs the
+        // configured depth ("depth 2/5"), and the uptime when the next +1
+        // step becomes eligible. Written only by ChunkSession's rate-limit
+        // methods; zeroed with the other mirrors on fresh-session creation.
+        @Volatile var hudDepthCap: Int = 0
+        @Volatile var hudDepthConfigured: Int = 0
+        @Volatile var hudNextStepAtMs: Long = 0L
 
-        /** Cooldown left before the clamp may lift; 0 when not latched. HUD read only. */
+        /** Time until the next +1 depth step; 0 when not capped. HUD read only. */
         fun hudClampCooldownRemainingMs(nowUptimeMs: Long): Long {
             if (!hudClampLatched) return 0L
-            val trips = hudClampTrips.coerceAtLeast(1)
-            val cooldownMs = (RATE_LIMIT_RECOVERY_BASE_MS shl (trips - 1).coerceAtMost(3))
-                .coerceAtMost(RATE_LIMIT_RECOVERY_MAX_MS)
-            return (cooldownMs - (nowUptimeMs - hudClampLastHitAtMs)).coerceAtLeast(0L)
+            return (hudNextStepAtMs - nowUptimeMs).coerceAtLeast(0L)
         }
 
         private class ChunkSession(
@@ -202,20 +216,23 @@ internal class ParallelRangeDataSource(
             val futures = ConcurrentHashMap<Long, CompletableFuture<DownloadedChunk>>()
             val lastTouch = ConcurrentHashMap<Long, Long>()
             val abandoned = AtomicBoolean(false)
-            // nt-tier2: set when the server rate-limits us repeatedly; the
-            // read path then holds prefetch to a single connection for this
-            // session. nt3 Lever 1: no longer one-way — after a quiet cooldown
-            // with no further 429/503 the read path lifts the clamp
-            // (tryRecoverFromRateLimit below); each re-trip doubles the next
-            // cooldown, capped at RATE_LIMIT_RECOVERY_MAX_MS.
-            val rateLimited = AtomicBoolean(false)
-            val rateLimit429s = AtomicInteger(0)
-            // nt3 Lever 1: uptime stamp of the most recently observed 429/503
-            // (slides on every hit, so the cooldown measures true quiet time),
-            // and how many times the clamp has tripped this session (drives
-            // the exponential cooldown).
+            // nt6(0.8.5): AIMD rate-limit state. rateLimitDepthCap is the
+            // multiplicative-decrease ceiling on prefetch depth
+            // (Int.MAX_VALUE = uncapped): halved (never below 1) once per
+            // rate-limited episode, stepped +1 per quiet probe interval, and
+            // cleared once it climbs past the configured depth again.
+            // lastRateLimitAtMs slides on EVERY observed 429/503 so quiet
+            // time is measured from the last hit. rateLimitEscalation
+            // persists across backoff cycles — the per-attempt ladder alone
+            // resets every time the outer retry machinery re-enters it,
+            // which is exactly how a hard limiter produces an indefinite
+            // fixed-period hammer.
+            val rateLimitDepthCap = AtomicInteger(Int.MAX_VALUE)
             @Volatile var lastRateLimitAtMs: Long = 0L
-            val rateLimitClampCount = AtomicInteger(0)
+            @Volatile var lastDepthHalveAtMs: Long = 0L
+            @Volatile var lastDepthStepAtMs: Long = 0L
+            @Volatile var depthStepIntervalMs: Long = RATE_LIMIT_DEPTH_STEP_BASE_MS
+            val rateLimitEscalation = AtomicInteger(0)
             val activeSources: MutableSet<DataSource> = java.util.concurrent.ConcurrentHashMap.newKeySet()
             // nt7 (progressive reads): live views of downloads in
             // flight, keyed like futures. Entries are owned by the
@@ -243,27 +260,88 @@ internal class ParallelRangeDataSource(
                 lastReadChunkIndex = chunkIndex
             }
 
+            /** Stamp an observed 429/503 so quiet time restarts. */
+            fun noteRateLimitHit() {
+                val now = SystemClock.uptimeMillis()
+                lastRateLimitAtMs = now
+                hudClampLastHitAtMs = now
+                if (hudClampLatched) hudNextStepAtMs = now + depthStepIntervalMs
+            }
+
             /**
-             * nt3 Lever 1: lift the rate-limit clamp once no 429/503 has been
-             * observed for the current cooldown. Returns true when the clamp
-             * is (now) inactive, false while it must still hold. Called from
-             * the read path; trips happen on download threads — the CAS makes
-             * that race benign (a concurrent 429 simply re-stamps
-             * lastRateLimitAtMs and can re-trip as normal).
+             * nt6(0.8.5): record the start of one rate-limited episode:
+             * stamp, bump the wait escalation, and apply ONE multiplicative
+             * depth decrease (guarded so a burst of concurrent 429s across
+             * download threads counts as a single congestion event, not a
+             * cascade to 1). Returns the escalation level this episode's
+             * waits should use (the pre-bump value, so a first-ever episode
+             * still starts from the short ladder).
              */
-            fun tryRecoverFromRateLimit(): Boolean {
-                if (!rateLimited.get()) return true
-                val trips = rateLimitClampCount.get().coerceAtLeast(1)
-                val cooldownMs = (RATE_LIMIT_RECOVERY_BASE_MS shl (trips - 1).coerceAtMost(3))
-                    .coerceAtMost(RATE_LIMIT_RECOVERY_MAX_MS)
-                if (SystemClock.uptimeMillis() - lastRateLimitAtMs < cooldownMs) return false
-                if (rateLimited.compareAndSet(true, false)) {
-                    rateLimit429s.set(0)
-                    hudClampLatched = false
-                    Log.i(TAG, "Rate-limit cooldown (${cooldownMs}ms) elapsed with no further " +
-                        "429/503; restoring parallel prefetch (clamp trips this session: $trips)")
+            fun beginRateLimitEpisode(configuredDepth: Int): Int {
+                val now = SystemClock.uptimeMillis()
+                lastRateLimitAtMs = now
+                hudClampLastHitAtMs = now
+                val escalation = rateLimitEscalation.getAndUpdate {
+                    (it + 1).coerceAtMost(RATE_LIMIT_ESCALATION_MAX)
                 }
-                return true
+                if (now - lastDepthHalveAtMs >= 1_000L) {
+                    val alreadyCapped = rateLimitDepthCap.get() < configuredDepth
+                    val effective = rateLimitDepthCap.get().coerceAtMost(configuredDepth)
+                    val halved = (effective / 2).coerceAtLeast(1)
+                    if (halved < effective) {
+                        rateLimitDepthCap.set(halved)
+                        lastDepthHalveAtMs = now
+                        // Gentler probing only when the provider pushes back
+                        // AGAIN during the climb: the first trip keeps the base
+                        // cadence, a re-trip doubles the interval.
+                        if (alreadyCapped) {
+                            depthStepIntervalMs =
+                                (depthStepIntervalMs * 2).coerceAtMost(RATE_LIMIT_DEPTH_STEP_MAX_MS)
+                        }
+                        hudClampLatched = true
+                        hudClampTrips += 1
+                        hudDepthCap = halved
+                        hudDepthConfigured = configuredDepth
+                        hudNextStepAtMs = now + depthStepIntervalMs
+                        Log.w(TAG, "Rate-limited; prefetch depth halved to " +
+                            "$halved/$configuredDepth (probe interval ${depthStepIntervalMs}ms)")
+                    }
+                }
+                return escalation
+            }
+
+            /**
+             * nt6(0.8.5): current allowed prefetch depth. Uncapped sessions
+             * pay nothing. A capped session steps +1 after each probe
+             * interval of quiet (no 429/503 observed) and clears the cap —
+             * resetting the probe interval and decaying the wait escalation —
+             * once it climbs past the configured depth again.
+             */
+            fun currentAllowedDepth(configuredDepth: Int): Int {
+                val cap = rateLimitDepthCap.get()
+                if (cap >= configuredDepth) return configuredDepth
+                val now = SystemClock.uptimeMillis()
+                if (now - lastRateLimitAtMs >= depthStepIntervalMs &&
+                    now - lastDepthStepAtMs >= depthStepIntervalMs) {
+                    val stepped = cap + 1
+                    if (rateLimitDepthCap.compareAndSet(cap, stepped)) {
+                        lastDepthStepAtMs = now
+                        rateLimitEscalation.updateAndGet { (it - 1).coerceAtLeast(0) }
+                        if (stepped >= configuredDepth) {
+                            rateLimitDepthCap.set(Int.MAX_VALUE)
+                            depthStepIntervalMs = RATE_LIMIT_DEPTH_STEP_BASE_MS
+                            hudClampLatched = false
+                            hudDepthCap = 0
+                            hudNextStepAtMs = 0L
+                            Log.i(TAG, "Rate-limit depth cap cleared; parallel prefetch fully restored")
+                        } else {
+                            hudDepthCap = stepped
+                            hudNextStepAtMs = now + depthStepIntervalMs
+                            Log.i(TAG, "Rate-limit quiet; prefetch depth stepped to $stepped/$configuredDepth")
+                        }
+                    }
+                }
+                return rateLimitDepthCap.get().coerceAtMost(configuredDepth)
             }
         }
 
@@ -414,6 +492,9 @@ internal class ParallelRangeDataSource(
                 hudClampLatched = false
                 hudClampTrips = 0
                 hudClampLastHitAtMs = 0L
+                hudDepthCap = 0
+                hudDepthConfigured = 0
+                hudNextStepAtMs = 0L
                 val created = ChunkSession(requestUri, requestHeaders, chunkSz, chunkCap, prefetchWindow)
                 currentChunkSession = created
                 return created
@@ -1257,16 +1338,13 @@ internal class ParallelRangeDataSource(
         // meaningful sequential run. Side cursors (a few bytes per open on
         // scatter-read files) fetch only the chunk they actually need, instead
         // of fanning out connections+1 chunks of dead prefetch per visit.
-        // nt-tier2: once the session is rate-limited, hold prefetch to a single
-        // connection so we stop fanning out into the limit. nt3 Lever 1: the
-        // clamp lifts after a quiet cooldown (tryRecoverFromRateLimit) instead
-        // of holding for the rest of the session; a null session keeps the
-        // pre-clamp behaviour (fall through to the earned-prefetch gate).
-        val maxAhead = when {
-            session?.tryRecoverFromRateLimit() == false -> 1
-            bytesServedThisOpen >= EARNED_PREFETCH_BYTES -> effectivePrefetchDepth
-            else -> 1
-        }
+        val earnedAhead = if (bytesServedThisOpen >= EARNED_PREFETCH_BYTES) effectivePrefetchDepth else 1
+        // nt6(0.8.5): AIMD — a rate-limited session halves its depth cap and
+        // recovers +1 per quiet probe interval (ChunkSession.currentAllowedDepth),
+        // so a provider that 429s converges just under its actual request
+        // budget instead of latching to a single connection.
+        val maxAhead = session?.currentAllowedDepth(effectivePrefetchDepth)?.coerceAtMost(earnedAhead)
+            ?: earnedAhead
 
         for (i in 0 until maxAhead) {
             val ci = currentChunkIdx + i
@@ -1412,10 +1490,12 @@ internal class ParallelRangeDataSource(
     }
 
     /**
-     * nt-tier2: dedicated backoff-retry for a rate-limited chunk. Bounded and
-     * cancellation-aware; on repeated hits it latches the session to a single
-     * connection. When the budget is spent it throws, and the existing failure
-     * handling / auto-recovery takes over — i.e. never worse than before.
+     * nt-tier2 / nt6(0.8.5): dedicated handling for a rate-limited chunk. One
+     * invocation = one congestion episode: one multiplicative depth decrease
+     * and one wait-escalation step, then up to RATE_LIMIT_MAX_BACKOFF_RETRIES
+     * properly-spaced retries. Bounded and cancellation-aware; when the
+     * budget is spent it throws and the existing failure handling /
+     * auto-recovery takes over — i.e. never worse than before.
      */
     private fun downloadChunkWithRateLimitBackoff(
         activeSession: ChunkSession,
@@ -1425,24 +1505,12 @@ internal class ParallelRangeDataSource(
     ): DownloadedChunk {
         var rl: HttpDataSource.InvalidResponseCodeException = firstError
         var lastException: Exception = firstError
+        val escalation = activeSession.beginRateLimitEpisode(effectivePrefetchDepth)
         var attempt = 0
         while (attempt < RATE_LIMIT_MAX_BACKOFF_RETRIES) {
-            // nt3 Lever 1: stamp every observed 429/503 so the recovery
-            // cooldown measures quiet time since the LAST hit, not since the
-            // moment the clamp tripped.
-            activeSession.lastRateLimitAtMs = SystemClock.uptimeMillis()
-            hudClampLastHitAtMs = activeSession.lastRateLimitAtMs
-            if (activeSession.rateLimit429s.incrementAndGet() >= RATE_LIMIT_CLAMP_THRESHOLD &&
-                activeSession.rateLimited.compareAndSet(false, true)) {
-                val trips = activeSession.rateLimitClampCount.incrementAndGet()
-                hudClampLatched = true
-                hudClampTrips = trips
-                Log.w(TAG, "Rate-limited (HTTP ${rl.responseCode}) repeatedly; clamping session to " +
-                    "single connection (trip #$trips this session)")
-            }
-            val waitMs = rateLimitBackoffMs(attempt, rl)
+            val waitMs = rateLimitWaitMs(attempt, escalation, rl)
             Log.w(TAG, "Chunk $chunkIndex rate-limited (HTTP ${rl.responseCode}); backing off ${waitMs}ms " +
-                "(attempt ${attempt + 1}/$RATE_LIMIT_MAX_BACKOFF_RETRIES)")
+                "(attempt ${attempt + 1}/$RATE_LIMIT_MAX_BACKOFF_RETRIES, escalation $escalation)")
             if (!sleepInterruptibly(waitMs, future, activeSession)) throw IOException("Cancelled during rate-limit backoff")
             if (future.isCancelled || activeSession.abandoned.get()) throw IOException("Cancelled")
             try {
@@ -1452,21 +1520,43 @@ internal class ParallelRangeDataSource(
                 lastException = e
                 // A non-rate-limit error after a 429 is a different failure: surface it.
                 rl = e.findRateLimitException() ?: throw e
+                activeSession.noteRateLimitHit()
                 attempt++
             }
         }
         throw IOException("Chunk $chunkIndex still rate-limited after $RATE_LIMIT_MAX_BACKOFF_RETRIES backoffs", lastException)
     }
 
-    /** nt-tier2: honour Retry-After (seconds) capped, else exponential + jitter. */
-    private fun rateLimitBackoffMs(attempt: Int, rl: HttpDataSource.InvalidResponseCodeException): Long {
-        val retryAfterMs = rl.headerFields.entries
-            .firstOrNull { it.key.equals("Retry-After", ignoreCase = true) }
-            ?.value?.firstOrNull()?.trim()?.toLongOrNull()
-            ?.let { it * 1000L }
-        val base = retryAfterMs ?: (RATE_LIMIT_BACKOFF_BASE_MS shl attempt.coerceIn(0, 3))
-        val capped = base.coerceIn(RATE_LIMIT_BACKOFF_BASE_MS, RATE_LIMIT_BACKOFF_MAX_MS)
-        return capped + (Math.random() * RATE_LIMIT_BACKOFF_JITTER_MS).toLong()
+    /**
+     * nt6(0.8.5): wait before retrying a rate-limited chunk. A server-stated
+     * Retry-After (delta-seconds or HTTP-date, via ParallelRangeRetryAfter)
+     * is honoured up to a hard cap — the server knows its own limiter, but a
+     * broken or hostile header must never camp a real-time pipeline. With no
+     * usable header the wait is exponential per attempt from a base that
+     * escalates with repeated episodes, so a hard limiter produces
+     * progressively longer waits across cycles instead of the indefinite
+     * fixed-period retry a self-resetting ladder degenerates into. Jitter
+     * decorrelates concurrent retries. Replaces the nt-tier2 version, which
+     * capped even a server-stated wait at 3s — precisely the ~5s indefinite
+     * re-429 loop observed against strict CDNs.
+     */
+    private fun rateLimitWaitMs(
+        attempt: Int,
+        escalation: Int,
+        rl: HttpDataSource.InvalidResponseCodeException
+    ): Long {
+        val jitter = (Math.random() * RATE_LIMIT_BACKOFF_JITTER_MS).toLong()
+        val header = rl.headerFields.entries
+            .firstOrNull { it.key?.equals("Retry-After", ignoreCase = true) == true }
+            ?.value?.firstOrNull()?.trim()
+        val headerMs = ParallelRangeRetryAfter.parseHeaderMs(header)
+        if (headerMs != null) {
+            return headerMs.coerceAtMost(RATE_LIMIT_WAIT_HARD_CAP_MS) + jitter
+        }
+        val cycleCapMs = (RATE_LIMIT_BACKOFF_CYCLE_CAP_MS shl escalation.coerceIn(0, RATE_LIMIT_ESCALATION_MAX))
+            .coerceAtMost(RATE_LIMIT_WAIT_HARD_CAP_MS)
+        val base = RATE_LIMIT_BACKOFF_BASE_MS shl (attempt + escalation).coerceIn(0, 6)
+        return base.coerceIn(RATE_LIMIT_BACKOFF_BASE_MS, cycleCapMs) + jitter
     }
 
     /**

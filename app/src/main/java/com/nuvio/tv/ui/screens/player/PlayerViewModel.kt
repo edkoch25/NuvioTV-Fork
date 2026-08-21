@@ -654,9 +654,14 @@ class PlayerViewModel @Inject constructor(
         // ParallelRangeDataSource companion mirror (same package).
         if (ParallelRangeDataSource.hudClampTrips > 0) {
             if (ParallelRangeDataSource.hudClampLatched) {
-                val leftS = ParallelRangeDataSource
+                val nextS = ParallelRangeDataSource
                     .hudClampCooldownRemainingMs(android.os.SystemClock.uptimeMillis()) / 1000L
-                rows += StatsRow("Clamp", "latched \u00b7 ${leftS}s left", StatsDot.WARN)
+                rows += StatsRow(
+                    "Clamp",
+                    "depth ${ParallelRangeDataSource.hudDepthCap}/${ParallelRangeDataSource.hudDepthConfigured}" +
+                        " \u00b7 +1 in ${nextS}s",
+                    StatsDot.WARN
+                )
             } else {
                 rows += StatsRow("Clamp", "recovered \u00b7 ${ParallelRangeDataSource.hudClampTrips} trips")
             }

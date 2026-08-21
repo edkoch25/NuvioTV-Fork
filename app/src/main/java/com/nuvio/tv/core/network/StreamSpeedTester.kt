@@ -217,10 +217,10 @@ object StreamSpeedTester {
             val elapsed = (endMs - tStart).coerceAtLeast(1)
             val networkDelta = totalBytesDownloaded.get() - networkAtMeasureStart
             // N3b: read the clamp trip count BEFORE closing, and read the
-            // companion counter rather than ChunkSession.rateLimited - the
-            // boolean is CLEARED by the Lever 1 recovery path, so a clamp
-            // that fired and recovered inside this cell would be invisible
-            // to an end-of-cell boolean read. The counter is reset in
+            // companion counter rather than the session's live cap state -
+            // nt6(0.8.5): the AIMD cap RECOVERS on quiet, so a cap that
+            // tripped and fully cleared inside this cell would be invisible
+            // to an end-of-cell state read. The counter is reset in
             // obtainSession() whenever a fresh session is created, and the
             // sweep calls releaseRetainedSession() before every cell, so
             // this is per-cell. If a warm session were ever attached the
