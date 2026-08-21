@@ -71,24 +71,27 @@ class TrailerService(
         tmdbId: String? = null,
         type: String? = null
     ): TrailerPlaybackSource? = withContext(Dispatchers.IO) {
-        // Read the TMDB settings once and reuse for both the "Disable Trailers"
-        // gate and the trailer language lookup below. The gate respects the
-        // user's "Disable Trailers in TMDB Enrichment" toggle: the TMDB path
-        // below is the only trailer source surfaced through this function,
-        // so when the toggle is off we return no trailer at all rather than
-        // silently falling through to TMDB's /videos endpoint. See #1647.
+        // Read both settings once up front. `useTrailers` (the TMDB-enrichment
+        // "Disable Trailers" toggle) gates the TMDB->YouTube path only (#1647).
+        // The IMDb source is a separate, user-selected opt-in ("Use IMDb trailers")
+        // and must run independently of the TMDB-enrichment gate, otherwise an
+        // unrelated TMDB setting silently disables IMDb.
         val tmdbSettings = runCatching { tmdbSettingsDataStore.settings.first() }.getOrNull()
-        if (tmdbSettings?.useTrailers != true) {
-            Log.d(TAG, "Trailers disabled in TMDB enrichment settings; skipping lookup")
-            return@withContext null
-        }
-        val tmdbLanguage = normalizeTmdbTrailerLanguage(tmdbSettings.language)
+        val useTrailers = tmdbSettings?.useTrailers == true
 
         // Read the trailer-source setting BEFORE building the cache key and fold it in, so
         // toggling YouTube<->IMDb takes effect immediately (each source has its own cache
         // namespace) instead of serving this session's stale other-source entries.
         val trailerSettings = runCatching { trailerSettingsDataStore.settings.first() }.getOrNull()
         val trailerSource = trailerSettings?.source ?: TrailerSource.YOUTUBE
+
+        // Nothing to surface when trailers are disabled AND the user hasn't opted
+        // into IMDb: the only remaining source here is the (now-gated) TMDB->YouTube
+        // path, so return no trailer. Preserves #1647 for the YouTube case.
+        if (!useTrailers && trailerSource != TrailerSource.IMDB) {
+            Log.d(TAG, "Trailers disabled in TMDB enrichment settings; skipping lookup")
+            return@withContext null
+        }
 
         val cacheKey = "$title|$year|$tmdbId|$type|$trailerSource"
 
@@ -117,8 +120,17 @@ class TrailerService(
                 }
             }
 
-            // TMDB-first path. Gated on `useTrailers` above so the
-            // user's toggle in TMDB enrichment settings is honored.
+            // TMDB->YouTube path. Gated on `useTrailers` (#1647): when trailers are
+            // disabled in TMDB enrichment, skip it entirely. An IMDb-only user with
+            // the gate off gets IMDb-or-nothing from this function, and the caller's
+            // meta-provided YouTube fallback still applies. Not negative-cached: the
+            // "no trailer" result here is gate-conditional, so caching it under the
+            // gate-independent key would go stale if the user re-enables trailers.
+            if (!useTrailers) {
+                return@withContext null
+            }
+
+            val tmdbLanguage = normalizeTmdbTrailerLanguage(tmdbSettings?.language)
             val tmdbSource = getTrailerPlaybackSourceFromTmdbId(
                 tmdbId = tmdbId,
                 type = type,
