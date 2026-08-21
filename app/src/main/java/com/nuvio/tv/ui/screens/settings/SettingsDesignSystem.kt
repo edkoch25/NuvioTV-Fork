@@ -166,10 +166,10 @@ internal fun SettingsBrandPanel(
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(SettingsContainerRadius))
-            .background(Color.Black.copy(alpha = 0.85f))
+            .background(NuvioTheme.colors.BackgroundElevated)
             .border(
                 width = NuvioTheme.spacing.hairline,
-                color = Color.White.copy(alpha = 0.09f),
+                color = NuvioTheme.colors.Border,
                 shape = RoundedCornerShape(SettingsContainerRadius)
             )
             .padding(26.dp),
@@ -181,7 +181,7 @@ internal fun SettingsBrandPanel(
                 modifier = Modifier
                     .size(44.dp)
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.08f)),
+                    .background(NuvioTheme.colors.BackgroundCard),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -255,10 +255,10 @@ internal fun SettingsWorkspaceSurface(
         Box(
             modifier = modifier
                 .clip(RoundedCornerShape(SettingsContainerRadius))
-                .background(Color.Black.copy(alpha = 0.85f))
+                .background(NuvioTheme.colors.BackgroundElevated)
                 .border(
                     width = NuvioTheme.spacing.hairline,
-                    color = Color.White.copy(alpha = 0.09f),
+                    color = NuvioTheme.colors.Border,
                     shape = RoundedCornerShape(SettingsContainerRadius)
                 )
                 .padding(20.dp),
@@ -649,10 +649,10 @@ internal fun SettingsGroupCard(
             modifier = modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(SettingsSecondaryCardRadius))
-                .background(Color.Black.copy(alpha = 0.85f))
+                .background(NuvioTheme.colors.BackgroundCard)
                 .border(
                     width = NuvioTheme.spacing.hairline,
-                    color = Color.White.copy(alpha = 0.09f),
+                    color = NuvioTheme.colors.Border,
                     shape = RoundedCornerShape(SettingsSecondaryCardRadius)
                 )
                 .padding(14.dp),

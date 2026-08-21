@@ -111,7 +111,6 @@ import com.nuvio.tv.domain.model.ContinueWatchingCardStyle
 import com.nuvio.tv.domain.model.PLACEHOLDER_IMAGE_URL
 import com.nuvio.tv.domain.model.isPlaceholder
 import com.nuvio.tv.ui.components.ContinueWatchingCard
-import com.nuvio.tv.ui.components.RailEyebrow
 import com.nuvio.tv.ui.components.continueWatchingArtworkWidth
 import com.nuvio.tv.ui.components.continueWatchingImageCacheKey
 import com.nuvio.tv.ui.components.continueWatchingImageModel
@@ -511,8 +510,10 @@ internal fun ModernRowSection(
                 .padding(start = 52.dp, end = 52.dp, bottom = rowTitleBottom)
                 .fillMaxWidth()
         }
-        RailEyebrow(
+        Text(
             text = rowTitle,
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = NuvioTheme.colors.TextPrimary,
             modifier = railHeaderModifier
         )
 
