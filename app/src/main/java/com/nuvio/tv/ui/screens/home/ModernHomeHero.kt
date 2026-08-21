@@ -98,6 +98,7 @@ internal fun ModernHeroScene(
     ModernHeroGradientLayer(
         bgColor = bgColor,
         isFullScreen = isFullScreen,
+        trailerShowing = { state().shouldPlayTrailer && state().trailerFirstFrameRendered },
         modifier = modifier
     )
 }
@@ -201,13 +202,20 @@ internal fun ModernHeroMediaLayer(
 internal fun ModernHeroGradientLayer(
     bgColor: Color,
     isFullScreen: () -> Boolean,
+    trailerShowing: () -> Boolean,
     modifier: Modifier
 ) {
     val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val scrimAlpha by animateFloatAsState(
+        targetValue = if (trailerShowing()) 0f else 1f,
+        animationSpec = tween(durationMillis = 480),
+        label = "heroScrimTrailerFade"
+    )
     Box(
         modifier = modifier
             .graphicsLayer {
                 compositingStrategy = CompositingStrategy.Offscreen
+                alpha = scrimAlpha
             }
             .drawWithCache {
                 val fullScreen = isFullScreen()
@@ -389,7 +397,8 @@ private fun HeroTitleContent(
                 modifier = Modifier
                     .height(100.dp)
                     .widthIn(min = 100.dp, max = 220.dp)
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .graphicsLayer { alpha = metaAlpha },
                 contentScale = ContentScale.Fit,
                 alignment = Alignment.CenterStart
             )
@@ -399,7 +408,8 @@ private fun HeroTitleContent(
                 style = scaledTitleStyle,
                 color = NuvioTheme.colors.TextPrimary,
                 maxLines = 2,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.graphicsLayer { alpha = metaAlpha }
             )
         }
 
