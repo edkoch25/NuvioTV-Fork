@@ -1638,9 +1638,15 @@ private fun MetaDetailsContent(
         )
 
         // Single scrollable column with hero + content
+        val trailerContentAlpha = animateFloatAsState(
+            targetValue = if (isTrailerPlaying) 0f else 1f,
+            animationSpec = tween(durationMillis = 480),
+            label = "detailContentTrailerFade"
+        )
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
+                .graphicsLayer { alpha = trailerContentAlpha.value }
                 .recompositionHighlighter(),
             state = listState
         ) {
