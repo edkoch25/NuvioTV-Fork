@@ -185,8 +185,7 @@ internal fun ModernHeroMediaLayer(
                     onEnded = onTrailerEnded,
                     onFirstFrameRendered = onFirstFrameRendered,
                     muted = mutedVal,
-                    cropToFill = true,
-                    overscanZoom = MODERN_TRAILER_OVERSCAN_ZOOM,
+                    cropToFill = false,
                     modifier = Modifier
                         .fillMaxSize()
                         .graphicsLayer {
