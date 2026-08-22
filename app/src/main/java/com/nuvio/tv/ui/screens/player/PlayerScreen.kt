@@ -2074,17 +2074,9 @@ private fun PlayerControlsOverlay(
                     ) {
                         ControlButton(
                             icon = Icons.Default.Info,
-                            contentDescription = stringResource(R.string.cd_stream_info),
-                            onClick = onShowStreamInfo,
-                            focusRequester = streamInfoFocusRequester,
-                            downFocusRequester = progressBarFocusRequester,
-                            onUpKey = onHideControls,
-                            onFocused = onResetHideTimer
-                        )
-                        ControlButton(
-                            icon = Icons.Default.ShowChart,
                             contentDescription = stringResource(R.string.cd_playback_stats),
                             onClick = onTogglePlaybackStats,
+                            focusRequester = streamInfoFocusRequester,
                             downFocusRequester = progressBarFocusRequester,
                             onUpKey = onHideControls,
                             onFocused = onResetHideTimer
