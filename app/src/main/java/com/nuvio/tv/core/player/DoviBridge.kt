@@ -268,7 +268,7 @@ object DoviBridge {
             // rather than a misleading "0". A wholly absent L6 stays omitted.
             maxCll?.let { parts += "MaxCLL ${if (it > 0) it.toString() else "-"}" }
             maxFall?.let { parts += "MaxFALL ${if (it > 0) it.toString() else "-"}" }
-            parts += "MDL peak ~${pqCodeToNits(sourceMaxPq)} nits"
+            parts += "MDL ~${pqCodeToNits(sourceMaxPq)} nits"
             return parts.joinToString(" · ")
         }
 
