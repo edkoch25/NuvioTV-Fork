@@ -359,9 +359,9 @@ internal fun HomeViewModel.requestTrailerPreviewPipeline(
     trailerPreviewJob?.cancel()
     trailerPreviewJob = viewModelScope.launch(Dispatchers.IO) {
         try {
-            // Debounce: wait for focus to settle before hitting network. 600ms so a slow scroll
-            // past a poster does not fire a wasted IMDb scrape; a deliberate pause still prewarms.
-            delay(600)
+            // Debounce: wait for focus to settle before hitting network. 350ms starts prewarming
+            // ~250ms sooner than 600 on a deliberate pause, still past a scroll-flick (~<200ms).
+            delay(350)
 
             // Only the LATEST request proceeds — all earlier ones are stale
             if (trailerPreviewRequestVersion != requestVersion) {

@@ -101,9 +101,7 @@ class ImdbTrailerResolver @Inject constructor(
         repeat(LOAD_ATTEMPTS) { attempt ->
             val flag = NetFlag()
             val result = withTimeoutOrNull(TITLE_BUDGET_MS) {
-                val tBuild0 = android.os.SystemClock.elapsedRealtime()
                 val wv = buildWebView(flag) ?: return@withTimeoutOrNull null
-                Log.i(TAG, "[$imdbId] IMDB_TIMING buildWebView=${android.os.SystemClock.elapsedRealtime() - tBuild0}ms")
                 try {
                     resolveInternal(imdbId, wv, flag)
                 } finally {
@@ -143,9 +141,7 @@ class ImdbTrailerResolver @Inject constructor(
 
     private suspend fun resolveInternal(imdbId: String, wv: WebView, flag: NetFlag): TrailerPlaybackSource? {
         val titleUrl = "https://www.imdb.com/title/$imdbId/"
-        val tTitle0 = android.os.SystemClock.elapsedRealtime()
         val titlePage = loadAndSettle(wv, titleUrl, imdbId, flag)
-        Log.i(TAG, "[$imdbId] IMDB_TIMING titlePage=${android.os.SystemClock.elapsedRealtime() - tTitle0}ms htmlLen=${titlePage?.html?.length ?: -1} blocked=${blockedAssets.get()}")
         if (titlePage == null) {
             Log.w(TAG, "[$imdbId] title page never committed")
             return null
@@ -169,9 +165,7 @@ class ImdbTrailerResolver @Inject constructor(
 
         // Fallback: load only the hero's video page and parse its playback data (mp4 rung not inline).
         val videoUrl = "https://www.imdb.com/video/${hero.vi}"
-        val tVid0 = android.os.SystemClock.elapsedRealtime()
         val videoPage = loadAndSettle(wv, videoUrl, hero.vi, flag)
-        Log.i(TAG, "[$imdbId] IMDB_TIMING videoPage[${hero.vi}]=${android.os.SystemClock.elapsedRealtime() - tVid0}ms htmlLen=${videoPage?.html?.length ?: -1} blocked=${blockedAssets.get()}")
         if (videoPage == null) {
             Log.w(TAG, "[$imdbId] hero video page never committed -> null (YouTube fallback)")
             return null
