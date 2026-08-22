@@ -1032,7 +1032,7 @@ fun ModernHomeContent(
                 .collectAsState(initial = 100)
             val heroDescriptionMaxLines = when {
                 heroDescriptionScalePercent <= 95 -> 4
-                heroDescriptionScalePercent <= 100 -> 3
+                heroDescriptionScalePercent <= 100 -> 4
                 else -> 2
             }
             HeroTitleBlock(
