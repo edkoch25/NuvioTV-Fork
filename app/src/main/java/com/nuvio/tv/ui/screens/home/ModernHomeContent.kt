@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -92,6 +93,17 @@ import kotlin.math.roundToInt
 
 // Height of the wide card as a fraction of its width, matching the 2.5:1 shape of the mobile card.
 private const val WIDE_CARD_HEIGHT_RATIO = 0.4f
+
+/**
+ * Vertical cache window for the Modern home rows list: keep one viewport of rows
+ * composed ahead of the scroll direction and one behind. Value-equal instances are
+ * treated as the same key by rememberLazyListState, but a single file-level
+ * instance avoids re-allocating it on every recomposition.
+ */
+private val MODERN_HOME_ROWS_CACHE_WINDOW = LazyLayoutCacheWindow(
+    aheadFraction = 1f,
+    behindFraction = 1f
+)
 
 @Composable
 fun ModernHomeContent(
@@ -181,7 +193,12 @@ fun ModernHomeContent(
     val activeRowKeys = carouselLookups.activeRowKeys
     val activeCatalogItemIds = carouselLookups.activeCatalogItemIds
 
+    // Pre-compose rows one viewport ahead and one behind during idle frames, so a
+    // DPAD_DOWN/UP press never composes the incoming row's cards on the press
+    // frame (nt2: that first composition was the residual ~150 ms vertical hitch).
+    // Symmetric to match the symmetric poster prewarm in ModernHomeRowsList.
     val verticalRowListState = rememberLazyListState(
+        cacheWindow = MODERN_HOME_ROWS_CACHE_WINDOW,
         initialFirstVisibleItemIndex = focusState.verticalScrollIndex,
         initialFirstVisibleItemScrollOffset = focusState.verticalScrollOffset
     )
