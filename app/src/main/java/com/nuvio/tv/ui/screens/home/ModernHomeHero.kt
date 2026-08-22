@@ -166,7 +166,14 @@ internal fun ModernHeroMediaLayer(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        compositingStrategy = CompositingStrategy.Offscreen
+                        // Auto, not Offscreen: this layer holds a single
+                        // full-screen AsyncImage (no overlapping content), so
+                        // Auto composites the transition alpha correctly while
+                        // avoiding a redundant offscreen buffer at rest. Inside a
+                        // Crossfade, Offscreen meant two buffered full-screen
+                        // backdrops alive at once during a hero swap. The hero
+                        // scrim layer keeps Offscreen (overlapping gradients).
+                        compositingStrategy = CompositingStrategy.Auto
                         alpha = 1f - transitionProgressState.value
                     },
                 contentScale = ContentScale.Crop,
