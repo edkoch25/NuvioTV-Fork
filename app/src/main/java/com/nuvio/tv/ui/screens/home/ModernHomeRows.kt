@@ -1260,8 +1260,14 @@ private fun ModernCarouselCard(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    // Auto instead of Offscreen: Offscreen forces a per-card
+                    // offscreen render target to accelerate blend-mode masking,
+                    // which this card never does (rounded corners come from
+                    // .clip below). Auto only allocates a buffer when alpha < 1
+                    // or a RenderEffect is set -- neither happens here -- so the
+                    // card composites directly at rest. Same clip, same visuals.
                     .graphicsLayer {
-                        compositingStrategy = CompositingStrategy.Offscreen
+                        compositingStrategy = CompositingStrategy.Auto
                     }
                     .clip(cardShape)
                     .nuvioCardDepth(
