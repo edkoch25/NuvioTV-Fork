@@ -151,6 +151,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.media3.exoplayer.ExoPlayer
 import io.github.peerless2012.ass.media.widget.AssSubtitleView
 import kotlin.math.abs
+import androidx.compose.ui.graphics.graphicsLayer
 
 @Composable
 fun PlayerScreen(
@@ -2002,7 +2003,12 @@ private fun PlayerControlsOverlay(
                 enter = fadeIn(animationSpec = tween(NuvioMotion.tokens.durations.fast)),
                 exit = fadeOut(animationSpec = tween(NuvioMotion.tokens.durations.fast))
             ) {
-                Column(modifier = Modifier.fillMaxWidth()) {
+                val statsTitleAlpha by animateFloatAsState(
+                    targetValue = if (uiState.showPlaybackStatsOverlay) 0f else 1f,
+                    animationSpec = tween(NuvioMotion.tokens.durations.fast),
+                    label = "statsTitleFade"
+                )
+                Column(modifier = Modifier.fillMaxWidth().graphicsLayer { alpha = statsTitleAlpha }) {
                     val displayName = if (uiState.currentSeason != null && uiState.currentEpisode != null) {
                         uiState.contentName ?: uiState.title
                     } else {
