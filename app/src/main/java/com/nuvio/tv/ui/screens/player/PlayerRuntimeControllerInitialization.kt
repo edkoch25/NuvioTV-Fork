@@ -3194,20 +3194,34 @@ private fun createDolbyVisionFallbackCodecSelector(
     // which only touches profile 7. We must NOT force video/dolby-vision to the HEVC
     // decoder here: that also catches DV5, which has no HDR10 base layer and ends up
     // decoded without its reshaping (wrong colors). DV5 keeps the DV decoder.
-    if (convertToDv81Active) {
-        return MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
-            val defaults = MediaCodecSelector.DEFAULT.getDecoderInfos(
-                mimeType, requiresSecureDecoder, requiresTunnelingDecoder
-            )
-            if (mimeType != MimeTypes.VIDEO_DOLBY_VISION || defaults.isNotEmpty()) {
-                return@MediaCodecSelector defaults
-            }
-            DolbyVisionCodecFallback.findDvDecodersIgnoringProfile()
+    return MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
+        val defaults = MediaCodecSelector.DEFAULT.getDecoderInfos(
+            mimeType, requiresSecureDecoder, requiresTunnelingDecoder
+        )
+        if (defaults.isNotEmpty()) {
+            return@MediaCodecSelector defaults
         }
+        // VC-1 MIME bridge. media3 tags Blu-ray VC-1 as video/wvc1, but Amlogic
+        // (S905X5) registers its VC-1 decoders as video/vc1, so a video/wvc1 query
+        // returns nothing on hardware that can decode it. Proven on AM9 Pro via
+        // MediaCodecList: supportedTypes=[video/vc1] for c2.amlogic.vc1.decoder and
+        // .sw; queryable_as_video/wvc1=[]. Re-query under video/vc1; the returned
+        // MediaCodecInfo carries codecMimeType=video/vc1, which the renderer sets as
+        // the MediaFormat KEY_MIME at configure, so the codec gets a string it accepts.
+        if (mimeType.equals(MimeTypes.VIDEO_VC1, ignoreCase = true)) {
+            val vc1Decoders = MediaCodecSelector.DEFAULT.getDecoderInfos(
+                "video/vc1", requiresSecureDecoder, requiresTunnelingDecoder
+            )
+            if (vc1Decoders.isNotEmpty()) {
+                return@MediaCodecSelector vc1Decoders
+            }
+        }
+        if (convertToDv81Active && mimeType == MimeTypes.VIDEO_DOLBY_VISION) {
+            return@MediaCodecSelector DolbyVisionCodecFallback.findDvDecodersIgnoringProfile()
+        }
+        defaults
     }
-    return MediaCodecSelector.DEFAULT
 }
-
 private fun describeExtensionRendererMode(mode: Int): String {
     return when (mode) {
         DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF -> "off"
