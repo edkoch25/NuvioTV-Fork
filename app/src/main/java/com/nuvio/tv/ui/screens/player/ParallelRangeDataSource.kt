@@ -201,6 +201,12 @@ internal class ParallelRangeDataSource(
         @Volatile var hudDepthCap: Int = 0
         @Volatile var hudDepthConfigured: Int = 0
         @Volatile var hudNextStepAtMs: Long = 0L
+        // nt19: HUD mirror of the 3a body-stall hedge. hudHedgeRestarts counts
+        // fresh-connection restart attempts this session; hudHedgeExhausted latches if
+        // any chunk hit the restart cap. Written only by downloadChunkWithStallRestart;
+        // zeroed on fresh-session creation with the other mirrors.
+        @Volatile var hudHedgeRestarts: Int = 0
+        @Volatile var hudHedgeExhausted: Boolean = false
 
         // 3a: once-ever announce flag so a capture can confirm this build
         // is live even when nothing stalls.
@@ -509,6 +515,8 @@ internal class ParallelRangeDataSource(
                 hudDepthCap = 0
                 hudDepthConfigured = 0
                 hudNextStepAtMs = 0L
+                hudHedgeRestarts = 0
+                hudHedgeExhausted = false
                 val created = ChunkSession(requestUri, requestHeaders, chunkSz, chunkCap, prefetchWindow)
                 currentChunkSession = created
                 return created
@@ -1503,6 +1511,7 @@ internal class ParallelRangeDataSource(
         var attempt = 0
         while (attempt < HEDGE_MAX_RESTARTS) {
             if (future.isCancelled || activeSession.abandoned.get()) throw IOException("Cancelled")
+            hudHedgeRestarts++
             Log.w(TAG, "HEDGE_RESTART chunk=$chunkIndex attempt=${attempt + 1}/$HEDGE_MAX_RESTARTS " +
                 "prevRateBps=${lastStall.rateBps} atWatermark=${lastStall.watermark}")
             try {
@@ -1515,6 +1524,7 @@ internal class ParallelRangeDataSource(
             }
         }
         // Origin stalling every connection: complete slowly rather than fail.
+        hudHedgeExhausted = true
         Log.w(TAG, "HEDGE_RESTART chunk=$chunkIndex exhausted after $HEDGE_MAX_RESTARTS; " +
             "final attempt with watchdog disabled")
         return downloadChunkOnce(activeSession, chunkIndex, future, allowStallRestart = false)

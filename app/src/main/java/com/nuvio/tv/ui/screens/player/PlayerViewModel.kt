@@ -203,11 +203,15 @@ class PlayerViewModel @Inject constructor(
     private var statsPrevNetworkSampleAtMs: Long = 0L
     private var statsPrevIsLoading: Boolean = false
     private var statsMeasuredBps: Long? = null
+    // nt19: recency state for the Rebuffers row (real STATE_BUFFERING count from the
+    // controller), mirroring the dropped/underrun/stall recency fields above.
+    private var statsPrevRebuffers: Int = -1
+    private var statsRebuffersIncreasedAtMs: Long = 0L
 
     /**
      * TCP-connect round trip to the current stream URL's host (the app cannot
      * send true ICMP pings). One handshake approximates one network RTT; it
-     * probes the host in the URL as written, pre any CDN redirect, and is a
+     * prefers the resolved serving host (post-redirect, as the Server row), and is a
      * fresh connection rather than the reused streaming one. Called from the
      * HUD effect roughly every fifth tick.
      */
@@ -215,7 +219,7 @@ class PlayerViewModel @Inject constructor(
         val url = runCatching { controller.getCurrentStreamUrl() }.getOrNull()
             ?.takeIf { it.isNotBlank() } ?: return@withContext null
         val uri = runCatching { URI(url) }.getOrNull() ?: return@withContext null
-        val host = uri.host ?: return@withContext null
+        val host = PlaybackConnectionEvents.resolvedHost() ?: uri.host ?: return@withContext null
         val port = when {
             uri.port > 0 -> uri.port
             uri.scheme.equals("https", ignoreCase = true) -> 443
@@ -274,6 +278,8 @@ class PlayerViewModel @Inject constructor(
             statsPrevNetworkSampleAtMs = 0L
             statsPrevIsLoading = false
             statsMeasuredBps = null
+            statsPrevRebuffers = -1
+            statsRebuffersIncreasedAtMs = 0L
         }
         if (statsPrevDropped in 0 until hud.droppedFrames) statsDroppedIncreasedAtMs = nowMs
         if (statsPrevUnderruns in 0 until hud.audioUnderrunCount) statsUnderrunsIncreasedAtMs = nowMs
@@ -281,6 +287,9 @@ class PlayerViewModel @Inject constructor(
         statsPrevDropped = hud.droppedFrames
         statsPrevUnderruns = hud.audioUnderrunCount
         statsPrevStalls = hud.positionStallCount
+        val rebuffers = controller.rebufferCount
+        if (statsPrevRebuffers in 0 until rebuffers) statsRebuffersIncreasedAtMs = nowMs
+        statsPrevRebuffers = rebuffers
 
         fun recencyDot(total: Int, increasedAtMs: Long): StatsDot = when {
             total <= 0 -> StatsDot.GOOD
@@ -329,7 +338,7 @@ class PlayerViewModel @Inject constructor(
             ) {
                 val windowMs = nowMs - statsPrevNetworkSampleAtMs
                 val windowBytes = networkNow - statsPrevNetworkBytes
-                if (windowBytes > 0L &&
+                if (windowBytes >= 0L &&
                     windowMs in t.THROUGHPUT_MIN_WINDOW_MS..t.THROUGHPUT_MAX_WINDOW_MS
                 ) {
                     val sampleBps = windowBytes * 8_000L / windowMs
@@ -612,7 +621,7 @@ class PlayerViewModel @Inject constructor(
         val meterRepresentative = hud.transferredNetworkBytes <= 0L ||
             hud.bandwidthBytesTotal * t.METER_COVERAGE_DIVISOR >= hud.transferredNetworkBytes
         val meterBps = hud.bandwidthEstimateBps?.takeIf { meterRepresentative }
-        (meterBps ?: statsMeasuredBps)?.let { bps ->
+        (statsMeasuredBps ?: meterBps)?.let { bps ->
             val reference = effectiveMuxBps
                 ?: player?.videoFormat?.bitrate?.takeIf { it > 0 }?.toLong()
             val dot = if (reference != null && reference > 0L) {
@@ -626,7 +635,7 @@ class PlayerViewModel @Inject constructor(
                 StatsDot.NONE
             }
             val rate = String.format("%.1f Mbit/s", bps / 1_000_000.0)
-            rows += StatsRow("Speed", if (meterBps != null) "est $rate" else "meas $rate", dot)
+            rows += StatsRow("Speed", if (statsMeasuredBps != null) "meas $rate" else "est $rate", dot)
         }
 
         // Ping (TCP connect RTT, sampled every ~5 s by the HUD effect).
@@ -657,14 +666,23 @@ class PlayerViewModel @Inject constructor(
                 val nextS = ParallelRangeDataSource
                     .hudClampCooldownRemainingMs(android.os.SystemClock.uptimeMillis()) / 1000L
                 rows += StatsRow(
-                    "Clamp",
-                    "depth ${ParallelRangeDataSource.hudDepthCap}/${ParallelRangeDataSource.hudDepthConfigured}" +
+                    "Rate limit",
+                    "429 \u00b7 depth ${ParallelRangeDataSource.hudDepthCap}/${ParallelRangeDataSource.hudDepthConfigured}" +
                         " \u00b7 +1 in ${nextS}s",
                     StatsDot.WARN
                 )
             } else {
-                rows += StatsRow("Clamp", "recovered \u00b7 ${ParallelRangeDataSource.hudClampTrips} trips")
+                rows += StatsRow("Rate limit", "recovered \u00b7 ${ParallelRangeDataSource.hudClampTrips} \u00d7 429")
             }
+        }
+        // Hedge (nt19): 3a body-stall restart activity this session. Hidden until the
+        // first fresh-connection restart fires. "N restarts" while escaping; appends
+        // "(cap hit)" if any chunk exhausted the restart budget (uniformly-slow origin).
+        if (ParallelRangeDataSource.hudHedgeRestarts > 0) {
+            val hedgeExhausted = ParallelRangeDataSource.hudHedgeExhausted
+            val hedgeValue = "${ParallelRangeDataSource.hudHedgeRestarts} restarts" +
+                if (hedgeExhausted) " (cap hit)" else ""
+            rows += StatsRow("Hedge", hedgeValue, if (hedgeExhausted) StatsDot.BAD else StatsDot.WARN)
         }
         if (hud.loadErrorCount > 0) {
             rows += StatsRow("Load errors", hud.loadErrorCount.toString(), StatsDot.WARN)
@@ -673,15 +691,27 @@ class PlayerViewModel @Inject constructor(
             .takeIf { it > 0L }
             ?.let { rows += StatsRow("Loaded", formatPlaybackStatsBytes(it)) }
 
-        // Stalls (rebuffers observed as position stalls).
-        run {
+        // Rebuffers (nt19): real STATE_BUFFERING count from the runtime controller,
+        // hidden until the first rebuffer. The old "Stalls" row read positionStallCount,
+        // which only counts a "zombie" freeze (player READY+playing yet position frozen)
+        // and reads 0 through a genuine rebuffer -- that now drives "Pos. freeze" below.
+        if (rebuffers > 0) {
+            rows += StatsRow(
+                "Rebuffers",
+                String.format("%d (%.1f s total)", rebuffers, controller.rebufferTotalMs / 1000.0),
+                recencyDot(rebuffers, statsRebuffersIncreasedAtMs)
+            )
+        }
+        // Pos. freeze (nt19): renderer/clock wedge -- position frozen while the player
+        // still reports READY+playing (the VC-1-class fault). Hidden until non-zero.
+        if (hud.positionStallCount > 0) run {
             val longest = hud.longestPositionStallMs
             val value = if (hud.positionStallCount > 0 && longest > 0L) {
                 String.format("%d (longest %.1f s)", hud.positionStallCount, longest / 1000.0)
             } else {
                 hud.positionStallCount.toString()
             }
-            rows += StatsRow("Stalls", value, recencyDot(hud.positionStallCount, statsStallsIncreasedAtMs))
+            rows += StatsRow("Pos. freeze", value, recencyDot(hud.positionStallCount, statsStallsIncreasedAtMs))
         }
 
         // Audio: format + passthrough state + bitrate.
