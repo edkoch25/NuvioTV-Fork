@@ -398,12 +398,17 @@ internal class PlaybackSpeedAwareAudioSink(
     // read. Returns super(...) UNCHANGED (no clamp, no intervention); logs the
     // value rate-limited to ~5ms so the seek->flush poison window can be read on
     // the real read path rather than the :361 proxy.
+    // nt20: single runtime-toggleable gate for the high-volume SEEK_TRACE /
+    // CEIL_FRONTIER emissions. Default OFF on release builds; arm per playback
+    // with `setprop log.tag.PassthroughAudioSink D` (read once, next play).
+    private val traceEnabled by lazy { Log.isLoggable(TAG, Log.DEBUG) }
+
     override fun getCurrentPositionUs(sourceEnded: Boolean): Long {
         val posUs = super.getCurrentPositionUs(sourceEnded)
         val nowMs = SystemClock.elapsedRealtime()
         if (nowMs - seekTracePosLogAtMs >= 5L) {
             seekTracePosLogAtMs = nowMs
-            Log.w(TAG, "SEEK_TRACE POS er=$nowMs posUs=$posUs sourceEnded=$sourceEnded")
+            if (traceEnabled) Log.w(TAG, "SEEK_TRACE POS er=$nowMs posUs=$posUs sourceEnded=$sourceEnded")
         }
         val governedUs = computeShadowGovernor(posUs, nowMs)
         return governedUs
@@ -427,11 +432,11 @@ internal class PlaybackSpeedAwareAudioSink(
             // for old-vs-new comparison -- proves the refinement only drops rebuffers.
             if (!govOldEngaged && playbackActive && r > GOV_ENGAGE_RATE_X100) {
                 govOldEngaged = true
-                Log.w(TAG, "SEEK_TRACE GOV_WOULD_ENGAGE_OLD er=$nowMs atPosUs=$rawUs rate100=$r")
+                if (traceEnabled) Log.w(TAG, "SEEK_TRACE GOV_WOULD_ENGAGE_OLD er=$nowMs atPosUs=$rawUs rate100=$r")
             }
             if (r > GOV_TELEPORT_REJECT_X100) {
                 // teleport (seek/rebuffer jump) -- never a storm; reject, do not count.
-                Log.w(TAG, "SEEK_TRACE GOV_REJECT er=$nowMs rate100=$r reason=teleport")
+                if (traceEnabled) Log.w(TAG, "SEEK_TRACE GOV_REJECT er=$nowMs rate100=$r reason=teleport")
             } else if (r > GOV_ENGAGE_RATE_X100) {
                 // nt18: in-band spike (1.5x..40x) engages directly. The recurrence
                 // gate (removed) suppressed real storms -- run5 missed 3 storms at
@@ -480,7 +485,7 @@ internal class PlaybackSpeedAwareAudioSink(
         }
         if (nowMs - govLogAtMs >= GOV_LOG_INTERVAL_MS) {
             govLogAtMs = nowMs
-            Log.w(TAG, "SEEK_TRACE GOV er=$nowMs raw=$rawUs A=$govA B=$govB C=$govC " +
+            if (traceEnabled) Log.w(TAG, "SEEK_TRACE GOV er=$nowMs raw=$rawUs A=$govA B=$govB C=$govC " +
                 "eng=${if (govEngaged) 1 else 0} frozen=${if (govCFrozen) 1 else 0} rate100=$govRateX100")
         }
         // nt19 LIVE C: report the frozen position while engaged+frozen; raw otherwise.
@@ -655,7 +660,7 @@ internal class PlaybackSpeedAwareAudioSink(
         val nowMs = SystemClock.elapsedRealtime()
         if (nowMs - ceilFrontierLogAtMs >= CEIL_FRONTIER_LOG_INTERVAL_MS) {
             ceilFrontierLogAtMs = nowMs
-            Log.w(
+            if (traceEnabled) Log.w(
                 TAG,
                 "CEIL_FRONTIER er=$nowMs lastPtsUs=$encodedAudioLastPtsUs " +
                     "anchorPtsUs=$ceilAnchorPtsUs queuedAtArmUs=$ceilQueuedAtArmUs " +
@@ -869,7 +874,7 @@ internal class PlaybackSpeedAwareAudioSink(
             val expectedMs = (wallDeltaMs * playbackSpeed).toLong()
             val absMs = abs(posDeltaMs - expectedMs)
             if (absMs > 50L) {
-                Log.w(
+                if (traceEnabled) Log.w(
                     TAG,
                     "SEEK_TRACE JITTER er=$nowMs posUs=$posUs posDeltaMs=$posDeltaMs " +
                         "expectedMs=$expectedMs devMs=$absMs"

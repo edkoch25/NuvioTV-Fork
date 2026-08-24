@@ -1,5 +1,7 @@
 package com.nuvio.tv.ui.screens.player
 
+import android.util.Log
+
 import android.os.SystemClock
 import androidx.media3.common.C
 import androidx.media3.common.Format
@@ -284,6 +286,7 @@ internal class PlayerPlaybackAnalyticsDiagnostics {
 
         if (lastPositionForStallMs < 0L || position > lastPositionForStallMs + POSITION_PROGRESS_EPSILON_MS) {
             if (positionStallActive) {
+                Log.i("NuvioPosFreeze", "FREEZE_END stallMs=${(now - positionLastAdvancedAtMs).coerceAtLeast(0L)} positionMs=$position")
                 record(
                     name = "position_stall_recovered",
                     eventTime = null,
@@ -305,6 +308,7 @@ internal class PlayerPlaybackAnalyticsDiagnostics {
             if (!positionStallActive) {
                 positionStallActive = true
                 positionStallCount += 1
+                Log.i("NuvioPosFreeze", "FREEZE_BEGIN stallMs=$stalledForMs positionMs=$position bufferedMs=${player.bufferedPosition.coerceAtLeast(0L)} state=${player.playbackState.playbackStateName()}")
                 record(
                     name = "position_stall",
                     eventTime = null,
