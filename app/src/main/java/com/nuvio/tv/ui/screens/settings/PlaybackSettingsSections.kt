@@ -1025,7 +1025,7 @@ private fun AfrCapabilityDisableButton(
         ),
         border = CardDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
+                border = NuvioTheme.focusRing.border(NuvioTheme.spacing.xxs),
                 shape = RoundedCornerShape(SettingsPillRadius)
             )
         ),

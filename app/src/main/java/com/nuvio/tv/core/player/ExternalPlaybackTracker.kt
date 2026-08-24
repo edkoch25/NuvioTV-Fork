@@ -280,6 +280,7 @@ class ExternalPlaybackTracker @Inject constructor(
     fun startTracking(
         metadata: ExternalPlaybackMetadata,
         autoLaunch: Boolean = false,
+        startFromBeginning: Boolean = false,
         nextEpisodeSnapshot: ExternalNextEpisodeSnapshot? = null,
         autoNextEnabled: Boolean? = null,
         cloudSessionToken: String? = null
@@ -328,7 +329,7 @@ class ExternalPlaybackTracker @Inject constructor(
 
         // On Zidoo devices, start REST API polling
         if (ZidooPlayerMonitor.isZidooDevice()) {
-            startZidooMonitor(metadata)
+            startZidooMonitor(metadata, startFromBeginning)
         }
     }
 
@@ -350,6 +351,7 @@ class ExternalPlaybackTracker @Inject constructor(
      * @param title Display title
      * @param headers HTTP headers for the stream
      * @param resumePositionMs Position to resume from (ms), 0 to auto-fetch
+     * @param startFromBeginning Skip saved progress and explicitly start at zero
      * @param context Fallback context for fire-and-forget launch
      */
     suspend fun launchPlayer(
@@ -358,6 +360,7 @@ class ExternalPlaybackTracker @Inject constructor(
         title: String?,
         headers: Map<String, String>?,
         resumePositionMs: Long = 0L,
+        startFromBeginning: Boolean = false,
         subtitles: List<SubtitleInput>? = null,
         autoLaunch: Boolean = false,
         nextEpisodeSnapshot: ExternalNextEpisodeSnapshot? = null,
@@ -377,6 +380,7 @@ class ExternalPlaybackTracker @Inject constructor(
         startTracking(
             metadata = metadata,
             autoLaunch = autoLaunch,
+            startFromBeginning = startFromBeginning,
             nextEpisodeSnapshot = nextEpisodeSnapshot,
             autoNextEnabled = autoNextEnabled,
             cloudSessionToken = cloudSessionToken
@@ -387,7 +391,11 @@ class ExternalPlaybackTracker @Inject constructor(
         // and is cached, so an auto-next chain pays it only once.
         val launched = coroutineScope {
             val positionDeferred = async {
-                if (resumePositionMs > 0L) resumePositionMs else getResumePosition(metadata)
+                when {
+                    startFromBeginning -> 0L
+                    resumePositionMs > 0L -> resumePositionMs
+                    else -> getResumePosition(metadata)
+                }
             }
             val skipSegmentsDeferred = async {
                 resolveSkipSegmentsJson(metadata)
@@ -399,7 +407,16 @@ class ExternalPlaybackTracker @Inject constructor(
                 false
             } else {
                 withContext(Dispatchers.Main.immediate) {
-                    doLaunch(url, title, headers, position, subtitles, skipSegmentsJson, context)
+                    doLaunch(
+                        url = url,
+                        title = title,
+                        headers = headers,
+                        resumePositionMs = position,
+                        startFromBeginning = startFromBeginning,
+                        subtitles = subtitles,
+                        skipSegmentsJson = skipSegmentsJson,
+                        context = context
+                    )
                 }
             }
         }
@@ -457,6 +474,7 @@ class ExternalPlaybackTracker @Inject constructor(
         title: String?,
         headers: Map<String, String>?,
         resumePositionMs: Long,
+        startFromBeginning: Boolean,
         subtitles: List<SubtitleInput>?,
         skipSegmentsJson: String?,
         context: Context
@@ -467,6 +485,7 @@ class ExternalPlaybackTracker @Inject constructor(
             title = title,
             headers = headers,
             resumePositionMs = resumePositionMs,
+            startFromBeginning = startFromBeginning,
             subtitles = subtitles,
             skipSegmentsJson = skipSegmentsJson
         )
@@ -479,6 +498,7 @@ class ExternalPlaybackTracker @Inject constructor(
                 title = title,
                 headers = headers,
                 resumePositionMs = resumePositionMs,
+                startFromBeginning = startFromBeginning,
                 subtitles = subtitles,
                 skipSegmentsJson = skipSegmentsJson
             )
@@ -497,6 +517,7 @@ class ExternalPlaybackTracker @Inject constructor(
                         title = title,
                         headers = headers,
                         resumePositionMs = resumePositionMs,
+                        startFromBeginning = startFromBeginning,
                         subtitles = subtitles,
                         skipSegmentsJson = skipSegmentsJson
                     )
@@ -509,6 +530,7 @@ class ExternalPlaybackTracker @Inject constructor(
                     title = title,
                     headers = headers,
                     resumePositionMs = resumePositionMs,
+                    startFromBeginning = startFromBeginning,
                     subtitles = subtitles,
                     skipSegmentsJson = skipSegmentsJson
                 )
@@ -1255,10 +1277,13 @@ class ExternalPlaybackTracker @Inject constructor(
         Log.d(TAG, "Dismissed overlay only (Zidoo monitor still running)")
     }
 
-    private fun startZidooMonitor(metadata: ExternalPlaybackMetadata) {
+    private fun startZidooMonitor(
+        metadata: ExternalPlaybackMetadata,
+        startFromBeginning: Boolean
+    ) {
         zidooMonitorJob?.cancel()
         zidooMonitorJob = scope.launch(Dispatchers.Default) {
-            val resumePosition = getResumePosition(metadata)
+            val resumePosition = if (startFromBeginning) 0L else getResumePosition(metadata)
             val result = ZidooPlayerMonitor.awaitPlaybackEnd(resumePositionMs = resumePosition)
             if (result != null) {
                 Log.d(TAG, "Zidoo monitor: pos=${result.positionMs}ms, dur=${result.durationMs}ms")
@@ -1380,6 +1405,8 @@ class ExternalPlaybackTracker @Inject constructor(
         )
             .takeIf { media ->
                 media.hasResolvableIdentity &&
-                    (media.kind == TrackingMediaKind.MOVIE || media.episode != null)
+                    (media.kind == TrackingMediaKind.MOVIE ||
+                        media.kind == TrackingMediaKind.ANIME ||
+                        media.episode != null)
             }
 }

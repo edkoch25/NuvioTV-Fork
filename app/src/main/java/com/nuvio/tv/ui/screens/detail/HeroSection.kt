@@ -83,8 +83,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.painter.Painter
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import com.nuvio.tv.ui.util.localizedGenreLabel
 import com.nuvio.tv.ui.util.rememberLongPressKeyTracker
 import java.util.Locale
+
+private const val MAX_VISIBLE_HERO_GENRES = 6
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -513,7 +516,7 @@ private fun PlayButton(
         ),
         border = ButtonDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                border = NuvioTheme.focusRing.border(NuvioTheme.spacing.xxs),
                 shape = RoundedCornerShape(NuvioTheme.spacing.xxl)
             )
         ),
@@ -574,7 +577,7 @@ private fun ActionIconButtonPainter(
         ),
         border = IconButtonDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                border = NuvioTheme.focusRing.border(NuvioTheme.spacing.xxs),
                 shape = CircleShape
             )
         ),
@@ -659,7 +662,7 @@ private fun ActionIconButton(
         ),
         border = IconButtonDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, NuvioTheme.colors.FocusRing),
+                border = NuvioTheme.focusRing.border(NuvioTheme.spacing.xxs),
                 shape = CircleShape
             )
         ),
@@ -691,7 +694,11 @@ private fun MetaInfoRow(
     tmdbRating: Float? = null
 ) {
     val context = LocalContext.current
-    val genresText = remember(meta.genres) { meta.genres.joinToString(" • ") }
+    val genresText = remember(meta.genres) {
+        meta.genres
+            .take(MAX_VISIBLE_HERO_GENRES)
+            .joinToString(" • ") { localizedGenreLabel(context, it) }
+    }
     val runtimeText = remember(meta.runtime) { meta.runtime?.let { formatRuntime(it) } }
     val yearText = remember(meta.releaseInfo, meta.released, meta.type, showFullReleaseDate) {
         if (showFullReleaseDate && meta.type == ContentType.MOVIE) {
@@ -704,6 +711,7 @@ private fun MetaInfoRow(
         }
     }
     val imdbRating = if (hideImdbRating) null else meta.imdbRating
+    val reserveImdbRatingHeight = meta.imdbRating != null
     val shouldShowImdbRating = imdbRating != null
     val shouldShowTmdbRating = tmdbRating != null
     val tmdbModel = remember(context) {
@@ -750,15 +758,18 @@ private fun MetaInfoRow(
     Column(verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.sm)) {
         // Primary row: Genres, Release, Ratings
         Row(
+            modifier = if (reserveImdbRatingHeight) Modifier.height(30.dp) else Modifier,
             horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.md),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Show all genres
             if (meta.genres.isNotEmpty()) {
                 Text(
                     text = genresText,
+                    modifier = Modifier.weight(1f, fill = false),
                     style = MaterialTheme.typography.labelLarge,
-                    color = NuvioTheme.extendedColors.textSecondary
+                    color = NuvioTheme.extendedColors.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 if (yearText != null || shouldShowImdbRating || shouldShowTmdbRating) {
                     MetaInfoDivider()

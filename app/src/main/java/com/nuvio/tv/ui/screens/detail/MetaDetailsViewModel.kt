@@ -12,6 +12,7 @@ import com.nuvio.tv.core.network.NetworkResult
 import com.nuvio.tv.core.tmdb.TmdbMetadataService
 import com.nuvio.tv.core.tmdb.TmdbService
 import com.nuvio.tv.data.local.LayoutPreferenceDataStore
+import com.nuvio.tv.data.local.MDBListSettingsDataStore
 import com.nuvio.tv.data.local.PlayerSettingsDataStore
 import com.nuvio.tv.data.local.TraktAuthDataStore
 import com.nuvio.tv.data.local.TraktSettingsDataStore
@@ -97,6 +98,7 @@ class MetaDetailsViewModel @Inject constructor(
     private val tmdbMetadataService: TmdbMetadataService,
     private val imdbEpisodeRatingsRepository: ImdbEpisodeRatingsRepository,
     private val mdbListRepository: MDBListRepository,
+    private val mdbListSettingsDataStore: MDBListSettingsDataStore,
     private val libraryRepository: LibraryRepository,
     private val watchProgressRepository: WatchProgressRepository,
     private val watchedItemsPreferences: WatchedItemsPreferences,
@@ -411,6 +413,8 @@ class MetaDetailsViewModel @Inject constructor(
         observeMovieWatched()
         observeRelatedWatchedStatus()
         observeBlurUnwatchedEpisodes()
+        observeOverallRatingsVisibility()
+        observeDetailImdbRatingsVisibility()
         observeShowFullReleaseDate()
         observeHideUnreleasedContent()
         loadMeta()
@@ -828,7 +832,39 @@ class MetaDetailsViewModel @Inject constructor(
                 _uiState.update { state ->
                     if (state.blurUnwatchedEpisodes == enabled) state else state.copy(blurUnwatchedEpisodes = enabled)
                 }
-            }
+                }
+        }
+    }
+
+    private fun observeDetailImdbRatingsVisibility() {
+        viewModelScope.launch {
+            layoutPreferenceDataStore.detailImdbRatingsVisibility
+                .distinctUntilChanged()
+                .collectLatest { visibility ->
+                    _uiState.update { state ->
+                        if (state.detailImdbRatingsVisibility == visibility) {
+                            state
+                        } else {
+                            state.copy(detailImdbRatingsVisibility = visibility)
+                        }
+                    }
+                }
+        }
+    }
+
+    private fun observeOverallRatingsVisibility() {
+        viewModelScope.launch {
+            layoutPreferenceDataStore.homeImdbRatingsVisibility
+                .distinctUntilChanged()
+                .collectLatest { visibility ->
+                    _uiState.update { state ->
+                        if (state.overallRatingsVisibility == visibility) {
+                            state
+                        } else {
+                            state.copy(overallRatingsVisibility = visibility)
+                        }
+                    }
+                }
         }
     }
 
@@ -870,6 +906,8 @@ class MetaDetailsViewModel @Inject constructor(
             // latency. Logging only.
             metaLoadStartMs = android.os.SystemClock.elapsedRealtime()
             cancelCommentsRequests()
+            val mdbListSettings = mdbListSettingsDataStore.settings.first()
+            val isMdbListActive = mdbListSettings.enabled && mdbListSettings.apiKey.isNotBlank()
             _uiState.update {
                 it.copy(
                     isLoading = true,
@@ -878,7 +916,7 @@ class MetaDetailsViewModel @Inject constructor(
                     isEpisodeRatingsLoading = false,
                     episodeRatingsError = null,
                     mdbListRatings = null,
-                    showMdbListImdb = false,
+                    isMdbListRatingsActive = isMdbListActive,
                     tmdbRating = null,
                     moreLikeThis = emptyList(),
                     moreLikeThisSource = null,
@@ -1532,6 +1570,8 @@ class MetaDetailsViewModel @Inject constructor(
     }
 
     private suspend fun loadMDBListRatings(meta: Meta) {
+        val settings = mdbListSettingsDataStore.settings.first()
+        val isMdbListActive = settings.enabled && settings.apiKey.isNotBlank()
         val ratingsResult = runCatching {
             mdbListRepository.getRatingsForMeta(
                 meta = meta,
@@ -1543,7 +1583,7 @@ class MetaDetailsViewModel @Inject constructor(
         _uiState.update { state ->
             state.copy(
                 mdbListRatings = ratingsResult?.ratings,
-                showMdbListImdb = ratingsResult?.hasImdbRating == true
+                isMdbListRatingsActive = isMdbListActive
             )
         }
     }
@@ -1572,12 +1612,21 @@ class MetaDetailsViewModel @Inject constructor(
                 )
             }
 
+            // Ratings the addon supplied on meta.videos[].rating. The repository below
+            // still wins wherever it has an entry.
+            val addonRatings: Map<Pair<Int, Int>, Double> = meta.videos.mapNotNull { video ->
+                val season = video.season ?: return@mapNotNull null
+                val episode = video.episode ?: return@mapNotNull null
+                val rating = video.rating ?: return@mapNotNull null
+                (season to episode) to rating
+            }.toMap()
+
             try {
                 val tmdbContentType = resolveTmdbContentType(meta)
                 if (tmdbContentType !in listOf(ContentType.SERIES, ContentType.TV)) {
                     _uiState.update {
                         it.copy(
-                            episodeImdbRatings = emptyMap(),
+                            episodeImdbRatings = addonRatings,
                             isEpisodeRatingsLoading = false,
                             episodeRatingsError = null
                         )
@@ -1597,9 +1646,13 @@ class MetaDetailsViewModel @Inject constructor(
                             state
                         } else {
                             state.copy(
-                                episodeImdbRatings = emptyMap(),
+                                episodeImdbRatings = addonRatings,
                                 isEpisodeRatingsLoading = false,
-                                episodeRatingsError = localizedContext.getString(R.string.ratings_unavailable)
+                                episodeRatingsError = if (addonRatings.isEmpty()) {
+                                    localizedContext.getString(R.string.ratings_unavailable)
+                                } else {
+                                    null
+                                }
                             )
                         }
                     }
@@ -1616,7 +1669,7 @@ class MetaDetailsViewModel @Inject constructor(
                         state
                     } else {
                         state.copy(
-                            episodeImdbRatings = ratings,
+                            episodeImdbRatings = addonRatings + ratings,
                             isEpisodeRatingsLoading = false,
                             episodeRatingsError = null
                         )
@@ -1631,9 +1684,13 @@ class MetaDetailsViewModel @Inject constructor(
                         state
                     } else {
                         state.copy(
-                            episodeImdbRatings = emptyMap(),
+                            episodeImdbRatings = addonRatings,
                             isEpisodeRatingsLoading = false,
-                            episodeRatingsError = localizedContext.getString(R.string.ratings_load_error)
+                            episodeRatingsError = if (addonRatings.isEmpty()) {
+                                localizedContext.getString(R.string.ratings_load_error)
+                            } else {
+                                null
+                            }
                         )
                     }
                 }

@@ -14,6 +14,7 @@ import com.nuvio.tv.domain.model.stableKey
 import com.nuvio.tv.ui.util.localizeEpisodeTitle
 import com.nuvio.tv.ui.util.localizedContentType
 import com.nuvio.tv.ui.util.computeAirDateBadgeText
+import com.nuvio.tv.ui.util.formatHeroRuntime
 import com.nuvio.tv.domain.model.MetaPreview
 import com.nuvio.tv.R
 import com.nuvio.tv.ui.components.formatContinueWatchingProgressLabel
@@ -171,6 +172,7 @@ internal data class ModernCatalogRowBuildCacheEntry(
     val source: CatalogRow,
     val useLandscapePosters: Boolean,
     val showCatalogTypeSuffix: Boolean,
+    val showImdbRatings: Boolean,
     val localeTag: String,
     val mappedRow: HeroCarouselRow
 )
@@ -186,10 +188,12 @@ class ModernCarouselRowBuildCache {
     var continueWatchingAirsDateTemplate: String = ""
     var continueWatchingUpcomingLabel: String = ""
     var continueWatchingUseLandscapePosters: Boolean = false
+    var continueWatchingShowImdbRatings: Boolean = true
     var continueWatchingRow: HeroCarouselRow? = null
     var upcomingItems: List<ContinueWatchingItem> = emptyList()
     var upcomingTitle: String = ""
     var upcomingUseLandscapePosters: Boolean = false
+    var upcomingShowImdbRatings: Boolean = true
     var upcomingRow: HeroCarouselRow? = null
     internal val catalogRows = java.util.concurrent.ConcurrentHashMap<String, ModernCatalogRowBuildCacheEntry>()
     internal val collectionRows = java.util.concurrent.ConcurrentHashMap<String, ModernCollectionRowBuildCacheEntry>()
@@ -201,6 +205,7 @@ internal data class CachedCarouselItem(
     val source: MetaPreview,
     val useLandscapePosters: Boolean,
     val showFullReleaseDate: Boolean,
+    val showImdbRatings: Boolean,
     val carouselItem: ModernCarouselItem
 )
 
@@ -279,6 +284,7 @@ internal fun ModernCarouselItem.catalogCardRequestMetrics(
 internal fun buildContinueWatchingItem(
     item: ContinueWatchingItem,
     useLandscapePosters: Boolean,
+    showImdbRatings: Boolean,
     airsDateTemplate: String,
     upcomingLabel: String,
     context: android.content.Context
@@ -335,7 +341,8 @@ internal fun buildContinueWatchingItem(
                 isSeries = isSeries,
                 yearText = extractYearOrRange(item.releaseInfo),
                 secondaryHighlightText = secondaryHighlightText,
-                imdbText = item.episodeImdbRating?.let { String.format("%.1f", it) },
+                imdbText = item.episodeImdbRating
+                    ?.let { String.format("%.1f", it) },
                 genres = item.genres.asStable(),
                 poster = item.progress.poster,
                 backdrop = item.progress.backdrop,
@@ -364,7 +371,8 @@ internal fun buildContinueWatchingItem(
                 isSeries = true,
                 yearText = extractYearOrRange(item.info.releaseInfo),
                 secondaryHighlightText = secondaryHighlightText,
-                imdbText = item.info.imdbRating?.let { String.format("%.1f", it) },
+                imdbText = item.info.imdbRating
+                    ?.let { String.format("%.1f", it) },
                 genres = item.info.genres.asStable(),
                 poster = item.info.poster,
                 backdrop = item.info.backdrop,
@@ -447,6 +455,7 @@ internal fun buildCatalogItem(
     strTypeMovie: String = "",
     strTypeSeries: String = "",
     showFullReleaseDate: Boolean = true,
+    showImdbRatings: Boolean = true,
     previousCachedItem: ModernCarouselItem? = null
 ): ModernCarouselItem {
     // Carry forward the frozen URLs from the previous cache entry so that
@@ -476,7 +485,8 @@ internal fun buildCatalogItem(
         isSeries = isSeriesType(item.apiType),
         yearText = extractYearText(item.type, item.releaseInfo, item.released, showFullReleaseDate),
         runtimeText = formatHeroRuntime(item.runtime),
-        imdbText = item.imdbRating?.let { String.format("%.1f", it) },
+        imdbText = item.imdbRating
+            ?.let { String.format("%.1f", it) },
         ageRatingText = item.ageRating,
         statusText = item.status,
         countryText = item.country,
@@ -653,27 +663,6 @@ internal fun extractYearText(type: ContentType, releaseInfo: String?, released: 
         if (full != null) return full
     }
     return extractYearOrRange(releaseInfo)
-}
-
-private val HOURS_REGEX = "(\\d+)\\s*h".toRegex()
-private val MINUTES_REGEX = "(\\d+)\\s*m(?:in)?".toRegex()
-
-internal fun formatHeroRuntime(runtime: String?): String? {
-    val normalized = runtime?.trim()?.lowercase()?.takeIf { it.isNotBlank() } ?: return null
-    val hours = HOURS_REGEX.find(normalized)?.groupValues?.getOrNull(1)?.toIntOrNull()
-    val minutes = MINUTES_REGEX.find(normalized)?.groupValues?.getOrNull(1)?.toIntOrNull()
-    val totalMinutes = when {
-        hours != null || minutes != null -> (hours ?: 0) * 60 + (minutes ?: 0)
-        else -> normalized.filter(Char::isDigit).toIntOrNull()
-    } ?: return runtime
-
-    val wholeHours = totalMinutes / 60
-    val remainingMinutes = totalMinutes % 60
-    return when {
-        wholeHours > 0 && remainingMinutes > 0 -> "${wholeHours}h ${remainingMinutes}m"
-        wholeHours > 0 -> "${wholeHours}h"
-        else -> "${remainingMinutes}m"
-    }
 }
 
 internal fun ContinueWatchingItem.contentId(): String {

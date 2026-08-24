@@ -436,7 +436,7 @@ internal fun LazyListScope.bufferAndNetworkSettingsItems(
                 ),
                 border = ButtonDefaults.border(
                     focusedBorder = Border(
-                        border = BorderStroke(NuvioTheme.spacing.hairline, Color.White),
+                        border = NuvioTheme.focusRing.border(NuvioTheme.spacing.hairline),
                         shape = RoundedCornerShape(10.dp)
                     )
                 )
@@ -500,7 +500,7 @@ internal fun LazyListScope.bufferAndNetworkSettingsItems(
             item(key = "buffer_net_parallel_chunk_size") {
                 val effectiveBufferMb = MemoryBudget.effectiveBufferMb(playerSettings.bufferSettings.targetBufferSizeMb)
                 val maxChunkSizeMb = if (playerSettings.nuvioPerformanceModeEnabled) {
-                    MemoryBudget.MAX_CHUNK_MB
+                    MemoryBudget.tierMaxChunkMb
                 } else {
                     MemoryBudget.maxChunkMb(effectiveBufferMb, playerSettings.parallelConnectionCount)
                 }
@@ -549,7 +549,7 @@ internal fun LazyListScope.bufferAndNetworkSettingsItems(
                 ),
                 border = ButtonDefaults.border(
                     focusedBorder = Border(
-                        border = BorderStroke(NuvioTheme.spacing.hairline, Color.White),
+                        border = NuvioTheme.focusRing.border(NuvioTheme.spacing.hairline),
                         shape = RoundedCornerShape(10.dp)
                     )
                 )

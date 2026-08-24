@@ -489,6 +489,7 @@ fun NuvioNavHost(
                 ?.getString("startFromBeginning")
                 ?.toBooleanStrictOrNull() == true
             StreamScreen(
+                startFromBeginning = startFromBeginning,
                 onBackPress = {
                     val streamContentType = streamArgs?.getString("contentType").orEmpty()
                     val streamContentId = streamArgs?.getString("contentId").orEmpty()
@@ -1146,10 +1147,12 @@ fun NuvioNavHost(
             )
         }
 
-        composable(Screen.SupportersContributors.route) {
-            SupportersContributorsScreen(
-                onBackPress = { navController.popBackStack() }
-            )
+        if (AppFeaturePolicy.supportNuvioEnabled) {
+            composable(Screen.SupportersContributors.route) {
+                SupportersContributorsScreen(
+                    onBackPress = { navController.popBackStack() }
+                )
+            }
         }
 
         composable(Screen.LicensesAttributions.route) {

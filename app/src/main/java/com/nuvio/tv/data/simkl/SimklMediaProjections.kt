@@ -71,7 +71,7 @@ fun SimklSyncSnapshot.toSimklWatchedProjection(): SimklWatchedProjection {
 }
 
 fun SimklSyncSnapshot.toSimklProgressEntries(): List<WatchProgress> = playback
-    .mapNotNull(SimklPlaybackSession::toWatchProgress)
+    .mapNotNull { session -> session.toWatchProgress(entries) }
     .groupBy(::simklProgressKey)
     .mapNotNull { (_, candidates) -> candidates.maxByOrNull(WatchProgress::lastWatched) }
     .sortedByDescending(WatchProgress::lastWatched)
@@ -111,10 +111,12 @@ fun SimklSyncSnapshot.enrichMediaReference(reference: TrackingMediaReference): T
         candidate.media?.toTrackingExternalIds()?.sharesIdentityWith(reference.ids) == true
     } ?: return reference
     val media = entry.media ?: return reference
-    val kind = when (entry.mediaType) {
-        SimklMediaType.MOVIES -> TrackingMediaKind.MOVIE
-        SimklMediaType.SHOWS -> TrackingMediaKind.SHOW
-        SimklMediaType.ANIME -> TrackingMediaKind.ANIME
+    val kind = when {
+        entry.mediaType == SimklMediaType.MOVIES -> TrackingMediaKind.MOVIE
+        entry.mediaType == SimklMediaType.ANIME && entry.animeType == "movie" -> TrackingMediaKind.MOVIE
+        entry.mediaType == SimklMediaType.SHOWS -> TrackingMediaKind.SHOW
+        entry.mediaType == SimklMediaType.ANIME -> TrackingMediaKind.ANIME
+        else -> TrackingMediaKind.SHOW
     }
     return reference.copy(
         kind = kind,
@@ -237,11 +239,22 @@ private fun SimklLibraryEntry.toWatchedItem(
     trackingSourceUrl = buildSimklSourceUrl(mediaType, media)
 )
 
-internal fun SimklPlaybackSession.toWatchProgress(): WatchProgress? {
+internal fun SimklPlaybackSession.toWatchProgress(
+    libraryEntries: List<SimklLibraryEntry> = emptyList()
+): WatchProgress? {
     val media = media ?: return null
     val parentId = media.canonicalContentId() ?: return null
+    val isAnimeMovie = mediaType == SimklMediaType.ANIME && (
+        type == "movie" ||
+        libraryEntries.any { entry ->
+            entry.mediaType == SimklMediaType.ANIME &&
+                entry.animeType == "movie" &&
+                entry.media?.toTrackingExternalIds()?.sharesIdentityWith(media.toTrackingExternalIds()) == true
+        }
+    )
     val isMovie = mediaType == SimklMediaType.MOVIES ||
-        (mediaType == SimklMediaType.ANIME && episode == null)
+        (mediaType == SimklMediaType.ANIME && episode == null) ||
+        isAnimeMovie
     val season = episode?.tvdbSeason ?: episode?.season
     val episodeNumber = episode?.tvdbNumber ?: episode?.number
     if (!isMovie && episodeNumber == null) return null
@@ -325,6 +338,13 @@ private fun daysInMonths(year: Int): IntArray = if (year.isLeapYear()) {
  */
 fun TrackingMediaReference.resolveAnimeEpisodeForSimkl(): TrackingMediaReference {
     if (kind != TrackingMediaKind.ANIME) return this
+    if (episode == null) {
+        val videoId = catalog?.videoId
+        val parsed = videoId?.let { parseSimklAnimeVideoId(it) }
+        if (parsed?.episodeNumber == null) {
+            return copy(episode = TrackingEpisode(season = null, number = 1))
+        }
+    }
     val videoId = catalog?.videoId ?: return stripAnimeIdsIfSeasoned()
     val parsed = parseSimklAnimeVideoId(videoId) ?: return stripAnimeIdsIfSeasoned()
     val videoEpisodeNumber = parsed.episodeNumber ?: return stripAnimeIdsIfSeasoned()

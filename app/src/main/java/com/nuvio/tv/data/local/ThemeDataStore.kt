@@ -37,13 +37,13 @@ class ThemeDataStore @Inject constructor(
     private val screensaverTimeoutKey = intPreferencesKey("oled_screensaver_timeout_min")
     private val screensaverDimKey = intPreferencesKey("oled_screensaver_dim_percent")
 
-    val selectedTheme: Flow<AppTheme> = profileManager.activeProfileId.flatMapLatest { pid ->
+    val selectedThemePreference: Flow<AppTheme?> = profileManager.activeProfileId.flatMapLatest { pid ->
         factory.get(pid, FEATURE).data.map { prefs ->
-            val themeName = prefs[themeKey] ?: AppTheme.WHITE.name
+            val themeName = prefs[themeKey] ?: return@map null
             try {
                 AppTheme.valueOf(themeName)
             } catch (e: IllegalArgumentException) {
-                AppTheme.WHITE
+                null
             }
         }
     }

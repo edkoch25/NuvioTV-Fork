@@ -250,6 +250,51 @@ class NuvioMpvSurfaceView @JvmOverloads constructor(
         }
     }
 
+    fun setAudioDelayMs(delayMs: Int) {
+        if (!initialized) return
+        runCatching {
+            mpv.setPropertyDouble("audio-delay", audioDelayMsToSeconds(delayMs))
+        }.onFailure {
+            Log.w(TAG, "Failed to set audio delay on mpv (delayMs=$delayMs): ${it.message}")
+        }
+    }
+
+    /**
+     * Bluetooth A2DP/LE cannot carry encoded passthrough. Force a stereo PCM mix.
+     * Mid-session route changes pass [reloadOutput] so AudioTrack follows the new device
+     * without restarting video.
+     */
+    fun applyBluetoothAudioRoute(isBluetooth: Boolean, reloadOutput: Boolean = false) {
+        if (!initialized) return
+        val wasPaused = !isPlayingNow()
+        runCatching {
+            mpv.setPropertyString("audio-channels", MpvBluetoothAudioPolicy.audioChannels(isBluetooth))
+            if (MpvBluetoothAudioPolicy.shouldClearAudioSpdif(isBluetooth)) {
+                mpv.setPropertyString("audio-spdif", "")
+            }
+            if (reloadOutput) {
+                reloadAudioOutput()
+                if (wasPaused) {
+                    mpv.setPropertyBoolean("pause", true)
+                }
+            }
+        }.onFailure {
+            Log.w(TAG, "Failed to apply bluetooth audio route on mpv (bt=$isBluetooth): ${it.message}")
+        }
+    }
+
+    private fun reloadAudioOutput() {
+        val reloaded = runCatching {
+            mpv.command("ao-reload")
+            true
+        }.getOrDefault(false)
+        if (reloaded) return
+        val aid = mpv.getPropertyString("aid")
+        if (!aid.isNullOrBlank() && !aid.equals("no", ignoreCase = true)) {
+            runCatching { mpv.setPropertyString("aid", aid) }
+        }
+    }
+
     fun applyAspectMode(mode: AspectMode) {
         currentAspectMode = mode
         pendingAspectRetryCount = 0
@@ -334,7 +379,7 @@ class NuvioMpvSurfaceView @JvmOverloads constructor(
             mpv.setPropertyString("sub-back-color", toMpvColor(style.backgroundColor))
             mpv.setPropertyString("sub-outline-color", toMpvColor(style.outlineColor))
             mpv.setPropertyBoolean("sub-filter-sdh", style.stripSdh)
-            mpv.setPropertyBoolean("sub-filter-sdh-harder", false)
+            mpv.setPropertyBoolean("sub-filter-sdh-harder", style.stripSdh)
         }.onFailure {
             Log.w(TAG, "Failed to apply subtitle style on mpv: ${it.message}")
         }
@@ -544,6 +589,7 @@ class NuvioMpvSurfaceView @JvmOverloads constructor(
         mpv.setOptionString("user-agent", PlayerMediaSourceFactory.DEFAULT_USER_AGENT)
         // Preserve native ASS/SSA styling behavior on MPV.
         mpv.setOptionString("sub-ass-override", "no")
+        mpv.setOptionString("sub-codepage", "auto:utf-8")
         mpv.setOptionString("sub-font", "Roboto")
         mpv.setOptionString("sub-use-margins", "yes")
         mpv.setOptionString("sub-ass-force-margins", "yes")

@@ -1540,7 +1540,7 @@ private fun DebridApiKeyDialog(
                     shape = RoundedCornerShape(10.dp)
                 ),
                 focusedBorder = Border(
-                    border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
+                    border = NuvioTheme.focusRing.border(NuvioTheme.spacing.xxs),
                     shape = RoundedCornerShape(10.dp)
                 )
             ),

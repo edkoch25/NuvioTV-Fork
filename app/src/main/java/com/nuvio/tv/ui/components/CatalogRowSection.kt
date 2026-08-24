@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -80,6 +81,7 @@ fun CatalogRowSection(
     seeAllLabel: String? = null,
     posterCardStyle: PosterCardStyle = PosterCardDefaults.Style,
     showPosterLabels: Boolean = true,
+    showImdbRatings: Boolean = true,
     showAddonName: Boolean = true,
     showCatalogTypeSuffix: Boolean = true,
     focusedPosterBackdropExpandEnabled: Boolean = false,
@@ -172,8 +174,17 @@ fun CatalogRowSection(
             val targetItemKey = rowItemFocusKey(focusedItemIndex, targetItem)
             if (lastRequestedFocusItemKey == targetItemKey) return@LaunchedEffect
             val requester = itemFocusRequestersByKey.getOrPut(targetItemKey) { FocusRequester() }
-            repeat(2) { withFrameNanos { } }
-            val focused = runCatching { requester.requestFocus() }.isSuccess
+            if (!listState.isScrollInProgress) {
+                runCatching { listState.scrollToItem(focusedItemIndex) }
+            }
+            var focused = false
+            for (attempt in 0 until 6) {
+                withFrameNanos { }
+                runCatching { requester.requestFocus() }
+                withFrameNanos { }
+                focused = lastFocusedItemIndex.intValue == focusedItemIndex
+                if (focused) break
+            }
             if (focused) {
                 lastRequestedFocusItemKey = targetItemKey
             }
@@ -279,19 +290,28 @@ fun CatalogRowSection(
                 .fillMaxWidth()
                 .onFocusChanged { rowHasFocusRef.value = it.hasFocus }
                 .focusRequester(resolvedRowFocusRequester)
-                .focusRestorer(
+                .focusRestorer {
                     if (enableRowFocusRestorer) {
-                        run {
-                            val idx = (if (lastFocusedItemIndex.intValue >= 0) lastFocusedItemIndex.intValue else restorerFocusedIndex)
-                                .coerceIn(0, (catalogRow.items.size - 1).coerceAtLeast(0))
-                            catalogRow.items.getOrNull(idx)
-                                ?.let { itemFocusRequestersByKey.getOrPut(rowItemFocusKey(idx, it)) { FocusRequester() } }
-                                ?: FocusRequester.Default
+                        val visibleIndices = listState.layoutInfo.visibleItemsInfo
+                            .map { it.index }
+                            .filter { it in catalogRow.items.indices }
+                        val preferredIndex = if (lastFocusedItemIndex.intValue >= 0) {
+                            lastFocusedItemIndex.intValue
+                        } else {
+                            restorerFocusedIndex
                         }
+                        val idx = preferredIndex.takeIf { it in visibleIndices }
+                            ?: visibleIndices.firstOrNull()
+                        idx?.let { visibleIndex ->
+                            catalogRow.items.getOrNull(visibleIndex)?.let { item ->
+                                itemFocusRequestersByKey[rowItemFocusKey(visibleIndex, item)]
+                            }
+                        }
+                            ?: FocusRequester.Default
                     } else {
                         FocusRequester.Default
                     }
-                )
+                }
                 .focusGroup(),
             contentPadding = PaddingValues(start = NuvioTheme.spacing.xxxl, end = 200.dp),
             horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.lg)
@@ -303,8 +323,16 @@ fun CatalogRowSection(
                 },
                 contentType = { _, item -> item.apiType } // Group items by apiType for better recycling
             ) { index, item ->
-                val targetIndex = if (lastFocusedItemIndex.intValue >= 0) lastFocusedItemIndex.intValue else 0
-                val isEntryTarget = entryFocusRequester != null && index == targetIndex
+                val isEntryTarget by remember(entryFocusRequester, index) {
+                    derivedStateOf {
+                        val targetIndex = if (lastFocusedItemIndex.intValue >= 0) {
+                            lastFocusedItemIndex.intValue
+                        } else {
+                            0
+                        }
+                        entryFocusRequester != null && index == targetIndex
+                    }
+                }
                 val cardFocusRequester = itemFocusRequestersByKey.getOrPut(
                     rowItemFocusKey(index, item)
                 ) { FocusRequester() }
@@ -331,6 +359,7 @@ fun CatalogRowSection(
                     item = item,
                     posterCardStyle = posterCardStyle,
                     showLabels = showPosterLabels,
+                    showImdbRatings = showImdbRatings,
                     placeholderShimmerOffsetState = placeholderShimmerOffsetState,
                     focusedPosterBackdropExpandEnabled = focusedPosterBackdropExpandEnabled,
                     focusedPosterBackdropExpandDelaySeconds = focusedPosterBackdropExpandDelaySeconds,
@@ -404,7 +433,7 @@ fun CatalogRowSection(
                         ),
                         border = CardDefaults.border(
                             focusedBorder = Border(
-                                border = BorderStroke(posterCardStyle.focusedBorderWidth, NuvioTheme.colors.FocusRing),
+                                border = NuvioTheme.focusRing.border(posterCardStyle.focusedBorderWidth),
                                 shape = seeAllCardShape
                             )
                         ),

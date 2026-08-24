@@ -80,6 +80,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.nuvio.tv.ui.util.localizedGenreLabel
 import com.nuvio.tv.ui.util.recompositionHighlighter
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListPrefetchStrategy
@@ -103,6 +104,8 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import com.nuvio.tv.domain.model.ContentType
+import com.nuvio.tv.domain.model.DetailImdbRatingsVisibility
+import com.nuvio.tv.domain.model.HomeImdbRatingsVisibility
 import com.nuvio.tv.domain.model.LibraryListTab
 import com.nuvio.tv.domain.model.LibrarySourceMode
 import com.nuvio.tv.domain.model.Meta
@@ -453,8 +456,10 @@ fun MetaDetailsScreen(
             }
             uiState.meta != null -> {
                 val meta = uiState.meta!!
+                val context = LocalContext.current
                 val genresString = remember(meta.genres) {
-                    meta.genres.takeIf { it.isNotEmpty() }?.joinToString(" • ")
+                    meta.genres.takeIf { it.isNotEmpty() }
+                        ?.joinToString(" • ") { localizedGenreLabel(context, it) }
                 }
                 val yearString = remember(meta.releaseInfo) {
                     formatDetailYearRange(meta.releaseInfo)
@@ -482,6 +487,8 @@ fun MetaDetailsScreen(
                     episodeWatchedPendingKeys = uiState.episodeWatchedPendingKeys,
                     blurUnwatchedEpisodes = uiState.blurUnwatchedEpisodes,
                     showFullReleaseDate = uiState.showFullReleaseDate,
+                    overallRatingsVisibility = uiState.overallRatingsVisibility,
+                    detailImdbRatingsVisibility = uiState.detailImdbRatingsVisibility,
                     isMovieWatched = uiState.isMovieWatched,
                     isMovieWatchedPending = uiState.isMovieWatchedPending,
                     moreLikeThis = uiState.moreLikeThis,
@@ -494,7 +501,7 @@ fun MetaDetailsScreen(
                     episodeRatingsError = uiState.episodeRatingsError,
                     mdbListRatings = uiState.mdbListRatings,
                     heroSourceSignal = heroSourceSignal,
-                    showMdbListImdb = uiState.showMdbListImdb,
+                    isMdbListRatingsActive = uiState.isMdbListRatingsActive,
                     tmdbRating = uiState.tmdbRating,
                     comments = uiState.comments,
                     commentsCurrentPage = uiState.commentsCurrentPage,
@@ -858,6 +865,8 @@ private fun MetaDetailsContent(
     episodeWatchedPendingKeys: Set<String>,
     blurUnwatchedEpisodes: Boolean,
     showFullReleaseDate: Boolean,
+    overallRatingsVisibility: HomeImdbRatingsVisibility,
+    detailImdbRatingsVisibility: DetailImdbRatingsVisibility,
     isMovieWatched: Boolean,
     isMovieWatchedPending: Boolean,
     moreLikeThis: List<MetaPreview>,
@@ -870,7 +879,7 @@ private fun MetaDetailsContent(
     episodeRatingsError: String?,
     mdbListRatings: MDBListRatings?,
     heroSourceSignal: com.nuvio.tv.core.stream.SourcePrefetchSignal?,
-    showMdbListImdb: Boolean,
+    isMdbListRatingsActive: Boolean,
     tmdbRating: Float?,
     comments: List<TraktCommentReview>,
     commentsCurrentPage: Int,
@@ -1225,7 +1234,23 @@ private fun MetaDetailsContent(
     val hasCastSection = directorWriterMembers.isNotEmpty() || normalCastMembers.isNotEmpty()
     val hasMoreLikeThisSection = moreLikeThis.isNotEmpty()
     val hasTrailerSection = remember(meta.trailers) { meta.trailers.any { !it.ytId.isNullOrBlank() } }
-    val hasRatingsSection = isTvShow
+    val showEpisodeImdbRatings = detailImdbRatingsVisibility.showEpisodeRatings
+    val visibleEpisodeImdbRatings = remember(
+        episodeImdbRatings,
+        detailImdbRatingsVisibility,
+        episodeProgressMap,
+        watchedEpisodes
+    ) {
+        episodeImdbRatings.filterKeys { episodeKey ->
+            val isWatched = episodeProgressMap[episodeKey]?.isCompleted() == true ||
+                watchedEpisodes.contains(episodeKey)
+            detailImdbRatingsVisibility.showEpisodeRating(isWatched)
+        }
+    }
+    val showStandardOverallRatings = overallRatingsVisibility
+        .showStandardDetailRatings(isMdbListRatingsActive)
+    val visibleMdbListRatings = mdbListRatings.takeIf { isMdbListRatingsActive }
+    val hasRatingsSection = isTvShow && showEpisodeImdbRatings
     val strTabCast = stringResource(R.string.detail_tab_cast)
     val strTabRatings = stringResource(R.string.detail_tab_ratings)
     val strTabMoreLikeThis = stringResource(R.string.detail_tab_more_like_this)
@@ -1669,10 +1694,10 @@ private fun MetaDetailsContent(
                         isMovieWatched = isMovieWatched,
                         isMovieWatchedPending = isMovieWatchedPending,
                         onToggleMovieWatched = onToggleMovieWatched,
-                        mdbListRatings = mdbListRatings,
+                        mdbListRatings = visibleMdbListRatings,
                         sourceSignal = heroSourceSignal,
-                        hideMetaInfoImdb = showMdbListImdb,
-                        tmdbRating = if (mdbListRatings?.isEmpty() != false) tmdbRating else null,
+                        hideMetaInfoImdb = !showStandardOverallRatings,
+                        tmdbRating = tmdbRating.takeIf { showStandardOverallRatings },
                         showFullReleaseDate = showFullReleaseDate,
                         trailerAvailable = trailerButtonEnabled && !trailerUrl.isNullOrBlank(),
                         onTrailerClick = onTrailerButtonClick,
@@ -1732,7 +1757,7 @@ private fun MetaDetailsContent(
                         EpisodesRow(
                             episodes = episodesForSeason,
                             episodeProgressMap = episodeProgressMap,
-                            episodeRatings = episodeImdbRatings,
+                            episodeRatings = visibleEpisodeImdbRatings,
                             watchedEpisodes = watchedEpisodes,
                             episodeWatchedPendingKeys = episodeWatchedPendingKeys,
                             blurUnwatchedEpisodes = blurUnwatchedEpisodes,
@@ -1911,7 +1936,7 @@ private fun MetaDetailsContent(
                             PeopleSectionTab.RATINGS -> {
                                 EpisodeRatingsSection(
                                     episodes = meta.videos,
-                                    ratings = episodeImdbRatings,
+                                    ratings = visibleEpisodeImdbRatings,
                                     isLoading = isEpisodeRatingsLoading,
                                     error = episodeRatingsError,
                                     title = if (hasVisiblePeopleTabs) "" else strTabRatings,

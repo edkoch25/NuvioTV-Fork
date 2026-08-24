@@ -83,6 +83,7 @@ import com.nuvio.tv.LocalContentFocusRequester
 import com.nuvio.tv.ui.util.LocalRecompositionHighlighterEnabled
 import com.nuvio.tv.ui.util.StableRef
 import com.nuvio.tv.ui.util.asStable
+import com.nuvio.tv.ui.util.formatHeroRuntime
 import com.nuvio.tv.ui.util.recompositionHighlighter
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
@@ -176,6 +177,7 @@ fun ModernHomeContent(
             Box(modifier = Modifier.fillMaxSize()) {
                 com.nuvio.tv.ui.components.HeroCarousel(
                     items = uiState.heroItems.asStable(),
+                    showImdbRatings = uiState.homeImdbRatingsVisibility.showRatings,
                     onItemClick = { item ->
                         onNavigateToDetail(item.id, item.apiType, "")
                     },
@@ -645,7 +647,7 @@ fun ModernHomeContent(
                 }
             }
 
-            val resolvedHeroState = remember(activeCarouselItemState, enrichedPreviews, enrichingItemId, heroItem, uiState.heroEnrichmentEnabled, failedEnrichmentIds) {
+            val resolvedHeroState = remember(activeCarouselItemState, enrichedPreviews, enrichingItemId, heroItem, uiState.heroEnrichmentEnabled, uiState.homeImdbRatingsVisibility, failedEnrichmentIds) {
                 derivedStateOf {
                     val activeCarouselItem = activeCarouselItemState.value
                     val activeItemId = activeCarouselItem?.metaPreview?.id
@@ -663,7 +665,8 @@ fun ModernHomeContent(
                                 ?: activeCarouselItem?.heroPreview?.yearText,
                             runtimeText = formatHeroRuntime(enrichedItem.runtime)
                                 ?: activeCarouselItem?.heroPreview?.runtimeText,
-                            imdbText = enrichedItem.imdbRating?.let { String.format(java.util.Locale.US, "%.1f", it) },
+                            imdbText = enrichedItem.imdbRating
+                                ?.let { String.format(java.util.Locale.US, "%.1f", it) },
                             ageRatingText = enrichedItem.ageRating,
                             statusText = enrichedItem.status,
                             countryText = enrichedItem.country,
@@ -1046,6 +1049,7 @@ fun ModernHomeContent(
                     else heroSceneStateLambda().enrichmentActive
                 },
                 portraitMode = !useLandscapePosters,
+                showImdbRatings = uiState.homeImdbRatingsVisibility.showRatings,
                 trailerPlaying = {
                     if (isRapidHorizontalNav.value) false
                     else {

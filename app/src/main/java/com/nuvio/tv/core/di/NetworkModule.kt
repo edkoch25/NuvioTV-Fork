@@ -5,8 +5,8 @@ import android.util.Log
 import com.nuvio.tv.BuildConfig
 import com.nuvio.tv.data.remote.api.AddonApi
 import com.nuvio.tv.data.remote.api.AuthDiagnosticReportApi
-import com.nuvio.tv.data.remote.api.DonationsApi
 import com.nuvio.tv.data.remote.api.GitHubReleaseApi
+import com.nuvio.tv.data.remote.api.SupportersApi
 import com.nuvio.tv.data.remote.api.TraktApi
 import com.nuvio.tv.data.remote.api.TrailerApi
 import com.nuvio.tv.data.remote.api.IntroDbApi
@@ -539,23 +539,18 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    @Named("donations")
-    fun provideDonationsRetrofit(okHttpClient: OkHttpClient, moshi: Moshi): Retrofit {
-        val baseUrl = BuildConfig.DONATIONS_BASE_URL
-            .takeIf { it.isNotBlank() }
-            ?: error("DONATIONS_BASE_URL is missing. Set it in local.properties or local.dev.properties.")
-
-        return Retrofit.Builder()
-            .baseUrl(baseUrl)
+    @Named("supporters")
+    fun provideSupportersRetrofit(okHttpClient: OkHttpClient, moshi: Moshi): Retrofit =
+        Retrofit.Builder()
+            .baseUrl(normalizedBaseUrl(BuildConfig.SUPPORTERS_API_BASE_URL, "https://nuvio.tv/"))
             .client(okHttpClient)
             .addConverterFactory(MoshiConverterFactory.create(moshi))
             .build()
-    }
 
     @Provides
     @Singleton
-    fun provideDonationsApi(@Named("donations") retrofit: Retrofit): DonationsApi =
-        retrofit.create(DonationsApi::class.java)
+    fun provideSupportersApi(@Named("supporters") retrofit: Retrofit): SupportersApi =
+        retrofit.create(SupportersApi::class.java)
 
     @Provides
     @Singleton

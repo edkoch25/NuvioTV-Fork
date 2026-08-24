@@ -50,6 +50,7 @@ import com.nuvio.tv.domain.repository.StreamRepository
 import com.nuvio.tv.domain.repository.WatchProgressRepository
 import com.nuvio.tv.ui.components.SourceChipItem
 import com.nuvio.tv.ui.components.SourceChipStatus
+import com.nuvio.tv.ui.util.localizedGenreLabel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
@@ -1206,7 +1207,8 @@ class StreamScreenViewModel @Inject constructor(
             val meta = result.data
             playbackMetaVideos = meta.videos
             if (!requiresMetadataLookup) return@launch
-            val metaGenres = meta.genres.takeIf { it.isNotEmpty() }?.joinToString(" • ")
+            val metaGenres = meta.genres.takeIf { it.isNotEmpty() }
+                ?.joinToString(" • ") { localizedGenreLabel(context, it) }
             val metaYear = meta.releaseInfo
                 ?.substringBefore("-")
                 ?.takeIf { it.isNotBlank() }
@@ -1568,6 +1570,7 @@ class StreamScreenViewModel @Inject constructor(
         playbackInfo: StreamPlaybackInfo,
         url: String,
         resumePositionMs: Long = 0L,
+        startFromBeginning: Boolean = false,
         autoLaunch: Boolean = false,
         context: android.content.Context
     ) {
@@ -1773,6 +1776,7 @@ class StreamScreenViewModel @Inject constructor(
             title = metadata.buildPlayerTitle(),
             headers = playbackInfo.headers,
             resumePositionMs = resumePositionMs,
+            startFromBeginning = startFromBeginning,
             subtitles = subtitleInputs,
             autoLaunch = autoLaunch,
             nextEpisodeSnapshot = playbackMetaVideos?.let { videos ->
@@ -1954,7 +1958,9 @@ class StreamScreenViewModel @Inject constructor(
         )
         return reference.takeIf { media ->
             media.hasResolvableIdentity &&
-                (media.kind == TrackingMediaKind.MOVIE || media.episode != null)
+                (media.kind == TrackingMediaKind.MOVIE ||
+                    media.kind == TrackingMediaKind.ANIME ||
+                    media.episode != null)
         }
     }
 

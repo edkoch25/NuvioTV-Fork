@@ -4,7 +4,6 @@ package com.nuvio.tv.ui.screens.settings
 
 import com.nuvio.tv.ui.theme.NuvioTheme
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -141,6 +140,13 @@ fun DebugSettingsContent(
                 )
             }
 
+            item(key = "debug_member_tier") {
+                DebugMemberTierCard(
+                    selectedTier = uiState.memberTier,
+                    onTierSelected = { viewModel.onEvent(DebugSettingsEvent.SelectMemberTier(it)) }
+                )
+            }
+
             item(key = "debug_toggle_compose_highlighter") {
                 DebugToggleCard(
                     title = stringResource(R.string.advanced_compose_highlighter),
@@ -230,7 +236,7 @@ private fun DebugProgressIndicatorCard() {
         ),
         border = CardDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
+                border = NuvioTheme.focusRing.border(NuvioTheme.spacing.xxs),
                 shape = RoundedCornerShape(NuvioTheme.radii.md)
             )
         ),
@@ -301,7 +307,7 @@ private fun DebugToggleCard(
         ),
         border = CardDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
+                border = NuvioTheme.focusRing.border(NuvioTheme.spacing.xxs),
                 shape = RoundedCornerShape(NuvioTheme.radii.md)
             )
         ),
@@ -364,7 +370,7 @@ private fun DebugActionCard(
         ),
         border = CardDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(NuvioTheme.spacing.xxs, Color.White),
+                border = NuvioTheme.focusRing.border(NuvioTheme.spacing.xxs),
                 shape = RoundedCornerShape(NuvioTheme.radii.md)
             )
         ),

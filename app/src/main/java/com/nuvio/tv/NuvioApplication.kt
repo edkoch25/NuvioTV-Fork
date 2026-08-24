@@ -29,6 +29,7 @@ import okhttp3.CookieJar
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import com.nuvio.tv.data.local.PlayerSettingsDataStore
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.delay
@@ -155,6 +156,47 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
     }
 
     override fun newImageLoader(context: android.content.Context): ImageLoader {
+        val imageOkHttpClient by lazy {
+            val imageDispatcher = okhttp3.Dispatcher().apply {
+                maxRequests = 32
+                maxRequestsPerHost = 16
+            }
+            OkHttpClient.Builder()
+                .dispatcher(imageDispatcher)
+                .dns(IPv4FirstDns())
+                .connectTimeout(4, TimeUnit.SECONDS)
+                .readTimeout(5, TimeUnit.SECONDS)
+                .callTimeout(12, TimeUnit.SECONDS)
+                .addInterceptor { chain ->
+                    try {
+                        chain.proceed(chain.request())
+                    } catch (e: java.net.SocketTimeoutException) {
+                        chain.withConnectTimeout(3, TimeUnit.SECONDS)
+                            .withReadTimeout(4, TimeUnit.SECONDS)
+                            .proceed(chain.request())
+                    }
+                }
+                .followRedirects(true)
+                .followSslRedirects(true)
+                // Default 1-week cache for image responses that ship no usable
+                // Cache-Control (e.g. btttr.cc rating posters, which otherwise
+                // re-download from NETWORK on every scroll return). Ratings can
+                // be up to a week stale in exchange for killing the reload thrash.
+                .addNetworkInterceptor { chain ->
+                    val response = chain.proceed(chain.request())
+                    val cc = response.header("Cache-Control")?.lowercase()
+                    if (cc == null || "no-store" in cc || "no-cache" in cc || "max-age=0" in cc) {
+                        response.newBuilder()
+                            .header("Cache-Control", "max-age=604800, public")
+                            .removeHeader("Pragma")
+                            .build()
+                    } else {
+                        response
+                    }
+                }
+                .build()
+        }
+
         return ImageLoader.Builder(this)
             .components {
                 // Size-aware TMDB downscaler: the Bingecat catalogue serves original-size
@@ -182,33 +224,16 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
                     add(GifDecoder.Factory())
                 }
                 add(SvgDecoder.Factory())
-                // CacheControlCacheStrategy respects server Cache-Control headers,
-                // so dynamic images (e.g. BetterPosters with max-age) revalidate.
                 add(
                     coil3.network.okhttp.OkHttpNetworkFetcherFactory(
-                        callFactory = {
-                            OkHttpClient.Builder()
-                                .dns(IPv4FirstDns())
-                                .followRedirects(true)
-                                .followSslRedirects(true)
-                                // Default 1-week cache for image responses that ship no usable
-                                // Cache-Control (e.g. btttr.cc rating posters, which otherwise
-                                // re-download from NETWORK on every scroll return). Ratings can
-                                // be up to a week stale in exchange for killing the reload thrash.
-                                .addNetworkInterceptor { chain ->
-                                    val response = chain.proceed(chain.request())
-                                    val cc = response.header("Cache-Control")?.lowercase()
-                                    if (cc == null || "no-store" in cc || "no-cache" in cc || "max-age=0" in cc) {
-                                        response.newBuilder()
-                                            .header("Cache-Control", "max-age=604800, public")
-                                            .removeHeader("Pragma")
-                                            .build()
-                                    } else {
-                                        response
-                                    }
-                                }
-                                .build()
-                        },
+                        callFactory = { imageOkHttpClient },
+                        // Merge 0.8.8: upstream's StaleWhileRevalidateCacheStrategy deliberately
+                        // NOT taken. As read, its background revalidation client has no cache, so a
+                        // 200 downloads the new body and discards it; the card's reload then hits the
+                        // unchanged disk entry and the strategy serves the stale copy again (and
+                        // re-fetches the body every 10-minute cooldown). CacheControlCacheStrategy
+                        // plus the interceptor above keeps the foreground conditional-GET path that
+                        // does update the disk entry.
                         cacheStrategy = { CacheControlCacheStrategy() },
                     )
                 )
@@ -218,15 +243,14 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
                 val memoryInfo = ActivityManager.MemoryInfo()
                 activityManager.getMemoryInfo(memoryInfo)
                 val totalRamMb = memoryInfo.totalMem / (1024 * 1024)
-                // Low-RAM devices (≤2GB): use 0.10 — minimal footprint to avoid
-                // triggering LMK. Fewer cached bitmaps means more re-decodes but
-                // less memory pressure overall.
-                // Mid-range devices (≤3GB): use 0.12.
-                // Normal devices (>3GB): use 0.15.
+                // Low-RAM devices (≤2GB): use 0.15 — larger cache reduces GC pressure
+                // from rapid bitmap eviction during scrolling.
+                // Mid-range devices (≤3GB): use 0.20 for decent image caching.
+                // Normal devices (>3GB): use 0.25 for snappy image loading.
                 val cachePercent = when {
-                    totalRamMb <= 2048 -> 0.10
-                    totalRamMb <= 3072 -> 0.12
-                    else -> 0.15
+                    totalRamMb <= 2048 -> 0.15
+                    totalRamMb <= 3072 -> 0.20
+                    else -> 0.25
                 }
                 MemoryCache.Builder()
                     .maxSizePercent(context, cachePercent)
@@ -269,7 +293,7 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
             // allowRgb565 removed: inert on the hardware decode path (API 26+), and
             // actively harmful on the software paths (blur inputs decode at 16-bit
             // before processing, baking in quantisation).
-            .bitmapFactoryMaxParallelism(2)
+            .bitmapFactoryMaxParallelism(4)
             .build()
     }
 }

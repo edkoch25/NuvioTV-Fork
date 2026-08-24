@@ -360,7 +360,7 @@ internal fun MDBListApiKeyDialog(
                     shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)
                 ),
                 focusedBorder = Border(
-                    border = androidx.compose.foundation.BorderStroke(NuvioTheme.spacing.xxs, Color.White),
+                    border = NuvioTheme.focusRing.border(NuvioTheme.spacing.xxs),
                     shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)
                 )
             ),

@@ -58,6 +58,9 @@ internal fun PlayerRuntimeController.applyAudioDelay(
     val clampedDelayMs = delayMs.coerceIn(AUDIO_DELAY_MIN_MS, AUDIO_DELAY_MAX_MS)
     audioDelayUs.set(clampedDelayMs.toLong() * 1000L)
     _uiState.update { it.copy(audioDelayMs = clampedDelayMs) }
+    if (isUsingMpvEngine()) {
+        mpvView?.setAudioDelayMs(clampedDelayMs)
+    }
     if (persistForCurrentRoute) {
         persistAudioDelayForCurrentRoute(clampedDelayMs)
     }
@@ -1029,7 +1032,9 @@ internal fun PlayerRuntimeController.buildScrobbleItem(): TrackingMediaReference
     )
     return reference.takeIf { media ->
         media.hasResolvableIdentity &&
-            (media.kind == TrackingMediaKind.MOVIE || media.episode != null)
+            (media.kind == TrackingMediaKind.MOVIE ||
+                media.kind == TrackingMediaKind.ANIME ||
+                media.episode != null)
     }
 }
 
@@ -1350,7 +1355,7 @@ internal fun PlayerRuntimeController.schedulePauseOverlay() {
         val anyPanelOpen = s.showSubtitleOverlay || s.showSubtitleStylePanel ||
             s.showSpeedDialog || s.showMoreDialog || s.showEpisodesPanel ||
             s.showSourcesPanel || s.showAudioOverlay || s.showStreamInfoOverlay ||
-            s.showSubtitleTimingDialog
+            s.showSubtitleTimingDialog || s.showSubtitleDelayOverlay
         if (!s.isPlaying && s.pauseOverlayEnabled && s.error == null && !anyPanelOpen) {
             _uiState.update { it.copy(showPauseOverlay = true, showControls = false) }
         }

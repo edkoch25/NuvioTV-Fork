@@ -58,7 +58,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.foundation.focusGroup
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -82,14 +81,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.runtime.compositionLocalOf
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.tv.material3.Border
-import androidx.tv.material3.Icon
 import androidx.tv.material3.Card
 import androidx.tv.material3.CardDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
@@ -119,12 +113,12 @@ import com.nuvio.tv.ui.components.continueWatchingUsesEpisodeThumbnails
 import com.nuvio.tv.ui.components.LocalCardDepthStyle
 import com.nuvio.tv.ui.components.MonochromePosterPlaceholder
 import com.nuvio.tv.ui.components.TrailerPlayer
+import com.nuvio.tv.ui.components.WatchedMarker
 import com.nuvio.tv.ui.components.placeholderCardShimmer
 import com.nuvio.tv.ui.components.nuvioCardDepth
 import com.nuvio.tv.ui.components.rememberArtworkBackedCardGlow
 import com.nuvio.tv.ui.components.rememberPlaceholderShimmerOffsetState
 import com.nuvio.tv.LocalSidebarExpanded
-import com.nuvio.tv.ui.theme.ThemeColors
 import kotlin.math.abs
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
@@ -1104,14 +1098,18 @@ private fun ModernCarouselCard(
         with(density) { cardHeight.roundToPx() }.coerceAtLeast(1)
     }
 
-    val imageModel = remember(context, imageUrl, requestWidthPx, requestHeightPx) {
+    val revalidationKey = com.nuvio.tv.core.image.rememberImageRevalidationKey(imageUrl)
+    val imageModel = remember(context, imageUrl, requestWidthPx, requestHeightPx, revalidationKey) {
         imageUrl?.let {
-            ImageRequest.Builder(context)
+            val builder = ImageRequest.Builder(context)
                 .data(it)
                 .crossfade(false)
-                .memoryCacheKey("${it}_${requestWidthPx}x${requestHeightPx}")
+                .memoryCacheKey("${it}_${requestWidthPx}x${requestHeightPx}_v$revalidationKey")
                 .size(width = requestWidthPx, height = requestHeightPx)
-                .build()
+            if (revalidationKey > 0) {
+                builder.placeholderMemoryCacheKey("${it}_${requestWidthPx}x${requestHeightPx}_v${revalidationKey - 1}")
+            }
+            builder.build()
         }
     }
     val logoHeight = cardHeight * 0.34f
@@ -1146,12 +1144,12 @@ private fun ModernCarouselCard(
     var longPressTriggered by remember { mutableStateOf(false) }
     val longPressKeyTracker = rememberLongPressKeyTracker()
     val backgroundCardColor = NuvioTheme.colors.BackgroundCard
-    val focusRingColor = NuvioTheme.colors.FocusRing
+    val focusRingBorder = NuvioTheme.focusRing.border(NuvioTheme.spacing.xxs)
     val titleMedium = MaterialTheme.typography.titleMedium
     val backgroundPainter = remember(backgroundCardColor) { ColorPainter(backgroundCardColor) }
-    val focusedBorder = remember(cardShape, focusRingColor) {
+    val focusedBorder = remember(cardShape, focusRingBorder) {
         Border(
-            border = BorderStroke(NuvioTheme.spacing.xxs, focusRingColor),
+            border = focusRingBorder,
             shape = cardShape
         )
     }
@@ -1260,15 +1258,6 @@ private fun ModernCarouselCard(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    // Auto instead of Offscreen: Offscreen forces a per-card
-                    // offscreen render target to accelerate blend-mode masking,
-                    // which this card never does (rounded corners come from
-                    // .clip below). Auto only allocates a buffer when alpha < 1
-                    // or a RenderEffect is set -- neither happens here -- so the
-                    // card composites directly at rest. Same clip, same visuals.
-                    .graphicsLayer {
-                        compositingStrategy = CompositingStrategy.Auto
-                    }
                     .clip(cardShape)
                     .nuvioCardDepth(
                         shape = cardShape,
@@ -1425,22 +1414,12 @@ private fun ModernCarouselCard(
                 }
 
                 if (isWatched) {
-                    Box(
+                    WatchedMarker(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .padding(end = NuvioTheme.spacing.sm, top = NuvioTheme.spacing.sm)
                             .zIndex(2f)
-                            .size(21.dp)
-                            .shadow(10.dp, shape = CircleShape, spotColor = Color.Transparent)
-                            .background(NuvioTheme.colors.Secondary, CircleShape)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            tint = NuvioTheme.colors.OnSecondary,
-                            contentDescription = stringResource(R.string.episodes_cd_watched),
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
+                    )
                 }
             }
         }
