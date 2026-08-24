@@ -2675,6 +2675,7 @@ private class SubtitleOffsetRenderersFactory(
             extensionRendererMode == EXTENSION_RENDERER_MODE_PREFER -> EXTENSION_RENDERER_MODE_ON
             else -> extensionRendererMode
         }
+        val vc1RestampTmp = ArrayList<Renderer>()
         super.buildVideoRenderers(
             context,
             videoExtensionMode,
@@ -2683,8 +2684,28 @@ private class SubtitleOffsetRenderersFactory(
             eventHandler,
             eventListener,
             allowedVideoJoiningTimeMs,
-            out
+            vc1RestampTmp
         )
+        // VC-1 pts-repair: replace ONLY the platform MediaCodec video renderer with a
+        // subclass that restamps VC-1 output timestamps; extension renderers (VP9/AV1)
+        // and their PREFER/ON ordering pass through untouched.
+        for (vc1RestampRenderer in vc1RestampTmp) {
+            if (vc1RestampRenderer::class.java == MediaCodecVideoRenderer::class.java) {
+                val vc1RestampBuilder = MediaCodecVideoRenderer.Builder(context)
+                    .setCodecAdapterFactory(getCodecAdapterFactory())
+                    .setMediaCodecSelector(mediaCodecSelector)
+                    .setAllowedJoiningTimeMs(allowedVideoJoiningTimeMs)
+                    .setEnableDecoderFallback(enableDecoderFallback)
+                    .setEventHandler(eventHandler)
+                    .setEventListener(eventListener)
+                    .setMaxDroppedFramesToNotify(
+                        DefaultRenderersFactory.MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY
+                    )
+                out.add(Vc1PtsRepairVideoRenderer(vc1RestampBuilder))
+            } else {
+                out.add(vc1RestampRenderer)
+            }
+        }
     }
 
     override fun buildAudioSink(
