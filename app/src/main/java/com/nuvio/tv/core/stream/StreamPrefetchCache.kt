@@ -65,7 +65,15 @@ object StreamPrefetchCache {
         val streams: List<AddonStreams>,
         val atMs: Long,
         /** R2: winner ranked at prefetch time, null when no ranker was supplied. */
-        val selection: PrefetchedSelection?
+        val selection: PrefetchedSelection?,
+        /**
+         * True when this pool was cut short by the prefetch completion cap
+         * (see collectFinal). The scrape kept running on the session cache's
+         * own scope and holds the full set, so a hit on a capHit entry must
+         * re-collect the session to fill the manual list rather than treating
+         * this subset as final.
+         */
+        val capHit: Boolean = false
     )
 
     private val lock = Any()
@@ -98,9 +106,10 @@ object StreamPrefetchCache {
     private fun putLocked(
         key: String,
         streams: List<AddonStreams>,
-        selection: PrefetchedSelection?
+        selection: PrefetchedSelection?,
+        capHit: Boolean
     ) {
-        completed[key] = Entry(streams, SystemClock.elapsedRealtime(), selection)
+        completed[key] = Entry(streams, SystemClock.elapsedRealtime(), selection, capHit)
         while (completed.size > MAX_ENTRIES) {
             val eldest = completed.keys.firstOrNull() ?: break
             completed.remove(eldest)
@@ -245,7 +254,7 @@ object StreamPrefetchCache {
             inFlightKey = key
             inFlightBackground = background
             inFlightJob = scope.async {
-                val result = collectFinal(repository, type, videoId, season, episode, capMs)
+                val (result, capHit) = collectFinal(repository, type, videoId, season, episode, capMs)
                 val rankT0 = SystemClock.elapsedRealtime()
                 val selection = if (rank != null && result.isNotEmpty()) {
                     try {
@@ -273,7 +282,7 @@ object StreamPrefetchCache {
                     )
                 }
                 synchronized(lock) {
-                    if (result.isNotEmpty()) putLocked(key, result, selection)
+                    if (result.isNotEmpty()) putLocked(key, result, selection, capHit)
                     if (inFlightKey == key) {
                         inFlightKey = null
                         inFlightJob = null
@@ -285,6 +294,11 @@ object StreamPrefetchCache {
         Log.i(TAG, "PREFETCH start source=$source key=$key")
     }
 
+    private data class CollectFinalResult(
+        val streams: List<AddonStreams>,
+        val capHit: Boolean
+    )
+
     private suspend fun collectFinal(
         repository: StreamRepository,
         type: String,
@@ -292,13 +306,15 @@ object StreamPrefetchCache {
         season: Int?,
         episode: Int?,
         capMs: Long?
-    ): List<AddonStreams> {
+    ): CollectFinalResult {
         var last: List<AddonStreams> = emptyList()
+        var capHit = false
         // Each Success emission from the repository carries the FULL accumulated
         // pool, so `last` after the collect (or after the cap cancels it) always
-        // holds the most complete set seen. Under the cap, cancelling the collect
-        // cancels the repository's fan-out scope and its outstanding addon jobs --
-        // exactly the slow-source wait we are declining.
+        // holds the most complete set seen. Under the cap, withTimeoutOrNull
+        // cancels only THIS collector; the scrape itself runs on the session
+        // cache's own scope and continues to completion, so the full pool stays
+        // re-collectable from the session (that is what a capHit hit does).
         val collectBlock: suspend () -> Unit = {
             repository.getStreamsFromAllAddons(type, videoId, season, episode).collect { result ->
                 if (result is NetworkResult.Success) last = result.data
@@ -307,6 +323,7 @@ object StreamPrefetchCache {
         try {
             if (capMs != null) {
                 if (withTimeoutOrNull(capMs) { collectBlock() } == null) {
+                    capHit = true
                     Log.i(TAG, "PREFETCH cap-hit ms=$capMs groups=${last.size}")
                 }
             } else {
@@ -316,10 +333,10 @@ object StreamPrefetchCache {
             throw e
         } catch (e: Exception) {
             Log.w(TAG, "PREFETCH failed: ${e.message}")
-            return emptyList()
+            return CollectFinalResult(emptyList(), false)
         }
         Log.i(TAG, "PREFETCH done groups=${last.size}")
-        return last
+        return CollectFinalResult(last, capHit)
     }
 
     /**
@@ -369,8 +386,10 @@ object StreamPrefetchCache {
         val key = keyOf(type, videoId, season, episode)
         var hit: List<AddonStreams>? = null
         var join: Deferred<List<AddonStreams>>? = null
+        var hitCapHit = false
         synchronized(lock) {
             hit = freshLocked(key)
+            if (hit != null) hitCapHit = completed[key]?.capHit ?: false
             if (hit == null && inFlightKey == key) {
                 val running = inFlightJob
                 if (running != null && running.isActive) join = running
@@ -379,10 +398,20 @@ object StreamPrefetchCache {
 
         val hitData = hit
         if (hitData != null) {
-            Log.i(TAG, "PREFETCH hit key=$key groups=${hitData.size}")
+            Log.i(TAG, "PREFETCH hit key=$key groups=${hitData.size} capHit=$hitCapHit")
             return flow {
                 emit(NetworkResult.Loading)
                 emit(NetworkResult.Success(hitData))
+                if (hitCapHit) {
+                    // The stored subset was cut short by the completion cap; the
+                    // scrape kept running on the session cache scope and holds the
+                    // full pool. Re-collect it (no forceRefresh -> session
+                    // replay/join, never a re-scrape) so late sources populate the
+                    // manual list instead of being marked ERROR and removed. Auto-
+                    // play has already fired from the fast subset.
+                    Log.i(TAG, "PREFETCH hit-continue key=$key filling from session")
+                    emitAll(repository.getStreamsFromAllAddons(type, videoId, season, episode))
+                }
             }
         }
 
