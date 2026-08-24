@@ -88,13 +88,6 @@
             </intent-filter>
         </activity>
 
-        <!-- DEBUG/TEST-ONLY: IMDb trailer probe. Not referenced by any UI; reachable only via
-             an explicit `am start`. Remove before any real release cut. -->
-        <activity
-            android:name=".debug.ImdbTrailerProbeActivity"
-            android:exported="true"
-            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
-
         <profileable android:shell="true" />
     </application>
 
