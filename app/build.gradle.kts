@@ -331,6 +331,7 @@ configurations.all {
 
 baselineProfile {
     automaticGenerationDuringBuild = false
+    dexLayoutOptimization = true
     saveInSrc = true
     mergeIntoMain = true
     baselineProfileOutputDir = "generated/baselineProfiles"
