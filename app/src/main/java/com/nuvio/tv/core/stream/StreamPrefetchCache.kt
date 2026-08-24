@@ -364,6 +364,25 @@ object StreamPrefetchCache {
     }
 
     /**
+     * True when the completed prefetch for this target was cut short by the
+     * completion cap. Read at presentation time by the ViewModel to decide
+     * whether still-loading source chips are genuinely dead or merely late
+     * (alive in the session and re-collectable). No TTL prune here; an evicted
+     * entry simply yields a conservative false.
+     */
+    fun capHitFor(
+        type: String,
+        videoId: String,
+        season: Int?,
+        episode: Int?
+    ): Boolean {
+        val key = keyOf(type, videoId, season, episode)
+        synchronized(lock) {
+            return completed[key]?.capHit ?: false
+        }
+    }
+
+    /**
      * The stream list for this target: a completed prefetch, a join onto one in
      * flight, or the live repository flow. Drop-in for the repository call.
      */
@@ -386,10 +405,8 @@ object StreamPrefetchCache {
         val key = keyOf(type, videoId, season, episode)
         var hit: List<AddonStreams>? = null
         var join: Deferred<List<AddonStreams>>? = null
-        var hitCapHit = false
         synchronized(lock) {
             hit = freshLocked(key)
-            if (hit != null) hitCapHit = completed[key]?.capHit ?: false
             if (hit == null && inFlightKey == key) {
                 val running = inFlightJob
                 if (running != null && running.isActive) join = running
@@ -398,20 +415,10 @@ object StreamPrefetchCache {
 
         val hitData = hit
         if (hitData != null) {
-            Log.i(TAG, "PREFETCH hit key=$key groups=${hitData.size} capHit=$hitCapHit")
+            Log.i(TAG, "PREFETCH hit key=$key groups=${hitData.size}")
             return flow {
                 emit(NetworkResult.Loading)
                 emit(NetworkResult.Success(hitData))
-                if (hitCapHit) {
-                    // The stored subset was cut short by the completion cap; the
-                    // scrape kept running on the session cache scope and holds the
-                    // full pool. Re-collect it (no forceRefresh -> session
-                    // replay/join, never a re-scrape) so late sources populate the
-                    // manual list instead of being marked ERROR and removed. Auto-
-                    // play has already fired from the fast subset.
-                    Log.i(TAG, "PREFETCH hit-continue key=$key filling from session")
-                    emitAll(repository.getStreamsFromAllAddons(type, videoId, season, episode))
-                }
             }
         }
 

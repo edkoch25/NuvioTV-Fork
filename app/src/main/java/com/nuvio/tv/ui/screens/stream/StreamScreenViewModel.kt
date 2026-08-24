@@ -118,6 +118,7 @@ class StreamScreenViewModel @Inject constructor(
     private var streamLoadScope: kotlinx.coroutines.CoroutineScope? = null
     private var streamLoadCompleted = false
     private var sourceChipErrorDismissJob: Job? = null
+    private var sessionFillJob: Job? = null
     private var pendingCacheSaveJob: Job? = null
     private var streamBadgePresentationJob: Job? = null
     private var streamBadgePresentationRequestId = 0L
@@ -358,6 +359,7 @@ class StreamScreenViewModel @Inject constructor(
             badgedAddonNames = emptySet()
         }
         sourceChipErrorDismissJob?.cancel()
+        sessionFillJob?.cancel()
         val newScope = kotlinx.coroutines.CoroutineScope(viewModelScope.coroutineContext + kotlinx.coroutines.SupervisorJob())
         streamLoadScope = newScope
         streamLoadJob = newScope.launch {
@@ -863,7 +865,36 @@ class StreamScreenViewModel @Inject constructor(
                     autoSelectTriggered = true
                     lastSuccessData?.let { applySuccess(it, isAllLoaded = true) }
                 }
-                markRemainingSourceChipsAsError()
+                // Shape 2: if this collect's pool was cut short by the prefetch
+                // completion cap (capHit) and chips are still loading, the missing
+                // sources are alive in the session, not dead. Fill the manual list
+                // from the session in the background WITHOUT gating auto-select
+                // (already resolved above), then mark ERROR only for genuinely dead
+                // addons. Non-capHit / fully-loaded collects mark immediately, as
+                // before. Detached on viewModelScope so it never defers
+                // streamLoadCompleted; cancelled at the next loadStreams.
+                val hasLoadingChips = _uiState.value.sourceChips.any {
+                    it.status == SourceChipStatus.LOADING
+                }
+                if (hasLoadingChips &&
+                    com.nuvio.tv.core.stream.StreamPrefetchCache.capHitFor(
+                        contentType, videoId, season, episode
+                    )
+                ) {
+                    sessionFillJob?.cancel()
+                    sessionFillJob = viewModelScope.launch {
+                        streamRepository.getStreamsFromAllAddons(
+                            contentType, videoId, season, episode
+                        ).collect { fillResult ->
+                            if (fillResult is NetworkResult.Success) {
+                                applySuccess(fillResult.data, isAllLoaded = false)
+                            }
+                        }
+                        markRemainingSourceChipsAsError()
+                    }
+                } else {
+                    markRemainingSourceChipsAsError()
+                }
                 if (directAutoPlayFlowEnabledForSession && !resolvedAutoPlayTarget) {
                     directAutoPlayFlowEnabledForSession = false
                     // All addons finished with no instant stream to auto-play: drop the loader and
