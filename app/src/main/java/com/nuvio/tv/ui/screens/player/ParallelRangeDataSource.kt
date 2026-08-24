@@ -80,6 +80,16 @@ internal class ParallelRangeDataSource(
         private const val IN_FLIGHT_WAIT_CAP_MS = 3_000L
         private const val IN_FLIGHT_POLL_MS = 2L
 
+        // 3a: body-stall watchdog. A chunk whose delivery RATE over
+        // HEDGE_WINDOW_MS falls below HEDGE_STALL_RATE_BPS, after
+        // HEDGE_MIN_OPEN_MS since open, is abandoned and re-fetched on a
+        // fresh connection (same slot -> connection budget unchanged), up
+        // to HEDGE_MAX_RESTARTS, then one final watchdog-disabled attempt.
+        private const val HEDGE_MIN_OPEN_MS = 1_500L
+        private const val HEDGE_WINDOW_MS = 2_000L
+        private const val HEDGE_STALL_RATE_BPS = 256L * 1024L
+        private const val HEDGE_MAX_RESTARTS = 3
+
         private val readBufferLocal = object : ThreadLocal<ByteArray>() {
             override fun initialValue(): ByteArray = ByteArray(READ_BUFFER_SIZE)
         }
@@ -191,6 +201,10 @@ internal class ParallelRangeDataSource(
         @Volatile var hudDepthCap: Int = 0
         @Volatile var hudDepthConfigured: Int = 0
         @Volatile var hudNextStepAtMs: Long = 0L
+
+        // 3a: once-ever announce flag so a capture can confirm this build
+        // is live even when nothing stalls.
+        private val obsAnnounced = AtomicBoolean(false)
 
         /** Time until the next +1 depth step; 0 when not capped. HUD read only. */
         fun hudClampCooldownRemainingMs(nowUptimeMs: Long): Long {
@@ -1407,6 +1421,11 @@ internal class ParallelRangeDataSource(
                 lastException = e
                 // nt-tier2: 429/503 is server rate-limiting, not a stalled socket.
                 // Hand off to a bounded backoff loop rather than retrying now.
+                // 3a: a body stall (not a 429) is abandoned and re-fetched
+                // on a fresh connection, sequentially, within budget.
+                if (e is StalledChunkException) {
+                    return downloadChunkWithStallRestart(activeSession, chunkIndex, future, e)
+                }
                 val rlError = e.findRateLimitException()
                 if (rlError != null) {
                     return downloadChunkWithRateLimitBackoff(activeSession, chunkIndex, future, rlError)
@@ -1427,7 +1446,7 @@ internal class ParallelRangeDataSource(
         throw IOException("Failed to download chunk $chunkIndex after 2 attempts", lastException)
     }
 
-    private fun downloadChunkOnce(activeSession: ChunkSession, chunkIndex: Long, future: CompletableFuture<*>): DownloadedChunk {
+    private fun downloadChunkOnce(activeSession: ChunkSession, chunkIndex: Long, future: CompletableFuture<*>, allowStallRestart: Boolean = true): DownloadedChunk {
         val sessionLength = activeSession.totalLength
         val start = chunkIndex * chunkSize
         val end = if (sessionLength > 0L) {
@@ -1454,7 +1473,7 @@ internal class ParallelRangeDataSource(
             // requested range is exact — a chunk that comes back short must
             // fail (and retry) rather than be cached as if complete.
             val expectedBytes = if (sessionLength > 0L) end - start else -1L
-            val chunk = readIntoChunk(activeSession, chunkIndex, ds, future, expectedBytes)
+            val chunk = readIntoChunk(activeSession, chunkIndex, ds, future, expectedBytes, allowStallRestart)
             Log.d(TAG, "Successfully downloaded chunk $chunkIndex, size=${chunk.size} bytes")
             return chunk
         } finally {
@@ -1462,6 +1481,53 @@ internal class ParallelRangeDataSource(
             try { ds.close() } catch (_: Exception) {}
         }
     }
+
+    /**
+     * 3a: a stalled body is abandoned and the chunk re-fetched on a FRESH
+     * connection, immediately (no backoff -- the point is speed) and
+     * SEQUENTIALLY, so the stalled connection's slot is reused and the
+     * user's configured connection count is never exceeded (works at 1, 2
+     * or N connections identically). Up to HEDGE_MAX_RESTARTS fresh tries;
+     * if the origin stalls every one, a final watchdog-disabled attempt
+     * lets the chunk complete slowly rather than failing playback. A
+     * fresh connection that returns a non-stall error (e.g. a 429) is
+     * surfaced so the existing rate-limit / retry paths handle it.
+     */
+    private fun downloadChunkWithStallRestart(
+        activeSession: ChunkSession,
+        chunkIndex: Long,
+        future: CompletableFuture<*>,
+        firstStall: StalledChunkException
+    ): DownloadedChunk {
+        var lastStall = firstStall
+        var attempt = 0
+        while (attempt < HEDGE_MAX_RESTARTS) {
+            if (future.isCancelled || activeSession.abandoned.get()) throw IOException("Cancelled")
+            Log.w(TAG, "HEDGE_RESTART chunk=$chunkIndex attempt=${attempt + 1}/$HEDGE_MAX_RESTARTS " +
+                "prevRateBps=${lastStall.rateBps} atWatermark=${lastStall.watermark}")
+            try {
+                return downloadChunkOnce(activeSession, chunkIndex, future)
+            } catch (e: Exception) {
+                if (activeSession.abandoned.get() || future.isCancelled) throw IOException("Session abandoned or cancelled")
+                if (e !is StalledChunkException) throw e
+                lastStall = e
+                attempt++
+            }
+        }
+        // Origin stalling every connection: complete slowly rather than fail.
+        Log.w(TAG, "HEDGE_RESTART chunk=$chunkIndex exhausted after $HEDGE_MAX_RESTARTS; " +
+            "final attempt with watchdog disabled")
+        return downloadChunkOnce(activeSession, chunkIndex, future, allowStallRestart = false)
+    }
+
+    /** 3a: thrown by readIntoChunk when a chunk's body rate collapses; an
+     *  IOException subtype so it never matches the 429 or transient-retry
+     *  predicates and flows only to the stall-restart path. */
+    private class StalledChunkException(
+        val chunkIndex: Long,
+        val watermark: Int,
+        val rateBps: Long
+    ) : IOException("chunk $chunkIndex body stalled at ${rateBps}B/s (watermark=$watermark)")
 
     private fun Exception.isTransientInterruption(): Boolean {
         if (this is InterruptedIOException || this is InterruptedException) return true
@@ -1590,7 +1656,8 @@ internal class ParallelRangeDataSource(
         chunkIndex: Long,
         ds: DataSource,
         future: CompletableFuture<*>,
-        expectedBytes: Long
+        expectedBytes: Long,
+        allowStallRestart: Boolean = true
     ): DownloadedChunk {
         val buffer = acquireBuffer()
         // nt7 (progressive reads): publish this attempt. Registered
@@ -1601,6 +1668,16 @@ internal class ParallelRangeDataSource(
         val tempArray = readBufferLocal.get()!!
         var totalRead = 0
         var consecutiveZeroReads = 0
+        // 3a: confirm the build is live on the first chunk read, once.
+        if (obsAnnounced.compareAndSet(false, true)) {
+            Log.w(TAG, "OBS_ACTIVE build=hedge-3a minOpenMs=$HEDGE_MIN_OPEN_MS " +
+                "windowMs=$HEDGE_WINDOW_MS stallRateBps=$HEDGE_STALL_RATE_BPS " +
+                "maxRestarts=$HEDGE_MAX_RESTARTS")
+        }
+        // 3a: in-loop body-stall watchdog state (per download attempt).
+        val hedgeChunkT0 = SystemClock.elapsedRealtime()
+        var hedgeLastCheckT0 = hedgeChunkT0
+        var hedgeLastCheckBytes = 0
         try {
             val byteBufferReader = if (useNativeMemory && ds is androidx.media3.common.ByteBufferDataReader && ds.supportsByteBufferRead()) {
                 ds
@@ -1647,6 +1724,29 @@ internal class ParallelRangeDataSource(
                 totalRead += read
                 // Volatile store orders every buffer write above it.
                 inFlight.watermark = totalRead
+                // 3a: rate-based body-stall sample, emitted every window
+                // whether or not it trips, so the decision is always
+                // visible. Only chunks taking longer than the window emit.
+                val hedgeNowMs = SystemClock.elapsedRealtime()
+                if (hedgeNowMs - hedgeChunkT0 >= HEDGE_MIN_OPEN_MS &&
+                    hedgeNowMs - hedgeLastCheckT0 >= HEDGE_WINDOW_MS) {
+                    val hedgeWindowMs = hedgeNowMs - hedgeLastCheckT0
+                    val hedgeWindowBytes = totalRead - hedgeLastCheckBytes
+                    val hedgeRateBps = if (hedgeWindowMs > 0L)
+                        hedgeWindowBytes.toLong() * 1000L / hedgeWindowMs else Long.MAX_VALUE
+                    val hedgeStalled = hedgeRateBps < HEDGE_STALL_RATE_BPS
+                    Log.w(TAG, "HEDGE_SAMPLE chunk=$chunkIndex watermark=$totalRead " +
+                        "windowBytes=$hedgeWindowBytes windowMs=$hedgeWindowMs " +
+                        "rateBps=$hedgeRateBps stalled=$hedgeStalled clamp=$hudClampLatched " +
+                        "restartable=$allowStallRestart")
+                    if (hedgeStalled && allowStallRestart && !hudClampLatched) {
+                        // Abandon this connection; downloadChunk routes the
+                        // throw to a fresh-connection restart within budget.
+                        throw StalledChunkException(chunkIndex, totalRead, hedgeRateBps)
+                    }
+                    hedgeLastCheckT0 = hedgeNowMs
+                    hedgeLastCheckBytes = totalRead
+                }
             }
             // pre-nt3 short-chunk rejection: a premature EOF inside a known
             // range must not produce a cached "complete" chunk — a short
