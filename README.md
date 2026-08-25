@@ -118,7 +118,7 @@ of person who tunes buffer settings for fun.
 
 ## Per-Format Audio Passthrough Switches:
 
-<img width="1920" height="1080" alt="screenshot" src="https://github.com/user-attachments/assets/f3a339a9-3126-40fc-bd33-6b372e72a002" />
+<img width="1920" height="1080" alt="Screenshot_20260826_084841" src="https://github.com/user-attachments/assets/85f3a839-11bb-45f6-9154-3d471efe2319" />
 
 ---
 
@@ -127,7 +127,6 @@ of person who tunes buffer settings for fun.
 - **Home layout picker** -- the app is now **Modern-layout only**. The picker was removed from both
   first-run setup and Settings. The Modern-specific options (landscape posters, full-screen hero
   backdrop, poster/card styling) remain.
-- **Color Themes** - largely disabled as the UI moves toward monochrome
 - **IAMF** and **MPEG-H** audio decoder components, and an unused UI component -- dropped to slim
   the build. No user-facing loss.
 - **Android TV channel / preview-program sync** -- not used on this fork's target setup.
