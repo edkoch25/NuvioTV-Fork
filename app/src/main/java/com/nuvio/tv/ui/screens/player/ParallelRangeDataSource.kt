@@ -89,6 +89,19 @@ internal class ParallelRangeDataSource(
         private const val HEDGE_WINDOW_MS = 2_000L
         private const val HEDGE_STALL_RATE_BPS = 256L * 1024L
         private const val HEDGE_MAX_RESTARTS = 3
+        // Source-aware hedge (calibrated 2026-08-25). A single-window trip at
+        // 256 KB/s false-fired ~28x over 5 min on a clean AIOStreams Usenet play:
+        // the NNTP engine delivers in bursts (a ~1 MB rush then a fetch-the-next-
+        // articles pause), so a lone sub-256 window is normal cadence, not a stall.
+        // Measured: every false fire sat 211-261 KB/s (none below), positionally
+        // locked at watermark ~1.05 MB -> a cadence artefact. So Usenet uses a
+        // lower rate floor (below the 211 KB/s observed floor) AND requires two
+        // consecutive stalled windows before restarting. CDN/debrid keeps the
+        // proven single-window 256 KB/s behaviour unchanged (zero regression).
+        private const val HEDGE_STALL_RATE_CDN = 256L * 1024L
+        private const val HEDGE_STALL_RATE_USENET = 128L * 1024L
+        private const val HEDGE_WINDOWS_CDN = 1
+        private const val HEDGE_WINDOWS_USENET = 2
 
         private val readBufferLocal = object : ThreadLocal<ByteArray>() {
             override fun initialValue(): ByteArray = ByteArray(READ_BUFFER_SIZE)
@@ -1688,6 +1701,14 @@ internal class ParallelRangeDataSource(
         val hedgeChunkT0 = SystemClock.elapsedRealtime()
         var hedgeLastCheckT0 = hedgeChunkT0
         var hedgeLastCheckBytes = 0
+        // 3a source-aware: pick the stall profile once per attempt from the
+        // resolved (post-redirect) URL. AIOStreams native Usenet resolves through
+        // .../api/v1/usenet/stream/...; anything else (debrid CDN, Emby, direct)
+        // is treated as CDN and keeps the original single-window behaviour.
+        val hedgeIsUsenet = activeSession.resolvedUri?.path?.contains("/usenet/") == true
+        val hedgeStallRateBps = if (hedgeIsUsenet) HEDGE_STALL_RATE_USENET else HEDGE_STALL_RATE_CDN
+        val hedgeWindowsRequired = if (hedgeIsUsenet) HEDGE_WINDOWS_USENET else HEDGE_WINDOWS_CDN
+        var hedgeConsecutiveStalled = 0
         try {
             val byteBufferReader = if (useNativeMemory && ds is androidx.media3.common.ByteBufferDataReader && ds.supportsByteBufferRead()) {
                 ds
@@ -1744,12 +1765,16 @@ internal class ParallelRangeDataSource(
                     val hedgeWindowBytes = totalRead - hedgeLastCheckBytes
                     val hedgeRateBps = if (hedgeWindowMs > 0L)
                         hedgeWindowBytes.toLong() * 1000L / hedgeWindowMs else Long.MAX_VALUE
-                    val hedgeStalled = hedgeRateBps < HEDGE_STALL_RATE_BPS
+                    val hedgeStalled = hedgeRateBps < hedgeStallRateBps
+                    if (hedgeStalled) hedgeConsecutiveStalled++ else hedgeConsecutiveStalled = 0
                     Log.w(TAG, "HEDGE_SAMPLE chunk=$chunkIndex watermark=$totalRead " +
                         "windowBytes=$hedgeWindowBytes windowMs=$hedgeWindowMs " +
-                        "rateBps=$hedgeRateBps stalled=$hedgeStalled clamp=$hudClampLatched " +
+                        "rateBps=$hedgeRateBps stalled=$hedgeStalled " +
+                        "consec=$hedgeConsecutiveStalled/$hedgeWindowsRequired " +
+                        "usenet=$hedgeIsUsenet clamp=$hudClampLatched " +
                         "restartable=$allowStallRestart")
-                    if (hedgeStalled && allowStallRestart && !hudClampLatched) {
+                    if (hedgeConsecutiveStalled >= hedgeWindowsRequired &&
+                        allowStallRestart && !hudClampLatched) {
                         // Abandon this connection; downloadChunk routes the
                         // throw to a fresh-connection restart within budget.
                         throw StalledChunkException(chunkIndex, totalRead, hedgeRateBps)
