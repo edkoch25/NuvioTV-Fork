@@ -64,6 +64,21 @@ private fun containsDebridCode(haystack: String, code: String): Boolean {
     }
 }
 
+// AIOStreams native (Usenet / other) results carry an "[AIO...] <indexer> ..."
+// marketing label. The indexer is the first whitespace-delimited token after the
+// "[AIO...]" prefix, e.g. "[AIO\u26a1] DrunkenSlug 2160p" and
+// "[AIO\u26a1] Newznab (Your Media) 2160p" both -> the first token. The trailing
+// "(Your Media)" group is present on some labels and absent on others, so it is
+// NOT relied on. Anchored to the literal "[AIO" so it can never fire on an
+// ordinary bracketed tag. When the indexer is not individually identifiable the
+// label reads a protocol name (e.g. "Newznab") -- AIOStreams' own generalisation,
+// shown as-is. (A space-containing indexer name would be truncated to its first
+// word, but no such name is emitted in practice.)
+private val AIOSTREAMS_LABEL = Regex("""\[AIO\S*]\s*(\S+)""")
+
+private fun aiostreamsIndexer(label: String): String? =
+    AIOSTREAMS_LABEL.find(label)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
+
 /**
  * @return the provider label, or null when nothing is known (the row is then omitted).
  */
@@ -88,6 +103,11 @@ fun resolveStreamProvider(
     LIBRARY_BACKENDS.firstOrNull { libHaystack.contains(it.first) }
         ?.let { return it.second }
 
-    // 3. Serving host.
+    // 3. AIOStreams native (Usenet/other): show the indexer named in the label.
+    //    Reached only when no debrid store and no library keyword matched, so
+    //    debrid and library sources are unaffected.
+    aiostreamsIndexer(label)?.let { return it }
+
+    // 4. Serving host.
     return host?.takeIf { it.isNotBlank() }
 }

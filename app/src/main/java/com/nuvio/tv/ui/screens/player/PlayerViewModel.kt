@@ -376,7 +376,17 @@ class PlayerViewModel @Inject constructor(
         // once a redirect resolves, falling back to the URL host (the
         // redirector during TTFF, or a direct source) until then / when there
         // is no redirect.
-        (PlaybackConnectionEvents.resolvedHost() ?: host)?.let { rows += StatsRow("Server", it) }
+        (PlaybackConnectionEvents.resolvedHost() ?: host)?.let { serverHost ->
+            // AIOStreams native (Usenet) streams are served from the NAS engine, so
+            // the resolved host is always the NAS -- never the article source
+            // (the NNTP backbone the engine talks to internally is never in the
+            // player's HTTP path). Show a friendly engine label instead of the NAS
+            // IP for those. Debrid CDN / Emby / direct sources keep the real host.
+            val serverValue =
+                if (statsUi.currentStreamName?.startsWith("[AIO") == true) "AIOStreams NNTP"
+                else serverHost
+            rows += StatsRow("Server", serverValue)
+        }
         val urlFileName = streamUrl
             ?.let { runCatching { URI(it).path }.getOrNull() }
             ?.substringAfterLast('/')
