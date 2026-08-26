@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
@@ -339,6 +340,33 @@ internal fun HomeViewModel.observeExternalMetaPrefetchPreferencePipeline() {
                     pendingExternalMetaPrefetchItemId = null
                     externalMetaPrefetchInFlightIds.clear()
                 }
+            }
+    }
+}
+
+/**
+ * Fork: the per-item trailer-preview caches (resolved URL/audio maps, negative
+ * cache) are keyed by itemId only and were cleared solely on addon-set change, so
+ * a hero trailer resolved under IMDb kept playing after the user switched the
+ * source back to YouTube (and a YouTube miss stayed negative after switching to
+ * IMDb). TrailerService's own cache is already source-keyed; this clears the
+ * layer above it and re-requests the currently focused item.
+ */
+internal fun HomeViewModel.observeTrailerSourceChangesPipeline() {
+    viewModelScope.launch {
+        trailerSettingsDataStore.settings
+            .map { it.source }
+            .distinctUntilChanged()
+            .drop(1) // initial value: nothing cached yet
+            .collectLatest {
+                trailerPreviewJob?.cancel()
+                trailerPreviewLoadingIds.clear()
+                trailerPreviewNegativeCache.clear()
+                trailerPreviewUrlsState.clear()
+                trailerPreviewAudioUrlsState.clear()
+                val refocusId = activeTrailerPreviewItemId
+                activeTrailerPreviewItemId = null
+                refocusId?.let { id -> findCatalogItemById(id)?.let { requestTrailerPreviewPipeline(it) } }
             }
     }
 }

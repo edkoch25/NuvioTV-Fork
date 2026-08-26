@@ -20,6 +20,7 @@ import com.nuvio.tv.data.local.StartupAuthNotice
 import com.nuvio.tv.data.local.MDBListSettingsDataStore
 import com.nuvio.tv.data.local.TmdbSettingsDataStore
 import com.nuvio.tv.data.local.TraktSettingsDataStore
+import com.nuvio.tv.data.local.TrailerSettingsDataStore
 import com.nuvio.tv.data.local.ContinueWatchingEnrichmentCache
 import com.nuvio.tv.data.trailer.TrailerService
 import com.nuvio.tv.domain.model.Addon
@@ -81,6 +82,7 @@ class HomeViewModel @Inject constructor(
     internal val tmdbMetadataService: TmdbMetadataService,
     internal val mdbListRepository: MDBListRepository,
     internal val trailerService: TrailerService,
+    internal val trailerSettingsDataStore: TrailerSettingsDataStore,
     internal val watchedSeriesStateHolder: com.nuvio.tv.data.local.WatchedSeriesStateHolder,
     internal val cwEnrichmentCache: ContinueWatchingEnrichmentCache,
     internal val profileManager: com.nuvio.tv.core.profile.ProfileManager,
@@ -460,6 +462,7 @@ class HomeViewModel @Inject constructor(
             loadContinueWatching()
             watchedSeriesStateHolder.loadFromDisk()
             observeExternalMetaPrefetchPreference()
+            observeTrailerSourceChanges()
             observeContinueWatchingSortMode()
             loadHomeCatalogOrderPreference()
             loadFollowAddonsOrder()
@@ -584,6 +587,8 @@ class HomeViewModel @Inject constructor(
     private fun observeModernHomePresentation() = observeModernHomePresentationPipeline()
 
     private fun observeExternalMetaPrefetchPreference() = observeExternalMetaPrefetchPreferencePipeline()
+
+    private fun observeTrailerSourceChanges() = observeTrailerSourceChangesPipeline()
 
     private fun observeContinueWatchingSortMode() {
         viewModelScope.launch {
