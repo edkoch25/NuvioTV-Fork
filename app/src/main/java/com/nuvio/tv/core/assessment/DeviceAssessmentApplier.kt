@@ -90,6 +90,13 @@ object DeviceAssessmentApplier {
         plan.stripHdr10PlusSei?.let { step { dataStore.setStripHdr10PlusSei(it) } }
         plan.forceOpticalPassthrough?.let { step { dataStore.setForceOpticalPassthrough(it) } }
         plan.deniedCodecHandling?.let { step { dataStore.setDeniedCodecHandling(it) } }
+        // Per-format passthrough switches; MAT last so it never outlives TrueHD.
+        plan.allowAc3Passthrough?.let { step { dataStore.setAllowAc3Passthrough(it) } }
+        plan.allowEac3Passthrough?.let { step { dataStore.setAllowEac3Passthrough(it) } }
+        plan.allowTrueHdPassthrough?.let { step { dataStore.setAllowTrueHdPassthrough(it) } }
+        plan.allowDtsPassthrough?.let { step { dataStore.setAllowDtsPassthrough(it) } }
+        plan.allowDtsHdPassthrough?.let { step { dataStore.setAllowDtsHdPassthrough(it) } }
+        plan.matPassthroughEnabled?.let { step { dataStore.setMatPassthroughEnabled(it) } }
 
         // Pre-commit safe-limit re-check (design: "recommend to safe"). Read
         // the settled state back and confirm the native footprint - target
@@ -163,6 +170,13 @@ object DeviceAssessmentApplier {
                 DeniedCodecHandling.fromStoredString(snap.getString("deniedCodecHandling"))
             )
         }
+        // Guarded for the same reason: older snapshots predate these keys.
+        if (snap.has("allowAc3Passthrough")) dataStore.setAllowAc3Passthrough(snap.getBoolean("allowAc3Passthrough"))
+        if (snap.has("allowEac3Passthrough")) dataStore.setAllowEac3Passthrough(snap.getBoolean("allowEac3Passthrough"))
+        if (snap.has("allowTrueHdPassthrough")) dataStore.setAllowTrueHdPassthrough(snap.getBoolean("allowTrueHdPassthrough"))
+        if (snap.has("allowDtsPassthrough")) dataStore.setAllowDtsPassthrough(snap.getBoolean("allowDtsPassthrough"))
+        if (snap.has("allowDtsHdPassthrough")) dataStore.setAllowDtsHdPassthrough(snap.getBoolean("allowDtsHdPassthrough"))
+        if (snap.has("matPassthroughEnabled")) dataStore.setMatPassthroughEnabled(snap.getBoolean("matPassthroughEnabled"))
 
         dataStore.setAssessmentRevertSnapshot(null)
         return true
@@ -193,5 +207,11 @@ object DeviceAssessmentApplier {
         put("stripHdr10PlusSei", s.stripHdr10PlusSei)
         put("forceOpticalPassthrough", s.forceOpticalPassthrough)
         put("deniedCodecHandling", s.deniedCodecHandling.name)
+        put("allowAc3Passthrough", s.allowAc3Passthrough)
+        put("allowEac3Passthrough", s.allowEac3Passthrough)
+        put("allowTrueHdPassthrough", s.allowTrueHdPassthrough)
+        put("allowDtsPassthrough", s.allowDtsPassthrough)
+        put("allowDtsHdPassthrough", s.allowDtsHdPassthrough)
+        put("matPassthroughEnabled", s.matPassthroughEnabled)
     }.toString()
 }

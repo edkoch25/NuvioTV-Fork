@@ -106,7 +106,16 @@ data class AssessmentApplyPlan(
     val dv5ToDv81Enabled: Boolean? = null,
     val stripHdr10PlusSei: Boolean? = null,
     val forceOpticalPassthrough: Boolean? = null,
-    val deniedCodecHandling: DeniedCodecHandling? = null
+    val deniedCodecHandling: DeniedCodecHandling? = null,
+    // Per-format passthrough switches, keyed on the platform's direct-playback
+    // report. Only ever set to false (a chain-absent format), never to true.
+    val allowAc3Passthrough: Boolean? = null,
+    val allowEac3Passthrough: Boolean? = null,
+    val allowTrueHdPassthrough: Boolean? = null,
+    val allowDtsPassthrough: Boolean? = null,
+    val allowDtsHdPassthrough: Boolean? = null,
+    /** Pinned off whenever TrueHD passthrough ends up off (MAT rides TrueHD). */
+    val matPassthroughEnabled: Boolean? = null
 ) {
     val touchedCount: Int
         get() = listOfNotNull(
@@ -116,6 +125,8 @@ data class AssessmentApplyPlan(
             parallelChunkSizeKb, enableHttp2, vodCacheEnabled, vodCacheSizeMode,
             frameRateMatchingMode, resolutionMatchingEnabled, dv7HandlingMode,
             dv5ToDv81Enabled, stripHdr10PlusSei, forceOpticalPassthrough,
-            deniedCodecHandling
+            deniedCodecHandling, allowAc3Passthrough, allowEac3Passthrough,
+            allowTrueHdPassthrough, allowDtsPassthrough, allowDtsHdPassthrough,
+            matPassthroughEnabled
         ).size
 }

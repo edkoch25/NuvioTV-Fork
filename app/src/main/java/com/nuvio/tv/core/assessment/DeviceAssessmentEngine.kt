@@ -48,7 +48,14 @@ import org.json.JSONObject
  *  - dv7LibdoviModeOverride is deliberately ABSENT: no queryable fact
  *    decides it (panel-dependent, eyes-on only), so the assessment does
  *    not mention it at all.
- *  - Audio is out of scope: the only honest AVR decode probe makes sound.
+ *  - Audio decode probing is out of scope (the only honest AVR decode probe
+ *    makes sound), but the platform's direct-playback report is silently
+ *    queryable and is the same oracle media3's sink uses. Per-format rows
+ *    therefore only ever recommend a switch OFF for a chain-ABSENT format:
+ *    that can never remove passthrough that would have worked, and it moves
+ *    the format from the vendor decoder onto the FFmpeg path and into the
+ *    Transcode-to-AC-3 candidate set. ON is never recommended (the probe
+ *    cannot see an F3-learned rejection or a deliberate user choice).
  *  - Tier 3 buffer profiles are user intent; the stability signal only
  *    SUGGESTS one, it never auto-applies. Profile numbers and the stability
  *    threshold are [inferred] initial values, marked as such here.
@@ -516,11 +523,29 @@ object DeviceAssessmentEngine {
         // DeniedTranscodePlanner re-guards learned AC-3 rejections at build time, so
         // a wrong recommendation degrades to PCM decode rather than stranding.
         val maxPcmChannels = runCatching { AudioCapabilityReport.readMaxPcmChannelCount(context) }.getOrNull()
+        // Per-format passthrough switches only exist on the Exo engine (reuse the
+        // engineOk computed above) and are inert when Decoder Priority is Device
+        // only (no fallback decoder). Probe only when both hold, so a device-only
+        // or MPV chain never does the (unused) isDirectPlaybackSupported calls.
+        val softwareDecodersOn = settings.decoderPriority != 0
+        val direct: AudioCapabilityReport.DirectSupport? =
+            if (engineOk && softwareDecodersOn) {
+                runCatching { AudioCapabilityReport.probeDirectSupport() }.getOrNull()
+            } else null
+        // HDMI ARC carries 2-channel LPCM only (multichannel LPCM needs eARC) -
+        // an HDMI-spec fact, not an EDID reading - so on an ARC route with no
+        // readable PCM profile (API < 31) the 2-channel answer is inferred.
+        val arcInferredTwoCh = maxPcmChannels == null &&
+            audioRoute != null && audioRoute.key.startsWith("type:hdmi_arc")
+        val effectivePcmChannels = maxPcmChannels ?: (2.takeIf { arcInferredTwoCh })
+        // AC-3 must be usable as the transcode target: switch on AND (when the probe
+        // answered) claimed by the chain.
+        val ac3Usable = settings.allowAc3Passthrough && direct?.ac3 != false
         val deniedHandlingTarget: DeniedCodecHandling? = when {
             audioRoute == null || !audioRoute.key.startsWith("type:hdmi") -> null
-            maxPcmChannels == null -> null
-            maxPcmChannels <= 2 && settings.allowAc3Passthrough -> DeniedCodecHandling.TRANSCODE_AC3
-            maxPcmChannels > 2 -> DeniedCodecHandling.DECODE_PCM
+            effectivePcmChannels == null -> null
+            effectivePcmChannels <= 2 && ac3Usable -> DeniedCodecHandling.TRANSCODE_AC3
+            effectivePcmChannels > 2 -> DeniedCodecHandling.DECODE_PCM
             else -> null
         }
         val deniedCurrentLabel = if (settings.deniedCodecHandling == DeniedCodecHandling.TRANSCODE_AC3) {
@@ -538,10 +563,13 @@ object DeviceAssessmentEngine {
                 } else {
                     s(R.string.denied_mode_pcm)
                 },
-                grounds = if (deniedHandlingTarget == DeniedCodecHandling.TRANSCODE_AC3) {
-                    s(R.string.assessment_grounds_denied_2ch)
-                } else {
-                    s(R.string.assessment_grounds_denied_multich, maxPcmChannels ?: 0)
+                grounds = when {
+                    deniedHandlingTarget == DeniedCodecHandling.TRANSCODE_AC3 && arcInferredTwoCh ->
+                        s(R.string.assessment_grounds_denied_arc_2ch)
+                    deniedHandlingTarget == DeniedCodecHandling.TRANSCODE_AC3 ->
+                        s(R.string.assessment_grounds_denied_2ch)
+                    else ->
+                        s(R.string.assessment_grounds_denied_multich, maxPcmChannels ?: 0)
                 },
                 tier = AssessmentTier.CALCULATED,
                 changeNeeded = settings.deniedCodecHandling != deniedHandlingTarget
@@ -556,6 +584,116 @@ object DeviceAssessmentEngine {
                 tier = AssessmentTier.VERIFY,
                 changeNeeded = false
             )
+        }
+
+        // ── Per-format passthrough switches vs the platform's direct report ─
+        // Targets are null (leave as is) or false (turn off); never true.
+        var ptAc3Target: Boolean? = null
+        var ptEac3Target: Boolean? = null
+        var ptTrueHdTarget: Boolean? = null
+        var ptDtsTarget: Boolean? = null
+        var ptDtsHdTarget: Boolean? = null
+        var matTarget: Boolean? = null
+        when {
+            !engineOk -> items += AssessmentItem(
+                key = "pt_switches",
+                title = s(R.string.assessment_item_pt_switches),
+                currentValue = null,
+                recommendedValue = s(R.string.assessment_value_leave_as_is),
+                grounds = s(R.string.assessment_grounds_pt_not_exo),
+                tier = AssessmentTier.VERIFY,
+                changeNeeded = false
+            )
+            !softwareDecodersOn -> items += AssessmentItem(
+                key = "pt_switches",
+                title = s(R.string.assessment_item_pt_switches),
+                currentValue = null,
+                recommendedValue = s(R.string.assessment_value_leave_as_is),
+                grounds = s(R.string.assessment_grounds_pt_device_only),
+                tier = AssessmentTier.VERIFY,
+                changeNeeded = false
+            )
+            direct == null -> items += AssessmentItem(
+                key = "pt_switches",
+                title = s(R.string.assessment_item_pt_switches),
+                currentValue = null,
+                recommendedValue = s(R.string.assessment_value_leave_as_is),
+                grounds = s(R.string.assessment_grounds_pt_unavailable),
+                tier = AssessmentTier.VERIFY,
+                changeNeeded = false
+            )
+            else -> {
+                fun ptRow(
+                    key: String,
+                    titleRes: Int,
+                    label: String,
+                    claimed: Boolean,
+                    current: Boolean,
+                    recommendOff: Boolean,
+                    offGroundsRes: Int = R.string.assessment_grounds_pt_absent,
+                    keepGroundsRes: Int? = null
+                ): Boolean? {
+                    return if (claimed) {
+                        items += AssessmentItem(
+                            key = key, title = s(titleRes),
+                            currentValue = if (current) on else off,
+                            recommendedValue = s(R.string.assessment_value_leave_as_is),
+                            grounds = s(R.string.assessment_grounds_pt_direct, label),
+                            tier = AssessmentTier.VERIFY, changeNeeded = false
+                        )
+                        null
+                    } else if (recommendOff) {
+                        items += AssessmentItem(
+                            key = key, title = s(titleRes),
+                            currentValue = if (current) on else off,
+                            recommendedValue = off,
+                            grounds = s(offGroundsRes, label),
+                            tier = AssessmentTier.CALCULATED, changeNeeded = current
+                        )
+                        false
+                    } else {
+                        items += AssessmentItem(
+                            key = key, title = s(titleRes),
+                            currentValue = if (current) on else off,
+                            recommendedValue = s(R.string.assessment_value_leave_as_is),
+                            grounds = s(keepGroundsRes ?: R.string.assessment_grounds_pt_absent, label),
+                            tier = AssessmentTier.VERIFY, changeNeeded = false
+                        )
+                        null
+                    }
+                }
+                ptAc3Target = ptRow("pt_ac3", R.string.audio_passthrough_ac3, "AC-3",
+                    direct.ac3, settings.allowAc3Passthrough, recommendOff = true)
+                ptEac3Target = ptRow("pt_eac3", R.string.audio_passthrough_eac3, "E-AC-3",
+                    direct.eac3, settings.allowEac3Passthrough, recommendOff = true)
+                ptTrueHdTarget = ptRow("pt_truehd", R.string.audio_passthrough_truehd, "TrueHD",
+                    direct.trueHd, settings.allowTrueHdPassthrough, recommendOff = true)
+                ptDtsTarget = ptRow("pt_dts", R.string.audio_passthrough_dts, "DTS",
+                    direct.dts, settings.allowDtsPassthrough, recommendOff = true)
+                // DTS-HD absent but DTS claimed: media3 relabels DTS-HD to DTS and the
+                // receiver decodes the core - lossy 5.1 passthrough. Only worth giving
+                // up when the chain provably takes multichannel LPCM (lossless decode
+                // wins); on a 2-channel or unknown chain the core beats AC-3 or stereo.
+                val dtsCoreFallback = !direct.dtsHd && direct.dts
+                val dtsHdOffWins = !dtsCoreFallback || ((maxPcmChannels ?: 0) > 2)
+                ptDtsHdTarget = ptRow("pt_dtshd", R.string.audio_passthrough_dtshd, "DTS-HD",
+                    direct.dtsHd, settings.allowDtsHdPassthrough,
+                    recommendOff = dtsHdOffWins,
+                    offGroundsRes = if (dtsCoreFallback) R.string.assessment_grounds_pt_dtshd_multich
+                                    else R.string.assessment_grounds_pt_absent,
+                    keepGroundsRes = R.string.assessment_grounds_pt_dtshd_core)
+                // MAT rides TrueHD: pin it off whenever TrueHD is, or will be, off.
+                val trueHdEndsOff = ptTrueHdTarget == false || !settings.allowTrueHdPassthrough
+                if (trueHdEndsOff && settings.matPassthroughEnabled) {
+                    matTarget = false
+                    items += AssessmentItem(
+                        key = "pt_mat", title = s(R.string.audio_mat_passthrough),
+                        currentValue = on, recommendedValue = off,
+                        grounds = s(R.string.assessment_grounds_pt_mat),
+                        tier = AssessmentTier.CALCULATED, changeNeeded = true
+                    )
+                }
+            }
         }
 
         // AFR + resolution: honest per display capability; VERIFY when the
@@ -837,7 +975,13 @@ object DeviceAssessmentEngine {
             },
             deniedCodecHandling = deniedHandlingTarget?.takeIf {
                 settings.deniedCodecHandling != it
-            }
+            },
+            allowAc3Passthrough = ptAc3Target?.takeIf { settings.allowAc3Passthrough != it },
+            allowEac3Passthrough = ptEac3Target?.takeIf { settings.allowEac3Passthrough != it },
+            allowTrueHdPassthrough = ptTrueHdTarget?.takeIf { settings.allowTrueHdPassthrough != it },
+            allowDtsPassthrough = ptDtsTarget?.takeIf { settings.allowDtsPassthrough != it },
+            allowDtsHdPassthrough = ptDtsHdTarget?.takeIf { settings.allowDtsHdPassthrough != it },
+            matPassthroughEnabled = matTarget?.takeIf { settings.matPassthroughEnabled != it }
         )
 
         return AssessmentResult(

@@ -3372,6 +3372,17 @@
     <string name="assessment_grounds_denied_2ch">This output negotiates at most 2-channel PCM, so decoded surround collapses to stereo \u2014 transcoding denied formats to 5.1 AC-3 keeps the channels</string>
     <string name="assessment_grounds_denied_multich">This output accepts %1$d-channel PCM, so decoding denied formats keeps lossless multichannel audio \u2014 AC-3 transcoding would only lose quality</string>
     <string name="assessment_grounds_denied_unknown">Couldn\'t read the output\'s PCM channel count from here \u2014 choose based on whether your receiver accepts multichannel PCM</string>
+    <string name="assessment_grounds_denied_arc_2ch">Audio route is HDMI ARC, which carries 2-channel PCM only \u2014 transcoding denied formats to 5.1 AC-3 keeps the channels</string>
+    <!-- Device Settings Assessment: per-format passthrough switches -->
+    <string name="assessment_item_pt_switches">Per-format passthrough switches</string>
+    <string name="assessment_grounds_pt_not_exo">These switches only apply to the ExoPlayer engine</string>
+    <string name="assessment_grounds_pt_device_only">Decoder Priority is Device only, so there is no fallback decoder and the switches do nothing</string>
+    <string name="assessment_grounds_pt_unavailable">This Android version can\'t report what the audio chain accepts</string>
+    <string name="assessment_grounds_pt_direct">The audio chain reports it accepts %1$s directly</string>
+    <string name="assessment_grounds_pt_absent">The audio chain does not accept %1$s \u2014 turning it off routes the format to the software decoder and makes it eligible for AC-3 transcoding</string>
+    <string name="assessment_grounds_pt_dtshd_core">The chain accepts DTS but not DTS-HD, so DTS-HD already plays as lossy DTS 5.1 \u2014 better than what turning it off would give on this output</string>
+    <string name="assessment_grounds_pt_dtshd_multich">The chain accepts DTS but not DTS-HD, and takes multichannel PCM \u2014 decoding gives lossless surround instead of the lossy DTS core</string>
+    <string name="assessment_grounds_pt_mat">TrueHD passthrough is off, so MAT encapsulation has nothing to carry</string>
 
 
     <!-- Device Settings Assessment: Stage 2 apply/revert + polish -->

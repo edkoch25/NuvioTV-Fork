@@ -73,15 +73,7 @@ object AudioCapabilityReport {
                     .build()
                 val supported = mutableListOf<String>()
                 val absent = mutableListOf<String>()
-                for ((label, encoding) in PROBES) {
-                    val format = AudioFormat.Builder()
-                        .setEncoding(encoding)
-                        .setSampleRate(48_000)
-                        .setChannelMask(AudioFormat.CHANNEL_OUT_5POINT1)
-                        .build()
-                    val ok = runCatching {
-                        AudioTrack.isDirectPlaybackSupported(format, attributes)
-                    }.getOrDefault(false)
+                for ((label, ok) in probeDirectLabels(attributes)) {
                     (if (ok) supported else absent).add(label)
                 }
                 val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
@@ -97,6 +89,56 @@ object AudioCapabilityReport {
     internal fun reset() {
         latestReport = null
     }
+
+    /**
+     * What the platform claims the chain can take directly, one flag per format group
+     * the per-format passthrough switches can act on. Same probe as [capture]; exposed
+     * structurally so the Device Assessment can key its per-format rows on it rather
+     * than parsing the display string.
+     *
+     * Null below API 29 (no isDirectPlaybackSupported) or when the probe throws. A
+     * false here is the same answer media3's AudioCapabilities will give the sink, so
+     * "absent" can never be wrong in the direction that loses working passthrough.
+     */
+    data class DirectSupport(
+        val ac3: Boolean,
+        val eac3: Boolean,
+        val trueHd: Boolean,
+        val dts: Boolean,
+        val dtsHd: Boolean
+    )
+
+    fun probeDirectSupport(): DirectSupport? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        return runCatching {
+            val attributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+                .build()
+            val m = probeDirectLabels(attributes).toMap()
+            DirectSupport(
+                ac3 = m["AC3"] == true,
+                eac3 = m["EAC3"] == true,
+                trueHd = m["TrueHD"] == true,
+                dts = m["DTS"] == true,
+                dtsHd = m["DTS-HD"] == true
+            )
+        }.getOrNull()
+    }
+
+    /** One isDirectPlaybackSupported call per [PROBES] entry, 48 kHz / 5.1, in order. */
+    private fun probeDirectLabels(attributes: AudioAttributes): List<Pair<String, Boolean>> =
+        PROBES.map { (label, encoding) ->
+            val format = AudioFormat.Builder()
+                .setEncoding(encoding)
+                .setSampleRate(48_000)
+                .setChannelMask(AudioFormat.CHANNEL_OUT_5POINT1)
+                .build()
+            val ok = runCatching {
+                AudioTrack.isDirectPlaybackSupported(format, attributes)
+            }.getOrDefault(false)
+            label to ok
+        }
 
     /** Pure formatter, split out so the wording is unit-testable without a device. */
     internal fun format(
