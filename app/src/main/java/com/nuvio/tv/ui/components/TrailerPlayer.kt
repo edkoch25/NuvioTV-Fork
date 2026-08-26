@@ -39,6 +39,15 @@ import com.nuvio.tv.R
 import kotlinx.coroutines.delay
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+/**
+ * Fork: uniform zoom applied to every trailer surface (hero, detail, shared
+ * overlay, poster card). 1.0 = no crop. A value like 1.10 trims most of the
+ * letterbox on 2.39:1 trailers but loses ~5% off every edge, including the
+ * network logos in the safe area (tried, rejected on device 2026-08-26). Tune
+ * here; callers may still override per surface.
+ */
+const val TRAILER_OVERSCAN_ZOOM = 1.0f
+
 @Composable
 fun TrailerPlayer(
     trailerUrl: String?,
@@ -53,7 +62,7 @@ fun TrailerPlayer(
     onProgressChanged: (positionMs: Long, durationMs: Long) -> Unit = { _, _ -> },
     onRemoteKey: (keyCode: Int, action: Int, repeatCount: Int) -> Boolean = { _, _, _ -> false },
     cropToFill: Boolean = false,
-    overscanZoom: Float = 1f,
+    overscanZoom: Float = TRAILER_OVERSCAN_ZOOM,
     modifier: Modifier = Modifier,
     enter: EnterTransition = fadeIn(animationSpec = tween(800)),
     exit: ExitTransition = fadeOut(animationSpec = tween(500)),
@@ -258,6 +267,9 @@ fun TrailerPlayer(
                     .clipToBounds()
                     .graphicsLayer {
                         alpha = playerAlphaState.value
+                        // Fork: overscanZoom was declared but never applied upstream.
+                        scaleX = overscanZoom
+                        scaleY = overscanZoom
                     }
             )
         }

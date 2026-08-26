@@ -1352,7 +1352,6 @@ private fun ModernCarouselCard(
                                 onEnded = onTrailerEnded,
                                 muted = focusedPosterBackdropTrailerMuted,
                                 cropToFill = true,
-                                overscanZoom = MODERN_TRAILER_OVERSCAN_ZOOM,
                                 modifier = Modifier.fillMaxSize()
                             )
                         }

@@ -26,7 +26,10 @@ import com.nuvio.tv.ui.util.asStable
 internal val YEAR_REGEX = Regex("""\b(19|20)\d{2}\b""")
 internal const val MODERN_HERO_TEXT_WIDTH_FRACTION = 0.42f
 internal const val MODERN_HERO_MEDIA_WIDTH_FRACTION = 0.72f
-internal const val MODERN_TRAILER_OVERSCAN_ZOOM = 1.35f
+/** Fork: clear gap kept between the hero text block and the non-fullscreen trailer. */
+internal val MODERN_HERO_TRAILER_TEXT_GUTTER = 24.dp
+/** Fork: inset between the non-fullscreen trailer's right edge and the screen edge. */
+internal val MODERN_HERO_TRAILER_EDGE_INSET = 24.dp
 internal const val MODERN_HERO_FOCUS_DEBOUNCE_MS = 450L
 internal val MODERN_ROW_HEADER_FOCUS_INSET = 40.dp
 internal const val MODERN_CONTINUE_WATCHING_ROW_KEY = "continue_watching"

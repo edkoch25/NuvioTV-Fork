@@ -13,9 +13,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -78,10 +80,13 @@ internal fun ModernHeroScene(
     modifier: Modifier,
     requestWidthPx: Int,
     requestHeightPx: Int,
+    trailerMaxWidth: androidx.compose.ui.unit.Dp,
     onTrailerEnded: () -> Unit,
     onFirstFrameRendered: () -> Unit
 ) {
     ModernHeroMediaLayer(
+        isFullScreen = isFullScreen,
+        trailerMaxWidth = trailerMaxWidth,
         heroBackdrop = { state().heroBackdrop },
         enrichmentActive = { state().enrichmentActive },
         shouldPlayHeroTrailer = { state().shouldPlayTrailer },
@@ -106,6 +111,8 @@ internal fun ModernHeroScene(
 
 @Composable
 internal fun ModernHeroMediaLayer(
+    isFullScreen: () -> Boolean,
+    trailerMaxWidth: androidx.compose.ui.unit.Dp,
     heroBackdrop: () -> String?,
     enrichmentActive: () -> Boolean,
     shouldPlayHeroTrailer: () -> Boolean,
@@ -186,21 +193,61 @@ internal fun ModernHeroMediaLayer(
             val playbackKeyVal = heroTrailerPlaybackKey()
             val audioUrlVal = heroTrailerAudioUrl()
             val mutedVal = muted()
-            key(playbackKeyVal ?: trailerUrlVal) {
-                TrailerPlayer(
-                    trailerUrl = trailerUrlVal,
-                    trailerAudioUrl = audioUrlVal,
-                    isPlaying = true,
-                    onEnded = onTrailerEnded,
-                    onFirstFrameRendered = onFirstFrameRendered,
-                    muted = mutedVal,
-                    cropToFill = false,
+            // Fork: the OUTER media box (this composable's `modifier`) is TopEnd,
+            // 72% wide, and offset(x = +huge) so the backdrop bleeds off the right
+            // screen edge. RESIZE_MODE_FIT centred the 16:9 video inside that box,
+            // pushing its left edge into the hero text block.
+            //
+            // The alignment MUST live on a Box that is a direct child of this Box:
+            // TrailerPlayer's modifier lands on an AndroidView inside an
+            // AnimatedVisibility, whose layout drops BoxScope.align parent-data
+            // (three earlier attempts placed the player at the box's top-left for
+            // exactly this reason). So: wrapper Box pinned CenterEnd, offset LEFT by
+            // `huge` to cancel the outer bleed plus a screen-edge inset, exact dp
+            // width (cap computed screen-side in dp), full height; the player
+            // fills the wrapper and FIT letterboxes the 16:9 video inside it.
+            if (isFullScreen()) {
+                key(playbackKeyVal ?: trailerUrlVal) {
+                    TrailerPlayer(
+                        trailerUrl = trailerUrlVal,
+                        trailerAudioUrl = audioUrlVal,
+                        isPlaying = true,
+                        onEnded = onTrailerEnded,
+                        onFirstFrameRendered = onFirstFrameRendered,
+                        muted = mutedVal,
+                        cropToFill = false,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                alpha = transitionProgressState.value
+                            }
+                    )
+                }
+            } else {
+                Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            alpha = transitionProgressState.value
-                        }
-                )
+                        .align(Alignment.CenterEnd)
+                        .offset(x = -(NuvioTheme.spacing.huge + MODERN_HERO_TRAILER_EDGE_INSET))
+                        .width(trailerMaxWidth)
+                        .fillMaxHeight()
+                ) {
+                    key(playbackKeyVal ?: trailerUrlVal) {
+                        TrailerPlayer(
+                            trailerUrl = trailerUrlVal,
+                            trailerAudioUrl = audioUrlVal,
+                            isPlaying = true,
+                            onEnded = onTrailerEnded,
+                            onFirstFrameRendered = onFirstFrameRendered,
+                            muted = mutedVal,
+                            cropToFill = false,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    alpha = transitionProgressState.value
+                                }
+                        )
+                    }
+                }
             }
         }
     }
