@@ -685,10 +685,28 @@ class PlayerViewModel @Inject constructor(
             if (ParallelRangeDataSource.hudClampLatched) {
                 val nextS = ParallelRangeDataSource
                     .hudClampCooldownRemainingMs(android.os.SystemClock.uptimeMillis()) / 1000L
+                // nt14 (27 Aug capture, 22 Aug SS7.2-7): when the server is actively
+                // throttling (clamp latched) AND measured delivery is materially below the
+                // mux rate the stream needs, name it out loud. Uses the Speed row's own
+                // SPEED_RATIO_WARN so the "materially below" bar matches the Speed dot.
+                // Absent when either figure is unknown or delivery is keeping up (row reads
+                // exactly as before). No client logic recovers throughput here; honesty is
+                // the feature.
+                val servingSuffix = run {
+                    val measured = statsMeasuredBps
+                    val needed = effectiveMuxBps
+                    if (measured != null && needed != null && needed > 0L &&
+                        measured.toDouble() / needed < t.SPEED_RATIO_WARN) {
+                        String.format(
+                            " \u00b7 serving %.1f/%.1f Mbit/s",
+                            measured / 1_000_000.0, needed / 1_000_000.0
+                        )
+                    } else ""
+                }
                 rows += StatsRow(
                     "Rate limit",
                     "429 \u00b7 depth ${ParallelRangeDataSource.hudDepthCap}/${ParallelRangeDataSource.hudDepthConfigured}" +
-                        " \u00b7 +1 in ${nextS}s",
+                        " \u00b7 +1 in ${nextS}s" + servingSuffix,
                     StatsDot.WARN
                 )
             } else {
