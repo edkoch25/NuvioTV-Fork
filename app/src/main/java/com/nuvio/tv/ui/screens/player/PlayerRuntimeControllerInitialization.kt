@@ -1705,6 +1705,16 @@ internal fun PlayerRuntimeController.initializePlayer(
                         hasRenderedFirstFrame = true
                         cancelStartupWatchdog()
                         mediaSourceFactory.unlockStartupPrefetch()
+                        // NuvioTV fork (Task A): pre-populate the source list in the
+                        // background once playback is healthy, so a mid-play failover
+                        // (an unrecoverable malformed hole, or an HTTP dead source) has
+                        // alternatives to switch to without the user having opened the
+                        // sources panel first. Cheap - the details screen already
+                        // fetched these, so it is a cache hit. Guarded on empty so it
+                        // runs once and never re-fires on a failover re-prepare.
+                        if (_uiState.value.sourceAllStreams.isEmpty()) {
+                            loadSourceStreams(forceRefresh = false)
+                        }
                         if (isFirstFrame && _uiState.value.postPlayDismissedForCurrentEpisode) {
                             _uiState.update { it.copy(postPlayDismissedForCurrentEpisode = false) }
                         }
@@ -1991,6 +2001,23 @@ internal fun PlayerRuntimeController.initializePlayer(
 
                         // ── Main Engine Failover ──
                         if (maybeAutoSwitchInternalPlayerOnStartupError(detailedError = detailedError, allowEngineFailover = allowEngineFailover)) {
+                            return
+                        }
+
+                        // Patch 2 (Task A backstop): a mid-play malformed-container error
+                        // (3001 / 2000) that Patch 1's extractor resync could not clear
+                        // will not recover on a same-URL re-prepare either - auto-retry
+                        // cue-seeks to the same position and re-hits the same corruption.
+                        // Fail over to the next source immediately, exactly like the HTTP
+                        // dead-source arm above (media3's Loader has already retried
+                        // before this point). Bounded by MAX_DEAD_SOURCE_FAILOVERS;
+                        // returns false (=> auto-retry, then the error screen) only when
+                        // no live source remains.
+                        if (hasRenderedFirstFrame &&
+                            (error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED ||
+                                error.errorCode == PlaybackException.ERROR_CODE_IO_UNSPECIFIED) &&
+                            advanceToNextLiveSource(detailedError)
+                        ) {
                             return
                         }
 

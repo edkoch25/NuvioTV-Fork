@@ -520,6 +520,18 @@ internal fun PlayerRuntimeController.tryParsingErrorProbeFallback(
         error.cause?.toString()?.contains("UnrecognizedInputFormatException") == true
 
     if (!isSourceOrParsingError) return false
+    // Patch 2 (Task A backstop): mid-play, the container already played for a
+    // while under a known non-HLS mimeType - re-probing the format cannot help
+    // (the data is corrupt, not the container label) and costs ~6s against the
+    // NNTP engine. Skip the probe; the dispatcher's auto-retry and the mid-play
+    // failover after the budget gate handle it. HLS (M3U8) still probes for
+    // live-window recovery.
+    if (hasRenderedFirstFrame &&
+        currentStreamMimeType != null &&
+        currentStreamMimeType != androidx.media3.common.MimeTypes.APPLICATION_M3U8
+    ) {
+        return false
+    }
     if (parsingErrorProbeAttempted) return false
     parsingErrorProbeAttempted = true
 

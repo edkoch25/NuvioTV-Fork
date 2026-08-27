@@ -893,6 +893,17 @@ private class PlayerLoadErrorHandlingPolicy : DefaultLoadErrorHandlingPolicy(6) 
                 return androidx.media3.common.C.TIME_UNSET
             }
         }
+        // NuvioTV fork: a malformed-container error (a Usenet zero-fill hole the
+        // extractor resync could not clear) will not un-malform on retry - the same
+        // bytes fail identically. Surface it immediately (no backoff retries) so the
+        // player's mid-play failover can switch sources, matching the permanent-HTTP
+        // handling above. Recoverable holes never reach here (the extractor swallows
+        // them), so only genuinely unrecoverable corruption is short-circuited.
+        val malformed = loadErrorInfo.exception.findCause<androidx.media3.common.ParserException>() != null ||
+            loadErrorInfo.exception.findCause<IllegalStateException>()?.message?.contains("varint") == true
+        if (malformed) {
+            return androidx.media3.common.C.TIME_UNSET
+        }
         val timeout = loadErrorInfo.exception.findCause<SocketTimeoutException>() != null
         return if (timeout) {
             when (loadErrorInfo.errorCount) {
