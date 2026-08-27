@@ -120,6 +120,10 @@ class AddonManagerViewModel @Inject constructor(
 
     fun requestAddonSyncNow() {
         startupSyncService.requestAddonSyncNow()
+        // Also force a manifest re-fetch of every installed addon (bypassing the
+        // in-memory cache), so an addon that dropped out because its manifest
+        // fetch failed reappears without needing a log-out / log-in.
+        viewModelScope.launch { addonRepository.refreshAllManifests() }
     }
 
     private fun loadLogoBytes() {
