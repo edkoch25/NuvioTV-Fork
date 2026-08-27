@@ -418,6 +418,14 @@ class PlayerRuntimeController(
 
     internal var rebufferCount: Int = 0
 
+    // nt14: wall time (elapsedRealtime) of the last DISCONTINUITY_REASON_SEEK, whether the
+    // currently-open buffering episode was seek-induced (excluded from rebuffer stats), and
+    // the grace window (27 Aug capture: seek-induced entries 2-4ms after the stamp, genuine
+    // ones >=7.9s from any seek).
+    internal var lastSeekWallMs: Long = 0L
+    internal var currentRebufferSeekInduced: Boolean = false
+    internal val seekRebufferGraceMs: Long = 1_500L
+
     // nt8: TrueHD startup-storm auto-recovery attempts this playback session (cap 2).
     internal var truehdStormRecoveryAttempts: Int = 0
 

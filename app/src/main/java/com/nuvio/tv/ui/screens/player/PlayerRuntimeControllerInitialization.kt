@@ -529,6 +529,8 @@ internal fun PlayerRuntimeController.initializePlayer(
             stormRecoveryTotalThisPlayback = 0
             rebufferTotalMs = 0L
             rebufferStartedAtMs = 0L
+            lastSeekWallMs = 0L
+            currentRebufferSeekInduced = false
 
             // Resolve effective DV7 mode — AUTO consults the display-capability policy.
             // The persisted enum stays as-is; only the runtime behavior is derived per playback.
@@ -1442,24 +1444,41 @@ internal fun PlayerRuntimeController.initializePlayer(
                         // Rebuffer telemetry: a rebuffer is STATE_BUFFERING entered
                         // AFTER the first frame (initial startup buffering is excluded).
                         // Accumulate time spent rebuffering; closed out on any non-buffering state.
+                        // nt14: buffering within seekRebufferGraceMs of a user seek is the seek's
+                        // own refill, not a starvation rebuffer. Excluded from count/totalMs/
+                        // analytics; duration tracking and the passthrough-resync arm still run
+                        // for every episode. Known limit: a seek INTO a starved region is
+                        // excluded too (STALL_WATCHDOG / Rate-limit row still surface it).
                         if (playbackState == Player.STATE_BUFFERING) {
                             if (hasRenderedFirstFrame && rebufferStartedAtMs == 0L) {
-                                rebufferCount += 1
                                 rebufferStartedAtMs = SystemClock.elapsedRealtime()
-                                playbackAnalyticsDiagnostics.onRebufferStarted(this@apply, rebufferCount)
-                                Log.i(
-                                    PlayerRuntimeController.TAG,
-                                    "REBUFFER: count=$rebufferCount totalRebufferMs=$rebufferTotalMs " +
-                                        "bufferEngine=${currentDiagnostics.bufferEngineEnabled} " +
-                                        "dv7dovi=${isExperimentalDv7ToDv81ActiveForCurrentPlayback} " +
-                                        "host=${currentStreamUrl.safeHost()}"
-                                )
+                                currentRebufferSeekInduced =
+                                    rebufferStartedAtMs - lastSeekWallMs <= seekRebufferGraceMs
+                                if (!currentRebufferSeekInduced) {
+                                    rebufferCount += 1
+                                    playbackAnalyticsDiagnostics.onRebufferStarted(this@apply, rebufferCount)
+                                    Log.i(
+                                        PlayerRuntimeController.TAG,
+                                        "REBUFFER: count=$rebufferCount totalRebufferMs=$rebufferTotalMs " +
+                                            "bufferEngine=${currentDiagnostics.bufferEngineEnabled} " +
+                                            "dv7dovi=${isExperimentalDv7ToDv81ActiveForCurrentPlayback} " +
+                                            "host=${currentStreamUrl.safeHost()}"
+                                    )
+                                } else {
+                                    Log.i(
+                                        PlayerRuntimeController.TAG,
+                                        "REBUFFER_SEEK_EXCLUDED: sinceSeekMs=${rebufferStartedAtMs - lastSeekWallMs}"
+                                    )
+                                }
                             }
                         } else if (rebufferStartedAtMs != 0L) {
                             val lastRebufferMs = (SystemClock.elapsedRealtime() - rebufferStartedAtMs).coerceAtLeast(0L)
-                            rebufferTotalMs += lastRebufferMs
+                            if (!currentRebufferSeekInduced) {
+                                rebufferTotalMs += lastRebufferMs
+                                playbackAnalyticsDiagnostics.onRebufferEnded(this@apply, rebufferTotalMs, lastRebufferMs)
+                            }
                             rebufferStartedAtMs = 0L
-                            playbackAnalyticsDiagnostics.onRebufferEnded(this@apply, rebufferTotalMs, lastRebufferMs)
+                            currentRebufferSeekInduced = false
                             playbackSpeedAwareAudioSink?.armPassthroughResync()
                         }
 
@@ -2393,6 +2412,11 @@ internal fun PlayerRuntimeController.initializePlayer(
                                 "oldMs=${oldPosition.positionMs} newMs=${newPosition.positionMs} " +
                                 "eventRealtimeMs=${eventTime.realtimeMs}"
                         )
+                        // nt14: seek stamp for the rebuffer seek-grace (reason SEEK only; the
+                        // snap classifier's stamp below stays unconditional).
+                        if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                            lastSeekWallMs = SystemClock.elapsedRealtime()
+                        }
                         // nt11 (0.8.2): stamp for the shadow snap classifier --
                         // a stride NOT preceded by this stamp is a snap suspect.
                         snapShadowLastDiscontinuityWallMs = SystemClock.elapsedRealtime()
