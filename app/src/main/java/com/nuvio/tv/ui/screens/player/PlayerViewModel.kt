@@ -244,6 +244,8 @@ class PlayerViewModel @Inject constructor(
     fun samplePlaybackStats(
         displayRefreshRateHz: Float?,
         displayRateOptions: Int?,
+        displayModeWidth: Int?,
+        displayModeHeight: Int?,
         lastPingMs: Long?
     ): PlaybackStatsSample {
         val engine = controller.currentInternalPlayerEngine
@@ -602,7 +604,15 @@ class PlayerViewModel @Inject constructor(
                 if (singleMode) add("1 mode")
             }
             val suffix = if (notes.isEmpty()) "" else " · " + notes.joinToString(", ")
-            rows += StatsRow("Display", String.format("%.2f Hz", hz) + suffix, dot)
+            // Output resolution first, mode-descriptor style ("3840×2160 · 23.98 Hz").
+            // This is the negotiated output MODE, distinct from the Video row's SOURCE
+            // resolution above it — a 4K file on a 1080p output reads Video 3840×2160 /
+            // Display 1920×1080, making the downscale self-evident. Deliberately no dot
+            // change: an output below source is not something the app can fix.
+            val modeSize = if ((displayModeWidth ?: 0) > 0 && (displayModeHeight ?: 0) > 0) {
+                "${displayModeWidth}×${displayModeHeight} · "
+            } else ""
+            rows += StatsRow("Display", modeSize + String.format("%.2f Hz", hz) + suffix, dot)
         }
 
         // Buffer health with startup grace and end-of-file guard.

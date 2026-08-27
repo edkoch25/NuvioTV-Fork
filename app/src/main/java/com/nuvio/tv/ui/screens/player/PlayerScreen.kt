@@ -954,7 +954,13 @@ fun PlayerScreen(
                     lastPingMs = viewModel.samplePing()
                 }
                 val statsDisplay = statsHostView.display
-                val refreshRateHz = statsDisplay?.mode?.refreshRate
+                // Active Display.Mode, not DisplayMetrics/Configuration: on Amlogic-class
+                // boxes the app framebuffer commonly renders at 1080p while HDMI outputs
+                // 4K — the metrics APIs report the framebuffer; Display.getMode() reports
+                // the negotiated output mode, the same object AFR switches through
+                // preferredDisplayModeId, so the row stays self-consistent with its dot.
+                val statsActiveMode = statsDisplay?.mode
+                val refreshRateHz = statsActiveMode?.refreshRate
                 // Modes on offer at the current resolution. When there is only one, no
                 // app-side mechanism can change the display rate — preferredDisplayModeId
                 // has nothing to switch to — so the HUD must not judge the rate as if the
@@ -969,6 +975,8 @@ fun PlayerScreen(
                 playbackStatsSample = viewModel.samplePlaybackStats(
                     refreshRateHz,
                     displayRateOptions,
+                    statsActiveMode?.physicalWidth,
+                    statsActiveMode?.physicalHeight,
                     lastPingMs
                 )
                 tick += 1
