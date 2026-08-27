@@ -221,12 +221,12 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
                 icon = Icons.Default.Tune,
                 title = stringResource(R.string.audio_enable_downmix_title),
                 subtitle = stringResource(R.string.audio_enable_downmix_subtitle),
-                // Show off outside Prefer app decoders so a persisted value doesn't
+                // Show off with Device-only decoders so a persisted value doesn't
                 // read as active (same pattern as optical passthrough / DV8.1-only toggles).
                 isChecked = playerSettings.effectiveDownmixEnabled,
                 onCheckedChange = onSetDownmixEnabled,
                 onFocused = onItemFocused,
-                enabled = enabled && playerSettings.isPreferAppDecoder
+                enabled = enabled && playerSettings.decoderPriority != 0
             )
         }
 

@@ -360,9 +360,17 @@ data class PlayerSettings(
     val isPreferAppDecoder: Boolean
         get() = decoderPriority == 2
 
-    /** FFmpeg downmix only runs when the app decoder is preferred. */
+    /**
+     * Kodi model: passthrough wins, downmix applies only to what the app
+     * decodes. Armed whenever the FFmpeg renderer exists (decoderPriority
+     * != 0) - the same condition as softwareDecodersAvailable. Under
+     * EXTENSION_RENDERER_MODE_ON the FFmpeg renderer only receives formats
+     * MediaCodec abstained from (policy-denied, or native channel count
+     * unsupported by the sink as PCM), so chain-claimed passthrough
+     * formats still bitstream untouched.
+     */
     val effectiveDownmixEnabled: Boolean
-        get() = downmixEnabled && isPreferAppDecoder
+        get() = downmixEnabled && decoderPriority != 0
 
     /**
      * Tunneled playback cannot share the FFmpeg audio path. Prefer-app decoder
