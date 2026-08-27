@@ -299,6 +299,11 @@ public class MatroskaExtractor implements Extractor {
   private static final int ID_TIMECODE_SCALE = 0x2AD7B1;
   private static final int ID_DURATION = 0x4489;
   private static final int ID_CLUSTER = 0x1F43B675;
+  // NuvioTV fork: malformed-container (Usenet zero-fill) recovery. Budget of
+  // resync attempts per extractor instance, and the forward byte span each
+  // resync scans looking for the next Cluster before giving up.
+  private static final int MAX_RESYNC_ATTEMPTS = 8;
+  private static final long MAX_RESYNC_SCAN_BYTES = 64L * 1024 * 1024;
   private static final int ID_TIME_CODE = 0xE7;
   private static final int ID_SIMPLE_BLOCK = 0xA3;
   private static final int ID_BLOCK_GROUP = 0xA0;
@@ -557,6 +562,10 @@ public class MatroskaExtractor implements Extractor {
   private final ParsableByteArray nalStartCode;
   private final ParsableByteArray nalLength;
   private final ParsableByteArray scratch;
+  // NuvioTV fork: 4-byte peek buffer and remaining resync budget for
+  // malformed-container recovery (see read() / resyncToNextCluster()).
+  private final byte[] resyncScratch = new byte[4];
+  private int resyncBudget = MAX_RESYNC_ATTEMPTS;
   private final ParsableByteArray vorbisNumPageSamples;
   private final ParsableByteArray seekEntryIdBytes;
   private final ParsableByteArray sampleStrippedBytes;
@@ -771,6 +780,12 @@ public class MatroskaExtractor implements Extractor {
   @CallSuper
   @Override
   public void seek(long position, long timeUs) {
+    resetParsingState();
+  }
+
+  // NuvioTV fork: extracted verbatim from the original seek() body so the
+  // malformed-container resync path can reuse the exact same clean-slate reset.
+  private void resetParsingState() {
     clusterTimecodeUs = C.TIME_UNSET;
     blockState = BLOCK_STATE_START;
     reader.reset();
@@ -792,6 +807,31 @@ public class MatroskaExtractor implements Extractor {
     }
   }
 
+  // NuvioTV fork: byte-scan forward from the current read position to the next
+  // Cluster (level-1) element, leaving the input positioned at the Cluster ID so
+  // the reader parses it fresh. Targets Cluster specifically (not any level-1 ID)
+  // because a Matroska cluster opens on a keyframe, giving the decoder a clean
+  // entry after the skipped hole. Bounded by MAX_RESYNC_SCAN_BYTES.
+  private boolean resyncToNextCluster(ExtractorInput input) throws IOException {
+    long scanned = 0;
+    while (scanned < MAX_RESYNC_SCAN_BYTES) {
+      input.resetPeekPosition();
+      if (!input.peekFully(resyncScratch, 0, 4, /* allowEndOfInput= */ true)) {
+        return false;
+      }
+      int length = VarintReader.parseUnsignedVarintLength(resyncScratch[0]);
+      if (length != C.LENGTH_UNSET && length <= 4) {
+        int id = (int) VarintReader.assembleVarint(resyncScratch, length, /* removeLengthMask= */ false);
+        if (id == ID_CLUSTER) {
+          return true;
+        }
+      }
+      input.skipFully(1);
+      scanned++;
+    }
+    return false;
+  }
+
   @Override
   public final void release() {
     zlibSampleDecompressor.release();
@@ -802,7 +842,34 @@ public class MatroskaExtractor implements Extractor {
     haveOutputSample = false;
     boolean continueReading = true;
     while (continueReading && !haveOutputSample) {
-      continueReading = reader.read(input);
+      try {
+        continueReading = reader.read(input);
+      } catch (ParserException | IllegalStateException malformed) {
+        // NuvioTV fork: Usenet zero-fill holes corrupt an element header or size
+        // varint mid-stream, surfacing here as ParserException (3001) or a varint
+        // IllegalStateException (2000). Skip the padded region and resync to the
+        // next Cluster instead of killing playback. Gated on sentSeekMap so this
+        // only runs past the header (inside cluster data), and budgeted so a
+        // pervasively-damaged stream still fails over via the caller.
+        if (!sentSeekMap || resyncBudget <= 0) {
+          throw malformed;
+        }
+        long failPosition = input.getPosition();
+        resyncBudget--;
+        resetParsingState();
+        if (!resyncToNextCluster(input)) {
+          throw malformed;
+        }
+        Log.w(
+            TAG,
+            "MKV_RESYNC: skipped malformed data near byte "
+                + failPosition
+                + " to next cluster (budget left "
+                + resyncBudget
+                + ")");
+        continueReading = true;
+        continue;
+      }
       if (pendingFinishTracks) {
         pendingFinishTracks = false;
         // Input is positioned right after the Tracks element (typically the first cluster),
