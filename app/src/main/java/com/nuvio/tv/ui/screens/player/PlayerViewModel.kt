@@ -703,10 +703,15 @@ class PlayerViewModel @Inject constructor(
                         )
                     } else ""
                 }
+                // nt15: cooldown countdown and the serving figure are mutually exclusive
+                // so this row never overflows -- serving (the throttle's actual cost) wins
+                // when present, else the depth-recovery countdown shows.
+                val cooldownOrServing =
+                    if (servingSuffix.isNotEmpty()) servingSuffix else " \u00b7 +1 in ${nextS}s"
                 rows += StatsRow(
                     "Rate limit",
                     "429 \u00b7 depth ${ParallelRangeDataSource.hudDepthCap}/${ParallelRangeDataSource.hudDepthConfigured}" +
-                        " \u00b7 +1 in ${nextS}s" + servingSuffix,
+                        cooldownOrServing,
                     StatsDot.WARN
                 )
             } else {
