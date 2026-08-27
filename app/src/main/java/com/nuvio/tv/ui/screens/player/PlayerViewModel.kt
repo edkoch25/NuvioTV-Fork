@@ -760,7 +760,16 @@ class PlayerViewModel @Inject constructor(
         // Audio: format + passthrough state + bitrate.
         player?.audioFormat?.let { format ->
             val codec = audioCodecLabel(format.sampleMimeType)
-            val channels = format.channelCount.takeIf { it > 0 }?.let { "${it}ch" }
+            val srcChannels = format.channelCount.takeIf { it > 0 }
+            // Output channel count: for a PCM decode (incl. FFmpeg downmix) the sink's
+            // configured input IS the decoder's PCM output, so its channelCount is the
+            // real post-downmix count. Passthrough/MAT leave this null - no arrow shown.
+            val outChannels = controller.playbackSpeedAwareAudioSink?.lastConfiguredInputFormat
+                ?.takeIf { it.sampleMimeType == MimeTypes.AUDIO_RAW }
+                ?.channelCount?.takeIf { it > 0 }
+            val channels = srcChannels?.let { s ->
+                if (outChannels != null && outChannels != s) "${s}ch→${outChannels}ch" else "${s}ch"
+            }
             val rate = format.sampleRate.takeIf { it > 0 }?.let { "${it / 1000} kHz" }
             val matActive = controller.matRoutingAudioSink?.isMatActive() == true
             val passthrough = controller.playbackSpeedAwareAudioSink?.isDirectPlaybackActive()
