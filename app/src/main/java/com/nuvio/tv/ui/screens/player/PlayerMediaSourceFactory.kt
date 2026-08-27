@@ -885,6 +885,26 @@ private inline fun <reified T : Throwable> Throwable.findCause(): T? {
 }
 
 private class PlayerLoadErrorHandlingPolicy : DefaultLoadErrorHandlingPolicy(6) {
+
+    // fatal-429 (27 Aug spec, Build 1): monotonic ms of the last 429/503 seen and the
+    // start of the current continuous rate-limit streak. Shared across every MediaPeriod
+    // that uses this single policy instance; AtomicLong because getRetryDelayMsFor runs on
+    // the loader thread and getMinimumLoadableRetryCount on the playback thread. 0L = idle.
+    private val rateLimitLastHitMs = java.util.concurrent.atomic.AtomicLong(0L)
+    private val rateLimitStreakStartMs = java.util.concurrent.atomic.AtomicLong(0L)
+
+    private companion object {
+        // No 429/503 for this long -> the streak is considered ended and resets.
+        private const val RATE_LIMIT_STREAK_QUIET_RESET_MS = 10_000L
+        // A continuous throttle with zero successful progress longer than this is treated
+        // as a dead stream: surface one clean fatal so mid-play source failover can act.
+        // NOTE: this is the single tunable. It is longer than today's ~58s count-based
+        // crash, so on a genuinely dead stream failover is later than today; the win is
+        // surviving every recoverable storm shorter than this. Build 2 (buffer-aware)
+        // replaces this fixed ceiling with the actual buffer-ahead trigger.
+        private const val RATE_LIMIT_STREAK_CEILING_MS = 120_000L
+    }
+
     override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
         val httpException = loadErrorInfo.exception.findCause<androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException>()
         if (httpException != null) {
@@ -893,6 +913,34 @@ private class PlayerLoadErrorHandlingPolicy : DefaultLoadErrorHandlingPolicy(6) 
                 return androidx.media3.common.C.TIME_UNSET
             }
         }
+        // fatal-429 (27 Aug spec, Build 1): 429/503 is transient server rate-limiting, not
+        // a dead stream. ParallelRangeDataSource already backs off (Retry-After / AIMD depth)
+        // and only surfaces to media3 once its own budget is spent; historically that then
+        // crossed the loader retry count and became a fatal Source error (crash observed
+        // 27 Aug, StremThru path, inflight=0 429s, x2). Instead: track the streak and keep
+        // retrying (count uncapped in getMinimumLoadableRetryCount) until the throttle has
+        // made zero progress for the ceiling duration, then give up cleanly. The
+        // retry delay is set explicitly (NOT via super) because the base policy may treat
+        // some response codes (e.g. 503) as permanent -> TIME_UNSET -> instant fatal.
+        if (httpException != null &&
+            (httpException.responseCode == 429 || httpException.responseCode == 503)) {
+            val now = android.os.SystemClock.elapsedRealtime()
+            val last = rateLimitLastHitMs.getAndSet(now)
+            if (last == 0L || now - last > RATE_LIMIT_STREAK_QUIET_RESET_MS) {
+                rateLimitStreakStartMs.set(now)
+            }
+            val streakMs = now - rateLimitStreakStartMs.get()
+            if (streakMs > RATE_LIMIT_STREAK_CEILING_MS) {
+                Log.w(
+                    "NuvioLoadErrPolicy",
+                    "Rate-limit streak ${streakMs}ms > ceiling; giving up (clean fatal for failover)"
+                )
+                rateLimitLastHitMs.set(0L)
+                return androidx.media3.common.C.TIME_UNSET
+            }
+            return minOf(1000L * loadErrorInfo.errorCount, 5_000L)
+        }
+
         // NuvioTV fork: a malformed-container error (a Usenet zero-fill hole the
         // extractor resync could not clear) will not un-malform on retry - the same
         // bytes fail identically. Surface it immediately (no backoff retries) so the
@@ -912,5 +960,20 @@ private class PlayerLoadErrorHandlingPolicy : DefaultLoadErrorHandlingPolicy(6) 
                 else -> 3000L
             }
         } else super.getRetryDelayMsFor(loadErrorInfo)
+    }
+
+    override fun getMinimumLoadableRetryCount(dataType: Int): Int {
+        val last = rateLimitLastHitMs.get()
+        if (last != 0L) {
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (now - last <= RATE_LIMIT_STREAK_QUIET_RESET_MS &&
+                now - rateLimitStreakStartMs.get() <= RATE_LIMIT_STREAK_CEILING_MS
+            ) {
+                // Active throttle streak within budget: never fatal on the retry count.
+                // getRetryDelayMsFor owns the give-up (ceiling -> C.TIME_UNSET).
+                return Int.MAX_VALUE
+            }
+        }
+        return super.getMinimumLoadableRetryCount(dataType)
     }
 }
