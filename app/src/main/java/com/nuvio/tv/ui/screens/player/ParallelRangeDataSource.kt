@@ -167,6 +167,13 @@ internal class ParallelRangeDataSource(
         // rather than returning 0 for a positive-length read; tolerate a few
         // zero-progress reads, then fail the chunk instead of spinning forever.
         private const val MAX_CONSECUTIVE_ZERO_READS = 3
+        // nt5: reader-blocked chunk escalation (spec 2026-08-26). Fire once the
+        // reader has waited this long on a chunk whose in-flight watermark has
+        // not moved (hung request -- invisible to the 3a body-rate watchdog);
+        // after firing, extend the in-flight poll so the duplicate's first
+        // bytes can serve the reader progressively.
+        private const val ESCALATE_AFTER_MS = 2_000L
+        private const val ESCALATE_POLL_EXTENSION_MS = 3_000L
 
         // nt-tier2: HTTP 429/503 is server-side rate-limiting, not a stalled
         // socket. Back off before retrying (immediate retry just re-hits the
@@ -249,6 +256,8 @@ internal class ParallelRangeDataSource(
             val futures = ConcurrentHashMap<Long, CompletableFuture<DownloadedChunk>>()
             val lastTouch = ConcurrentHashMap<Long, Long>()
             val abandoned = AtomicBoolean(false)
+            // nt5: chunks already escalated by the reader-blocked path (once per chunk).
+            val escalatedChunks: MutableSet<Long> = ConcurrentHashMap.newKeySet()
             // nt6(0.8.5): AIMD rate-limit state. rateLimitDepthCap is the
             // multiplicative-decrease ceiling on prefetch depth
             // (Int.MAX_VALUE = uncapped): halved (never below 1) once per
@@ -1277,6 +1286,65 @@ internal class ParallelRangeDataSource(
         }
     }
 
+    // nt5: reader-blocked chunk escalation (spec 2026-08-26). A stagnant
+    // in-flight watermark past the threshold means the chunk's request is
+    // hung (dead pooled connection / pre-body stall) -- the one shape the 3a
+    // body-rate watchdog structurally cannot see, because it samples inside
+    // the body-read loop. Race ONE duplicate on a fresh connection into the
+    // SAME future. The ownership-gated complete()/releaseBuffer() race
+    // (ensureChunkScheduled's pattern) keeps the loser's buffer safe; the
+    // duplicate NEVER completes the future exceptionally, so failure
+    // semantics stay with the original attempt. Skipped while the
+    // rate-limit clamp is latched; at most once per chunk per session.
+    // OutOfMemoryError is contained exactly as in ensureChunkScheduled
+    // (19 Jul 2026 incident class): drain idle buffers, log, never escape
+    // the executor thread.
+    private fun escalateReaderBlockedChunk(
+        activeSession: ChunkSession,
+        chunkIndex: Long,
+        future: CompletableFuture<*>,
+        waitedMs: Long,
+        watermark: Int
+    ) {
+        if (future.isDone || future.isCancelled || activeSession.abandoned.get()) {
+            Log.i(TAG, "RS_ESCALATE skip chunk=$chunkIndex reason=done")
+            return
+        }
+        if (hudClampLatched) {
+            Log.i(TAG, "RS_ESCALATE skip chunk=$chunkIndex reason=clamp")
+            return
+        }
+        val typed = activeSession.futures[chunkIndex]
+        if (typed == null || typed !== future) {
+            Log.i(TAG, "RS_ESCALATE skip chunk=$chunkIndex reason=stale")
+            return
+        }
+        if (!activeSession.escalatedChunks.add(chunkIndex)) {
+            Log.i(TAG, "RS_ESCALATE skip chunk=$chunkIndex reason=already")
+            return
+        }
+        Log.w(TAG, "RS_ESCALATE fired chunk=$chunkIndex waitMs=$waitedMs watermark=$watermark")
+        val t0 = SystemClock.elapsedRealtime()
+        sharedExecutor.execute {
+            try {
+                if (typed.isDone || typed.isCancelled || activeSession.abandoned.get()) return@execute
+                val result = downloadChunkOnce(activeSession, chunkIndex, typed, allowStallRestart = false)
+                if (typed.complete(result)) {
+                    Log.w(TAG, "RS_ESCALATE won chunk=$chunkIndex ms=${SystemClock.elapsedRealtime() - t0}")
+                } else {
+                    releaseBuffer(result.buffer)
+                    Log.i(TAG, "RS_ESCALATE lost chunk=$chunkIndex")
+                }
+            } catch (e: Exception) {
+                // Never completeExceptionally: the original path owns failure.
+                Log.w(TAG, "RS_ESCALATE failed chunk=$chunkIndex: ${e.message}")
+            } catch (e: OutOfMemoryError) {
+                drainIdleBuffers(activeSession.chunkSize)
+                Log.w(TAG, "RS_ESCALATE failed chunk=$chunkIndex: chunk buffer OOM (contained)")
+            }
+        }
+    }
+
     /**
      * nt9: serve player bytes from a chunk still downloading, WAITING for
      * the first bytes rather than giving up when none have landed yet.
@@ -1308,6 +1376,9 @@ internal class ParallelRangeDataSource(
     ): Int {
         val offsetInChunk = (position % chunkSize).toInt()
         val waitT0 = SystemClock.elapsedRealtime()
+        // nt5: reader-blocked escalation state for this wait (see spec).
+        var escalatedThisWait = false
+        var baselineWatermark = Int.MIN_VALUE
         while (true) {
             // Completion is the caller's business: its future.get() is then
             // instant, and a FAILED download completes here too, so its
@@ -1341,7 +1412,26 @@ internal class ParallelRangeDataSource(
                     return toCopy
                 }
             }
-            if (SystemClock.elapsedRealtime() - waitT0 >= IN_FLIGHT_WAIT_CAP_MS) {
+            // nt5: stagnant watermark past the threshold = hung request.
+            // Progressing-but-slow chunks (watermark moving) stay 3a's
+            // jurisdiction and are never escalated here.
+            val wmNow = inFlight?.watermark ?: -1
+            if (baselineWatermark == Int.MIN_VALUE) baselineWatermark = wmNow
+            if (!escalatedThisWait &&
+                wmNow == baselineWatermark &&
+                SystemClock.elapsedRealtime() - waitT0 >=
+                    minOf(ESCALATE_AFTER_MS, IN_FLIGHT_WAIT_CAP_MS.toLong())
+            ) {
+                escalateReaderBlockedChunk(
+                    activeSession, chunkIndex, future,
+                    SystemClock.elapsedRealtime() - waitT0, wmNow
+                )
+                escalatedThisWait = true
+            }
+            if (SystemClock.elapsedRealtime() - waitT0 >=
+                IN_FLIGHT_WAIT_CAP_MS.toLong() +
+                    (if (escalatedThisWait) ESCALATE_POLL_EXTENSION_MS else 0L)
+            ) {
                 Log.i(
                     TAG,
                     "RS_INFLIGHT_GIVEUP pos=$position chunk=$chunkIndex " +
@@ -1432,7 +1522,10 @@ internal class ParallelRangeDataSource(
     private fun downloadChunk(activeSession: ChunkSession, chunkIndex: Long, future: CompletableFuture<*>): DownloadedChunk {
         var lastException: Exception? = null
         for (attempt in 0..1) {
-            if (future.isCancelled || activeSession.abandoned.get()) throw IOException("Cancelled")
+            // nt5: isDone => a racing completer (reader-blocked escalation) already
+            // won; a retry here would fetch a full chunk only to lose the
+            // ownership race and release it.
+            if (future.isDone || future.isCancelled || activeSession.abandoned.get()) throw IOException("Cancelled")
             try {
                 return downloadChunkOnce(activeSession, chunkIndex, future)
             } catch (e: Exception) {
