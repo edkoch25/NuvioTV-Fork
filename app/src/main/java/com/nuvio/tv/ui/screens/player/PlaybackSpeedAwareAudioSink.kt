@@ -148,7 +148,15 @@ internal class PlaybackSpeedAwareAudioSink(
      * Upstream 0.8.2: when Bluetooth media output is active, always decode to PCM
      * (Media3 policy - A2DP/LE Audio cannot carry TrueHD/Atmos/DTS-HD bitstream).
      */
-    forcePcmForBluetooth: Boolean = false
+    forcePcmForBluetooth: Boolean = false,
+    /**
+     * Tier-2 startup-settle experiment: when > 0, apply this as the DIRECT AudioTrack's
+     * start threshold (reflected onto the media3-created track on the first passthrough
+     * buffer) so the head can begin before the full ~765 KB/2.25 MB buffer fills, WITHOUT
+     * shrinking the buffer. 0 (the shipping default) is fully inert. Armed at the factory
+     * from `settings put global nuvio_reduced_start_threshold <frames>`.
+     */
+    private val reducedStartThresholdFrames: Int = 0
 ) : ForwardingAudioSink(delegate) {
 
     // Set when the sink is built with forcePcm (error recovery). Don't clear on speed reset.
@@ -169,6 +177,11 @@ internal class PlaybackSpeedAwareAudioSink(
     // Diagnostic harness: one refusal per configure cycle, mirroring a real init-time
     // failure (the track open() throws once, not on every buffer).
     private var faultInjectFiredForCurrentConfig: Boolean = false
+
+    // Tier-2 startup-settle experiment: one start-threshold application per (re)created
+    // AudioTrack. Cleared in resetAudioMeasurements() (configure/flush), where the media3
+    // track is torn down and rebuilt.
+    private var startThresholdAppliedThisTrack: Boolean = false
 
     @Volatile
     private var listener: AudioSink.Listener? = null
@@ -524,6 +537,37 @@ internal class PlaybackSpeedAwareAudioSink(
             ordFirstHandleBufferPending = false
             Log.w(TAG, "ORD_TRACE first handleBuffer after configure ${ordState()}")
         }
+
+        // Tier-2 startup-settle experiment: reflect the media3-created DIRECT track and
+        // lower its start threshold so the head begins before the full buffer fills. Applied
+        // once per track, on a passthrough buffer after the track exists (created during an
+        // earlier handleBuffer). Fully guarded; any failure disables and never disturbs playback.
+        if (isCurrentlyPassthrough && reducedStartThresholdFrames > 0 &&
+            !startThresholdAppliedThisTrack && android.os.Build.VERSION.SDK_INT >= 31
+        ) {
+            try {
+                val defaultSink = delegate as? DefaultAudioSink
+                val stTrack = if (defaultSink != null && !audioTrackFieldLookupFailed) {
+                    val field = cachedAudioTrackField
+                        ?: DefaultAudioSink::class.java.getDeclaredField("audioTrack")
+                            .apply { isAccessible = true }
+                            .also { cachedAudioTrackField = it }
+                    field.get(defaultSink) as? AudioTrack
+                } else null
+                if (stTrack != null) {
+                    val buf = stTrack.bufferSizeInFrames
+                    if (buf > 0) {
+                        val target = reducedStartThresholdFrames.coerceIn(1, (buf - 1).coerceAtLeast(1))
+                        val ret = stTrack.setStartThresholdInFrames(target)
+                        Log.w(TAG, "STHRESH_TRACE applied req=$reducedStartThresholdFrames target=$target ret=$ret buf=$buf")
+                        startThresholdAppliedThisTrack = true
+                    }
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "STHRESH_TRACE apply failed: ${t.message}")
+                startThresholdAppliedThisTrack = true
+            }
+        }
         val rejectMime = faultInjectRejectMime
         val injectFmt = currentInputFormat
         if (rejectMime != null && isCurrentlyPassthrough && !faultInjectFiredForCurrentConfig &&
@@ -758,6 +802,7 @@ internal class PlaybackSpeedAwareAudioSink(
         govLastSpikeMs = 0L
         govFreezeStartMs = 0L
         govCReleased = false
+        startThresholdAppliedThisTrack = false
     }
 
     /**

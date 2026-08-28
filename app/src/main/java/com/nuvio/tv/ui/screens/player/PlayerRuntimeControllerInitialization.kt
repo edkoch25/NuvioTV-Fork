@@ -2815,13 +2815,29 @@ private class SubtitleOffsetRenderersFactory(
         if (faultInjectRejectMime != null) {
             Log.w(PlayerRuntimeController.TAG, "FAULT_INJECT armed: passthrough for $faultInjectRejectMime will be refused")
         }
+        // Startup-settle fix: lower the DIRECT AudioTrack start threshold so passthrough
+        // playback begins ~0.4-0.7 s in (worst case ~1.9 s on a very-low-bitrate quiet opener)
+        // instead of waiting for the full ~765 KB/2.25 MB buffer to fill -- a 2-7 s silent
+        // freeze on every cold start. The buffer size is unchanged, so underrun headroom is
+        // retained; ~5.5 s of audio is banked at start. Proven clean across Emby/TorBox/Usenet
+        // (17 starts, 0 underruns). On by default; override with
+        //   adb shell settings put global nuvio_reduced_start_threshold <frames>
+        // and disable with a value of 0.
+        val defaultStartThresholdFrames = 262144  // ~5.5 s at 48 kHz
+        val reducedStartThresholdFrames = runCatching {
+            android.provider.Settings.Global.getString(context.contentResolver, "nuvio_reduced_start_threshold")
+        }.getOrNull()?.trim()?.toIntOrNull() ?: defaultStartThresholdFrames
+        if (reducedStartThresholdFrames > 0) {
+            Log.w(PlayerRuntimeController.TAG, "STHRESH: DIRECT start threshold -> $reducedStartThresholdFrames frames")
+        }
         val playbackSpeedAwareAudioSink = PlaybackSpeedAwareAudioSink(
             baseAudioSink,
             initialForcePcm,
             forceAc3Support = forceOpticalPassthrough || deniedTranscodeMimes.isNotEmpty(),
             passthroughPolicy = audioPassthroughPolicy,
             faultInjectRejectMime = faultInjectRejectMime,
-            forcePcmForBluetooth = bluetoothForcePcm
+            forcePcmForBluetooth = bluetoothForcePcm,
+            reducedStartThresholdFrames = reducedStartThresholdFrames
         )
         playbackSpeedAwareAudioSink.setInitialPlaybackSpeed(playbackSpeedProvider())
         onPlaybackSpeedAwareAudioSinkCreated(playbackSpeedAwareAudioSink)
