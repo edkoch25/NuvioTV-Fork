@@ -13,11 +13,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -80,13 +78,10 @@ internal fun ModernHeroScene(
     modifier: Modifier,
     requestWidthPx: Int,
     requestHeightPx: Int,
-    trailerMaxWidth: androidx.compose.ui.unit.Dp,
     onTrailerEnded: () -> Unit,
     onFirstFrameRendered: () -> Unit
 ) {
     ModernHeroMediaLayer(
-        isFullScreen = isFullScreen,
-        trailerMaxWidth = trailerMaxWidth,
         heroBackdrop = { state().heroBackdrop },
         enrichmentActive = { state().enrichmentActive },
         shouldPlayHeroTrailer = { state().shouldPlayTrailer },
@@ -104,15 +99,12 @@ internal fun ModernHeroScene(
     ModernHeroGradientLayer(
         bgColor = bgColor,
         isFullScreen = isFullScreen,
-        trailerShowing = { state().shouldPlayTrailer && state().trailerFirstFrameRendered },
         modifier = modifier
     )
 }
 
 @Composable
 internal fun ModernHeroMediaLayer(
-    isFullScreen: () -> Boolean,
-    trailerMaxWidth: androidx.compose.ui.unit.Dp,
     heroBackdrop: () -> String?,
     enrichmentActive: () -> Boolean,
     shouldPlayHeroTrailer: () -> Boolean,
@@ -193,61 +185,31 @@ internal fun ModernHeroMediaLayer(
             val playbackKeyVal = heroTrailerPlaybackKey()
             val audioUrlVal = heroTrailerAudioUrl()
             val mutedVal = muted()
-            // Fork: the OUTER media box (this composable's `modifier`) is TopEnd,
-            // 72% wide, and offset(x = +huge) so the backdrop bleeds off the right
-            // screen edge. RESIZE_MODE_FIT centred the 16:9 video inside that box,
-            // pushing its left edge into the hero text block.
-            //
-            // The alignment MUST live on a Box that is a direct child of this Box:
-            // TrailerPlayer's modifier lands on an AndroidView inside an
-            // AnimatedVisibility, whose layout drops BoxScope.align parent-data
-            // (three earlier attempts placed the player at the box's top-left for
-            // exactly this reason). So: wrapper Box pinned CenterEnd, offset LEFT by
-            // `huge` to cancel the outer bleed plus a screen-edge inset, exact dp
-            // width (cap computed screen-side in dp), full height; the player
-            // fills the wrapper and FIT letterboxes the 16:9 video inside it.
-            if (isFullScreen()) {
-                key(playbackKeyVal ?: trailerUrlVal) {
-                    TrailerPlayer(
-                        trailerUrl = trailerUrlVal,
-                        trailerAudioUrl = audioUrlVal,
-                        isPlaying = true,
-                        onEnded = onTrailerEnded,
-                        onFirstFrameRendered = onFirstFrameRendered,
-                        muted = mutedVal,
-                        cropToFill = false,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .graphicsLayer {
-                                alpha = transitionProgressState.value
-                            }
-                    )
-                }
-            } else {
-                Box(
+            // Fork 2026-08-29: match the official hero trailer presentation.
+            // The trailer fills the SAME media box as the backdrop image
+            // (crop-to-fill) and the hero gradient scrim stays at full alpha
+            // over it, so the video fades into the backdrop instead of playing
+            // in a hard-edged inset window. Supersedes the 2026-08-26 inset
+            // geometry. Zoom is 1.0: sharpness over bar-hiding (upstream uses
+            // 1.35 to crop letterbox bars baked into 16:9 scope trailer files;
+            // on the black theme residual bars read as background).
+            // MODERN_TRAILER_OVERSCAN_ZOOM (ModernHomeModels.kt) is the knob.
+            key(playbackKeyVal ?: trailerUrlVal) {
+                TrailerPlayer(
+                    trailerUrl = trailerUrlVal,
+                    trailerAudioUrl = audioUrlVal,
+                    isPlaying = true,
+                    onEnded = onTrailerEnded,
+                    onFirstFrameRendered = onFirstFrameRendered,
+                    muted = mutedVal,
+                    cropToFill = true,
+                    overscanZoom = MODERN_TRAILER_OVERSCAN_ZOOM,
                     modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .offset(x = -(NuvioTheme.spacing.huge + MODERN_HERO_TRAILER_EDGE_INSET))
-                        .width(trailerMaxWidth)
-                        .fillMaxHeight()
-                ) {
-                    key(playbackKeyVal ?: trailerUrlVal) {
-                        TrailerPlayer(
-                            trailerUrl = trailerUrlVal,
-                            trailerAudioUrl = audioUrlVal,
-                            isPlaying = true,
-                            onEnded = onTrailerEnded,
-                            onFirstFrameRendered = onFirstFrameRendered,
-                            muted = mutedVal,
-                            cropToFill = false,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer {
-                                    alpha = transitionProgressState.value
-                                }
-                        )
-                    }
-                }
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            alpha = transitionProgressState.value
+                        }
+                )
             }
         }
     }
@@ -257,20 +219,13 @@ internal fun ModernHeroMediaLayer(
 internal fun ModernHeroGradientLayer(
     bgColor: Color,
     isFullScreen: () -> Boolean,
-    trailerShowing: () -> Boolean,
     modifier: Modifier
 ) {
     val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
-    val scrimAlpha by animateFloatAsState(
-        targetValue = if (trailerShowing()) 0f else 1f,
-        animationSpec = tween(durationMillis = 480),
-        label = "heroScrimTrailerFade"
-    )
     Box(
         modifier = modifier
             .graphicsLayer {
                 compositingStrategy = CompositingStrategy.Offscreen
-                alpha = scrimAlpha
             }
             .drawWithCache {
                 val fullScreen = isFullScreen()

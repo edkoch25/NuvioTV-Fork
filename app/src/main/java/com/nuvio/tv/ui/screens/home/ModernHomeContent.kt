@@ -1001,15 +1001,6 @@ fun ModernHomeContent(
                 }.coerceAtLeast(1)
             }
 
-            // Fork: width cap for the non-fullscreen hero trailer, computed entirely
-            // in dp (px<->dp round-trips were the earlier miss). screenWidthDp minus
-            // the text block's right edge (start padding + 42% width), minus the
-            // text-side gutter, minus the screen-edge inset.
-            val screenWidthDp = with(localDensity) { heroWindowWidthPx.toDp() }
-            val heroTrailerMaxWidth = remember(screenWidthDp, rowHorizontalPadding) {
-                (screenWidthDp - rowHorizontalPadding - screenWidthDp * MODERN_HERO_TEXT_WIDTH_FRACTION
-                    - MODERN_HERO_TRAILER_TEXT_GUTTER - MODERN_HERO_TRAILER_EDGE_INSET).coerceAtLeast(1.dp)
-            }
             val heroMediaModifier = remember(heroBackdropHeight, screenHeight, fullScreenBackdrop) {
                 if (fullScreenBackdrop) {
                     Modifier.align(Alignment.TopStart).fillMaxWidth().height(screenHeight)
@@ -1039,7 +1030,6 @@ fun ModernHomeContent(
                 isFullScreen = isFullScreenLambda,
                 heroMediaWidthPx = heroMediaWidthPx,
                 heroMediaHeightPx = heroMediaHeightPx,
-                heroTrailerMaxWidth = heroTrailerMaxWidth,
                 modifier = heroMediaModifier,
                 onTrailerEnded = onTrailerEndedLambda,
                 onFirstFrameRendered = onFirstFrameRenderedLambda
@@ -1258,7 +1248,6 @@ private fun ModernHeroSection(
     isFullScreen: () -> Boolean,
     heroMediaWidthPx: Int,
     heroMediaHeightPx: Int,
-    heroTrailerMaxWidth: androidx.compose.ui.unit.Dp,
     modifier: Modifier,
     onTrailerEnded: () -> Unit,
     onFirstFrameRendered: () -> Unit
@@ -1272,7 +1261,6 @@ private fun ModernHeroSection(
         modifier = modifier.then(if (highlighterEnabled) Modifier.recompositionHighlighter() else Modifier),
         requestWidthPx = heroMediaWidthPx,
         requestHeightPx = heroMediaHeightPx,
-        trailerMaxWidth = heroTrailerMaxWidth,
         onTrailerEnded = onTrailerEnded,
         onFirstFrameRendered = onFirstFrameRendered,
     )
