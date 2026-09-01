@@ -529,6 +529,16 @@ internal fun PlaybackSettingsSections(
             focusRequester = streamHeaderFocus,
             onHeaderFocused = { focusedSection = PlaybackSection.STREAM_SELECTION }
         ) {
+            item(key = "stream_player_preference") {
+                NavigationSettingsItem(
+                    icon = Icons.Default.PlayArrow,
+                    title = stringResource(R.string.playback_player),
+                    subtitle = streamSelectionUi.playerPreferenceLabel,
+                    onClick = onShowPlayerPreferenceDialog,
+                    onFocused = { focusedSection = PlaybackSection.STREAM_SELECTION }
+                )
+            }
+
             if (playerSettings.playerPreference != PlayerPreference.INTERNAL) {
                 item(key = "external_player_forward_subtitles") {
                     ToggleSettingsItem(
