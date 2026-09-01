@@ -45,6 +45,8 @@ jobs:
       - name: Enable bundled Dolby Vision conversion
         run: |
           printf '%s\n' \
+            'NUVIO_SUPABASE_URL=https://api.nuvio.tv' \
+            'NUVIO_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzgxNTIxMzQ2LCJleHAiOjE5MzkyMDEzNDZ9.tmQaj682pwzehpqlgCDMnySOqiUvpgRbrE43T4VJpDI' \
             'DOVI_NATIVE_ENABLED=true' \
             'DOVI_EXTRACTOR_HOOK_READY=true' \
             'DOVI_ENABLE_REAL_LINK=true' \
@@ -65,15 +67,15 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" | grep -F "native-code: 'arm64-v8a'"
           unzip -l "$apk" | grep -F 'lib/arm64-v8a/libdovi_bridge.so'
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk"
-          cp "$apk" Nuvio-Shield-Test-0.8.11-beta-nt1-ext2-arm64-v8a.apk
-          sha256sum Nuvio-Shield-Test-0.8.11-beta-nt1-ext2-arm64-v8a.apk > Nuvio-Shield-Test-0.8.11-beta-nt1-ext2-arm64-v8a.apk.sha256
+          cp "$apk" Nuvio-Shield-Test-0.8.11-beta-nt1-ext3-arm64-v8a.apk
+          sha256sum Nuvio-Shield-Test-0.8.11-beta-nt1-ext3-arm64-v8a.apk > Nuvio-Shield-Test-0.8.11-beta-nt1-ext3-arm64-v8a.apk.sha256
 
       - name: Upload Shield test build
         uses: actions/upload-artifact@v4
         with:
-          name: Nuvio-Shield-Test-0.8.11-beta-nt1-ext2-arm64-v8a
+          name: Nuvio-Shield-Test-0.8.11-beta-nt1-ext3-arm64-v8a
           path: |
-            Nuvio-Shield-Test-0.8.11-beta-nt1-ext2-arm64-v8a.apk
-            Nuvio-Shield-Test-0.8.11-beta-nt1-ext2-arm64-v8a.apk.sha256
+            Nuvio-Shield-Test-0.8.11-beta-nt1-ext3-arm64-v8a.apk
+            Nuvio-Shield-Test-0.8.11-beta-nt1-ext3-arm64-v8a.apk.sha256
           if-no-files-found: error
           retention-days: 14
