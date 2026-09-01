@@ -294,8 +294,8 @@ data class PlayerSettings(
     val injectHdr10MetadataOnStrip: Boolean = false,
     val mpvHardwareDecodeMode: MpvHardwareDecodeMode = MpvHardwareDecodeMode.AUTO_SAFE,
     // Display settings
-    val frameRateMatchingMode: FrameRateMatchingMode = FrameRateMatchingMode.OFF,
-    val resolutionMatchingEnabled: Boolean = false,
+    val frameRateMatchingMode: FrameRateMatchingMode = FrameRateMatchingMode.START_STOP,
+    val resolutionMatchingEnabled: Boolean = true,
     // Stream selection settings
     val streamAutoPlayMode: StreamAutoPlayMode = StreamAutoPlayMode.MANUAL,
     val streamAutoPlaySource: StreamAutoPlaySource = StreamAutoPlaySource.ALL_SOURCES,
@@ -332,8 +332,8 @@ data class PlayerSettings(
     val subtitleOrganizationMode: SubtitleOrganizationMode = SubtitleOrganizationMode.NONE,
 
     // Networking
-    val bufferEngineEnabled: Boolean = false,
-    val parallelNetworkEnabled: Boolean = false,
+    val bufferEngineEnabled: Boolean = true,
+    val parallelNetworkEnabled: Boolean = true,
     /** When true the device memory budget caps the buffer; when false Target Buffer Size drives it. */
     val bufferBudgetManaged: Boolean = DEFAULT_BUFFER_BUDGET_MANAGED,
     /** When true, target buffer slider max is raised to 2GB regardless of device memory. */
@@ -426,8 +426,8 @@ data class PlayerSettings(
         const val MAX_PARALLEL_CONNECTION_COUNT = 4
         const val MIN_PARALLEL_CHUNK_SIZE_KB = 256
         const val MAX_PARALLEL_CHUNK_SIZE_KB = 32 * 1024
-        const val DEFAULT_ENABLE_HTTP2 = false
-        const val DEFAULT_NUVIO_PERFORMANCE_MODE_ENABLED = false
+        const val DEFAULT_ENABLE_HTTP2 = true
+        const val DEFAULT_NUVIO_PERFORMANCE_MODE_ENABLED = true
     }
 }
 
@@ -998,8 +998,8 @@ class PlayerSettingsDataStore @Inject constructor(
                 mpvHardwareDecodeMode = parseMpvHardwareDecodeMode(prefs[mpvHardwareDecodeModeKey]),
                 frameRateMatchingMode = prefs[frameRateMatchingModeKey]?.let {
                     runCatching { FrameRateMatchingMode.valueOf(it) }.getOrNull()
-                } ?: if (prefs[frameRateMatchingKey] == true) FrameRateMatchingMode.START_STOP else FrameRateMatchingMode.OFF,
-                resolutionMatchingEnabled = prefs[resolutionMatchingEnabledKey] ?: false,
+                } ?: FrameRateMatchingMode.START_STOP,
+                resolutionMatchingEnabled = prefs[resolutionMatchingEnabledKey] ?: true,
                 streamAutoPlayMode = prefs[streamAutoPlayModeKey]?.let {
                     runCatching { StreamAutoPlayMode.valueOf(it) }.getOrDefault(StreamAutoPlayMode.MANUAL)
                 } ?: StreamAutoPlayMode.MANUAL,
@@ -1056,8 +1056,8 @@ class PlayerSettingsDataStore @Inject constructor(
                 } ?: PlayerSettings.DEFAULT_VOD_CACHE_SIZE_MODE,
                 vodCacheSizeMb = (prefs[vodCacheSizeMbKey] ?: PlayerSettings.DEFAULT_VOD_CACHE_SIZE_MB).coerceIn(PlayerSettings.MIN_VOD_CACHE_SIZE_MB, PlayerSettings.MAX_VOD_CACHE_SIZE_MB),
                 useParallelConnections = prefs[useParallelConnectionsKey] ?: PlayerSettings.DEFAULT_USE_PARALLEL_CONNECTIONS,
-                bufferEngineEnabled = prefs[bufferEngineEnabledKey] ?: false,
-                parallelNetworkEnabled = prefs[parallelNetworkEnabledKey] ?: false,
+                bufferEngineEnabled = prefs[bufferEngineEnabledKey] ?: true,
+                parallelNetworkEnabled = prefs[parallelNetworkEnabledKey] ?: true,
                 allowLargeTargetBuffer = prefs[allowLargeTargetBufferKey] ?: PlayerSettings.DEFAULT_ALLOW_LARGE_TARGET_BUFFER,
                 bufferBudgetManaged = prefs[bufferBudgetManagedKey] ?: PlayerSettings.DEFAULT_BUFFER_BUDGET_MANAGED,
                 parallelConnectionCount = run {
